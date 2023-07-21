@@ -1,0 +1,9 @@
+**/target
+
+# Test files
+/datacore
+/dataindex
+/dataldk0
+/dataldk1
+/dataldk2
+/tmp

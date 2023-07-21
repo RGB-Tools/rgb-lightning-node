@@ -1,0 +1,66 @@
+[package]
+name = "rgb-lightning-node"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rgb-lightning-node"
+
+[dependencies]
+amplify = "=4.0.0"
+anyhow = "1.0.72"
+axum = "0.6.19"
+axum-extra = "0.7.5"
+# axum-macros = "0.3.8"  # uncomment to use debug_handler
+base64 = "0.13.0"
+bdk = { version = "0.28", features = ["electrum", "keys-bip39", "sqlite-bundled"] }
+bech32 = "0.8"
+bitcoin = { package = "bitcoin", version = "0.29.2" }
+bitcoin-bech32 = "0.12"
+bitcoin_30 = { package = "bitcoin", version = "0.30.0" }
+bp-core = { version = "=0.10.5", features = ["serde"] }
+bp-seals = "=0.10.5"
+chrono = "0.4"
+clap = "4.3.19"
+dirs = "5.0.1"
+futures = "0.3"
+hex = "0.3"
+hyper = "0.14.27"
+libc = "0.2"
+lightning = { version = "0.0.115", features = ["max_level_trace"], path = "./rust-lightning/lightning" }
+lightning-background-processor = { version = "0.0.115", features = [ "futures" ], path = "./rust-lightning/lightning-background-processor" }
+lightning-block-sync = { version = "0.0.115", features = [ "rpc-client" ] }
+lightning-invoice = { version = "0.23", path = "./rust-lightning/lightning-invoice" }
+lightning-net-tokio = { version = "0.0.115" }
+lightning-persister = { version = "0.0.115", path = "./rust-lightning/lightning-persister" }
+lightning-rapid-gossip-sync = { version = "0.0.115" }
+miniscript = { version = "8.0", features = ["serde"] }
+rand = "0.4"
+reqwest = { version = "0.11", default-features = false, features = ["json", "multipart", "native-tls", "stream"] }
+rgb-contracts = { version = "=0.10.0-rc.2", features = ["all", "electrum"] }
+rgb-schemata = "=0.10.0-rc.1"
+rgb-std = { version = "=0.10.3", features = ["all"] }
+rgb-wallet = { version = "=0.10.3", features = ["all"] }
+rgb_core = { package = "rgb-core", version = "=0.10.5" }
+serde = { version = "^1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+strict_encoding = "=2.5.0"
+thiserror = "1.0"
+tokio = { version = "1", features = [ "io-util", "macros", "rt", "rt-multi-thread", "signal", "sync", "net", "time" ] }
+tokio-util = { version = "0.7.4", features = ["codec"] }
+tower-http = { version = "0.4.3", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+mime = "0.3.17"
+once_cell = "1.17.1"
+time = { version = "0.3.20", features = ["std"] }
+tower = "0.4.13"
+
+[patch.crates-io]
+commit_verify = { path = "./client_side_validation/commit_verify" }
+lightning = { path = "./rust-lightning/lightning" }
+lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
+rgb-std = { path = "./rgb-wallet/std" }
+rgb-wallet = { path = "./rgb-wallet" }
