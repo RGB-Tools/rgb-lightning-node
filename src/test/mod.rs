@@ -9,9 +9,10 @@ use time::OffsetDateTime;
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, Channel, CloseChannelRequest,
     EmptyResponse, HTLCStatus, IssueAssetRequest, IssueAssetResponse, KeysendRequest,
-    KeysendResponse, ListChannelsResponse, ListPaymentsResponse, NodeInfoResponse,
-    OpenChannelRequest, OpenChannelResponse, Payment, RgbInvoiceResponse, SendAssetRequest,
-    SendAssetResponse,
+    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListChannelsResponse,
+    ListPaymentsResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment,
+    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    SendPaymentResponse,
 };
 
 use super::*;
@@ -140,14 +141,14 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
 
     let t_0 = OffsetDateTime::now_utc();
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let channels = list_channels(node_address).await;
-        if channels
-            .iter()
-            .find(|c| c.channel_id == channel_id)
-            .is_none()
-        {
-            mine_n_blocks(true, 6);
+        if !channels.iter().any(|c| c.channel_id == channel_id) {
+            let block_num = match force {
+                true => 144,
+                false => 6,
+            };
+            mine_n_blocks(true, block_num);
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
@@ -202,6 +203,29 @@ async fn issue_asset(node_address: SocketAddr) -> String {
         .asset_id
 }
 
+async fn ln_invoice(
+    node_address: SocketAddr,
+    asset_id: &str,
+    asset_amount: u64,
+    expiry_sec: u32,
+) -> LNInvoiceResponse {
+    let payload = LNInvoiceRequest {
+        amt_msat: Some(3000000),
+        expiry_sec,
+        asset_id: Some(asset_id.to_string()),
+        asset_amount: Some(asset_amount),
+    };
+    reqwest::Client::new()
+        .post(format!("http://{}/lninvoice", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
 async fn keysend(
     node_address: SocketAddr,
     dest_pubkey: &str,
@@ -226,7 +250,7 @@ async fn keysend(
 
     let t_0 = OffsetDateTime::now_utc();
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let payments = list_payments(node_address).await;
         if let Some(payment) = payments
             .iter()
@@ -282,11 +306,11 @@ async fn open_channel(
     let mut channel_id = None;
     let mut channel_funded = false;
     while !channel_funded {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let channels = list_channels(node_address).await;
         if let Some(channel) = channels.iter().find(|c| c.peer_pubkey == dest_peer_pubkey) {
             if channel.funding_txid.is_some() {
-                let txout = get_txout(&channel.funding_txid.as_ref().unwrap());
+                let txout = get_txout(channel.funding_txid.as_ref().unwrap());
                 if !txout.is_empty() {
                     mine_n_blocks(true, 6);
                     channel_id = Some(channel.channel_id.clone());
@@ -303,7 +327,7 @@ async fn open_channel(
 
     let t_0 = OffsetDateTime::now_utc();
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let channels = list_channels(node_address).await;
         let channel = channels
             .iter()
@@ -380,6 +404,36 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         .json::<SendAssetResponse>()
         .await
         .unwrap();
+}
+
+async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
+    let payload = SendPaymentRequest { invoice };
+    let send_payment = reqwest::Client::new()
+        .post(format!("http://{}/sendpayment", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<SendPaymentResponse>()
+        .await
+        .unwrap();
+
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let payments = list_payments(node_address).await;
+        if let Some(payment) = payments
+            .iter()
+            .find(|p| p.payment_hash == send_payment.payment_hash)
+        {
+            if matches!(payment.status, HTLCStatus::Succeeded) {
+                return payment.clone();
+            }
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("cannot find successful payment")
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -473,3 +527,14 @@ pub fn initialize() {
 }
 
 mod close_coop;
+mod close_coop_nobtc_acceptor;
+mod close_coop_other_side;
+mod close_coop_zero_balance;
+mod close_force;
+mod close_force_nobtc_acceptor;
+mod close_force_other_side;
+mod multi_hop;
+mod multi_open_close;
+mod open_after_double_send;
+mod payment;
+mod send_receive;

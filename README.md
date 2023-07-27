@@ -181,6 +181,17 @@ given above, you can even call the APIs directly from the Swagger UI.
 
 To stop the daemon, exit with the `/shutdown` API (or press `Ctrl+C`).
 
+## Test
+
+Tests for a few scenarios using the regtest network are included. The same
+services and data directories as the regtest.sh script are used, so the two
+cannot run at the same time.
+
+Tests can be executed with:
+```sh
+cargo test
+```
+
 
 [RGB proxy server]: https://github.com/grunch/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample

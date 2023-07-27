@@ -1,13 +1,13 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/close_coop/";
-const NODE1_PEER_PORT: u16 = 9801;
-const NODE2_PEER_PORT: u16 = 9802;
-const NODE3_PEER_PORT: u16 = 9803;
+const TEST_DIR_BASE: &str = "tmp/close_coop_other_side/";
+const NODE1_PEER_PORT: u16 = 9841;
+const NODE2_PEER_PORT: u16 = 9842;
+const NODE3_PEER_PORT: u16 = 9843;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
-async fn close_coop() {
+async fn close_coop_other_side() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
@@ -23,6 +23,8 @@ async fn close_coop() {
 
     let asset_id = issue_asset(node1_addr).await;
 
+    let node1_info = node_info(node1_addr).await;
+    let node1_pubkey = node1_info.pubkey;
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
@@ -33,7 +35,7 @@ async fn close_coop() {
     keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
 
     stop_mining();
-    close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
+    close_channel(node2_addr, &channel.channel_id, &node1_pubkey, false).await;
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;

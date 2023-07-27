@@ -12,9 +12,6 @@ if ! $COMPOSE >/dev/null; then
 fi
 BITCOIN_CLI="$COMPOSE exec -u blits bitcoind bitcoin-cli -regtest"
 INITIAL_BLOCKS=103
-RGB_ELECTRUM_SERVER=electrs:50001
-ELECTRUM_URL=electrs
-ELECTRUM_PORT=50001
 
 _die () {
     echo "ERR: $*"
@@ -24,7 +21,7 @@ _die () {
 _start_services() {
     _stop_services
 
-    mkdir -p data{rgb0,rgb1,rgb2,core,index,ldk0,ldk1,ldk2}
+    mkdir -p data{core,index,ldk0,ldk1,ldk2}
     # see docker-compose.yml for the exposed ports
     EXPOSED_PORTS=(3000 50001)
     for port in "${EXPOSED_PORTS[@]}"; do
@@ -45,15 +42,15 @@ _start_services() {
 
 _stop_services() {
     $COMPOSE down --remove-orphans
-    rm -rf data{rgb0,rgb1,rgb2,core,index,ldk0,ldk1,ldk2}
+    rm -rf data{core,index,ldk0,ldk1,ldk2}
 }
 
 _mine() {
-    $BITCOIN_CLI -rpcwallet=miner -generate $NUM_BLOCKS >/dev/null
+    $BITCOIN_CLI -rpcwallet=miner -generate "$NUM_BLOCKS" >/dev/null
 }
 
 _sendtoaddress() {
-    $BITCOIN_CLI sendtoaddress $ADDRESS $AMOUNT
+    $BITCOIN_CLI sendtoaddress "$ADDRESS" "$AMOUNT"
 }
 
 _help() {
@@ -90,14 +87,14 @@ while [ -n "$1" ]; do
             stop=1
             ;;
         mine)
-            [ ! -z "$2" ] || _die "num blocks is required"
+            [ -n "$2" ] || _die "num blocks is required"
             NUM_BLOCKS="$2"
             mine=1
             shift
             ;;
         sendtoaddress)
-            [ ! -z "$2" ] || _die "address is required"
-            [ ! -z "$3" ] || _die "amount is required"
+            [ -n "$2" ] || _die "address is required"
+            [ -n "$3" ] || _die "amount is required"
             ADDRESS="$2"
             AMOUNT="$3"
             sendtoaddress=1

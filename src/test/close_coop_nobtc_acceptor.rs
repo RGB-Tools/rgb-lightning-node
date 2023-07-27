@@ -1,13 +1,13 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/close_coop/";
-const NODE1_PEER_PORT: u16 = 9801;
-const NODE2_PEER_PORT: u16 = 9802;
-const NODE3_PEER_PORT: u16 = 9803;
+const TEST_DIR_BASE: &str = "tmp/close_coop_nobtc_acceptor/";
+const NODE1_PEER_PORT: u16 = 9831;
+const NODE2_PEER_PORT: u16 = 9832;
+const NODE3_PEER_PORT: u16 = 9833;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
-async fn close_coop() {
+async fn close_coop_nobtc_acceptor() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
@@ -18,7 +18,6 @@ async fn close_coop() {
     let node3_addr = start_node(test_dir_node3, NODE3_PEER_PORT);
 
     fund_and_create_utxos(node1_addr).await;
-    fund_and_create_utxos(node2_addr).await;
     fund_and_create_utxos(node3_addr).await;
 
     let asset_id = issue_asset(node1_addr).await;
@@ -50,6 +49,7 @@ async fn close_coop() {
     let blinded_utxo = rgb_invoice(node3_addr).await;
     send_asset(node1_addr, &asset_id, 700, blinded_utxo).await;
     let blinded_utxo = rgb_invoice(node3_addr).await;
+    fund_and_create_utxos(node2_addr).await;
     send_asset(node2_addr, &asset_id, 50, blinded_utxo).await;
     mine(false);
     refresh_transfers(node3_addr).await;

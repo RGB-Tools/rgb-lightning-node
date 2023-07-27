@@ -55,6 +55,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 mime = "0.3.17"
 once_cell = "1.17.1"
+serial_test = "2.0.0"
 time = { version = "0.3.20", features = ["std"] }
 tower = "0.4.13"
 

@@ -212,7 +212,7 @@ pub(crate) struct ListUnspentsResponse {
     pub(crate) unspents: Vec<Unspent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct LNInvoiceRequest {
     pub(crate) amt_msat: Option<u64>,
     pub(crate) expiry_sec: u32,
@@ -220,7 +220,7 @@ pub(crate) struct LNInvoiceRequest {
     pub(crate) asset_amount: Option<u64>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct LNInvoiceResponse {
     pub(crate) invoice: String,
 }
