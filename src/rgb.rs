@@ -9,7 +9,7 @@ use bp::seals::txout::blind::SingleBlindSeal;
 use bp::seals::txout::CloseMethod;
 use bp::Outpoint as RgbOutpoint;
 use lightning::rgb_utils::{RgbUtxo, RgbUtxos, STATIC_BLINDING};
-use rgb::Runtime;
+use rgb::{Runtime, BlockchainResolver};
 use rgb_core::{Operation, Opout};
 use rgb_schemata::{nia_rgb20, nia_schema};
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
@@ -142,6 +142,7 @@ pub(crate) trait RgbUtilities {
         ticker: String,
         name: String,
         precision: u8,
+        resolver: &mut BlockchainResolver,
     ) -> ContractId;
 
     fn send_rgb(
@@ -161,6 +162,7 @@ impl RgbUtilities for Runtime {
         ticker: String,
         name: String,
         precision: u8,
+        resolver: &mut BlockchainResolver,
     ) -> ContractId {
         let spec = DivisibleAssetSpec {
             naming: AssetNaming {
@@ -176,7 +178,7 @@ impl RgbUtilities for Runtime {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let created = Timestamp::from(i32::try_from(created_at).unwrap());
+        let created = Timestamp::from(i64::try_from(created_at).unwrap());
         let seal = ExplicitSeal::<RgbTxid>::from_str(&format!("opret1st:{outpoint}")).unwrap();
         let seal = GenesisSeal::from(seal);
 
@@ -196,9 +198,9 @@ impl RgbUtilities for Runtime {
         let contract = builder.issue_contract().expect("failure issuing contract");
         let contract_id = contract.contract_id();
         let validated_contract = contract
-            .validate(self.resolver())
+            .validate(resolver)
             .expect("internal error: failed validating self-issued contract");
-        self.import_contract(validated_contract)
+        self.import_contract(validated_contract, resolver)
             .expect("failure importing issued contract");
         contract_id
     }

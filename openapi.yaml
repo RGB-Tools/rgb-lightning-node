@@ -405,7 +405,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
     AssetBalanceResponse:
       type: object
       properties:
@@ -453,7 +453,7 @@ components:
           example: true
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         asset_local_amount:
           type: integer
           example: 777
@@ -530,7 +530,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
     KeychainKind:
       type: string
       enum:
@@ -547,7 +547,7 @@ components:
           example: 3000000
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         asset_amount:
           type: integer
           example: 42
@@ -601,7 +601,7 @@ components:
           example: 420
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         asset_amount:
           type: integer
           example: 42
@@ -646,7 +646,7 @@ components:
           example: 777
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         public:
           type: boolean
           example: true
@@ -687,7 +687,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: SignalGolfArctic061n2sDExyxHFXsN4fa8CqrtEo4ggfUC4oYpqMR6wAKjg
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         amount:
           type: integer
           example: 42

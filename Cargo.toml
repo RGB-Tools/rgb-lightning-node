@@ -7,7 +7,7 @@ edition = "2021"
 name = "rgb-lightning-node"
 
 [dependencies]
-amplify = "=4.0.0"
+amplify = "=4.0.1"
 anyhow = "1.0.72"
 axum = "0.6.19"
 axum-extra = "0.7.5"
@@ -18,8 +18,8 @@ bech32 = "0.8"
 bitcoin = { package = "bitcoin", version = "0.29.2" }
 bitcoin-bech32 = "0.12"
 bitcoin_30 = { package = "bitcoin", version = "0.30.0" }
-bp-core = { version = "=0.10.5", features = ["serde"] }
-bp-seals = "=0.10.5"
+bp-core = { version = "=0.10.9", features = ["serde"] }
+bp-seals = "=0.10.9"
 chrono = "0.4"
 clap = "4.3.19"
 dirs = "5.0.1"
@@ -37,11 +37,11 @@ lightning-rapid-gossip-sync = { version = "0.0.115" }
 miniscript = { version = "8.0", features = ["serde"] }
 rand = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["json", "multipart", "native-tls", "stream"] }
-rgb-contracts = { version = "=0.10.0-rc.2", features = ["all", "electrum"] }
-rgb-schemata = "=0.10.0-rc.1"
-rgb-std = { version = "=0.10.3", features = ["all"] }
-rgb-wallet = { version = "=0.10.3", features = ["all"] }
-rgb_core = { package = "rgb-core", version = "=0.10.5" }
+rgb-contracts = { version = "=0.10.0-rc.5", features = ["all", "electrum"] }
+rgb-schemata = "=0.10.0-rc.3"
+rgb-std = { version = "=0.10.7", features = ["all"] }
+rgb-wallet = { version = "=0.10.7", features = ["all"] }
+rgb_core = { package = "rgb-core", version = "=0.10.7" }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 strict_encoding = "=2.5.0"

@@ -8,6 +8,7 @@ use bitcoin::{hashes::Hash, Txid};
 use bitcoin::{Network, OutPoint};
 use lightning::chain::keysinterface::EntropySource;
 use lightning::onion_message::{Destination, OnionMessageContents};
+use lightning::rgb_utils::get_resolver;
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -600,7 +601,8 @@ pub(crate) async fn issue_asset(
     fs::write(rgb_utxos_path, serialized_utxos).expect("able to write rgb utxos file");
 
     let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-    let contract_id = runtime.issue_contract(amount, outpoint, ticker, name, precision);
+    let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
+    let contract_id = runtime.issue_contract(amount, outpoint, ticker, name, precision, &mut resolver);
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
@@ -974,7 +976,7 @@ pub(crate) async fn refresh_transfers(
     let blinded_dir = PathBuf::from_str(&state.ldk_data_dir)
         .expect("valid data dir")
         .join("blinded_utxos");
-    let blinded_files = fs::read_dir(blinded_dir).expect("successfult dir read");
+    let blinded_files = fs::read_dir(blinded_dir).expect("successful dir read");
 
     for bf in blinded_files {
         let serialized_info =
@@ -1006,24 +1008,25 @@ pub(crate) async fn refresh_transfers(
         let transfer: RgbTransfer = consignment.clone().unbindle();
 
         let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+        let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
         let mut minimal_contract = transfer.clone().into_contract();
         minimal_contract.bundles = none!();
         minimal_contract.terminals = none!();
-        let minimal_contract_validated = match minimal_contract.clone().validate(runtime.resolver())
+        let minimal_contract_validated = match minimal_contract.clone().validate(&mut resolver)
         {
             Ok(consignment) => consignment,
             Err(consignment) => consignment,
         };
         runtime
-            .import_contract(minimal_contract_validated)
+            .import_contract(minimal_contract_validated, &mut resolver)
             .expect("failure importing issued contract");
 
         let validated_transfer = transfer
-            .validate(runtime.resolver())
+            .validate(&mut resolver)
             .expect("invalid contract");
         let status = runtime
-            .accept_transfer(validated_transfer, true)
+            .accept_transfer(validated_transfer, &mut resolver, false)
             .expect("valid transfer");
         drop(runtime);
         drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
@@ -1111,6 +1114,7 @@ pub(crate) async fn send_asset(
         .map_err(|_| APIError::InvalidBlindedUTXO(blinded_utxo.clone()))?;
 
     let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+    let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
     let asset_owned_values = {
         let wallet = state.get_wallet();
@@ -1240,10 +1244,10 @@ pub(crate) async fn send_asset(
 
     let transfer = consignment
         .unbindle()
-        .validate(runtime.resolver())
+        .validate(&mut resolver)
         .unwrap_or_else(|c| c);
     let _status = runtime
-        .accept_transfer(transfer, true)
+        .accept_transfer(transfer, &mut resolver, false)
         .expect("valid transfer");
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));

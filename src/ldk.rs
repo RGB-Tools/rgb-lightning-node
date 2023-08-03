@@ -25,6 +25,7 @@ use lightning::ln::channelmanager::{
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
 use lightning::ln::{PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::SimpleArcOnionMessenger;
+use lightning::rgb_utils::get_resolver;
 use lightning::rgb_utils::{
     drop_rgb_runtime, get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, RgbUtxo,
     RgbUtxos, STATIC_BLINDING,
@@ -535,6 +536,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
             let output_descriptors = &outputs.iter().collect::<Vec<_>>();
             let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
             let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+            let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
             for outp in output_descriptors {
                 let outpoint = match outp {
@@ -592,10 +594,10 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
 
                 let validated_transfer = transfer
                     .clone()
-                    .validate(runtime.resolver())
+                    .validate(&mut resolver)
                     .expect("invalid contract");
                 let status = runtime
-                    .accept_transfer(validated_transfer.clone(), true)
+                    .accept_transfer(validated_transfer.clone(), &mut resolver, false)
                     .expect("valid transfer");
                 let validity = status.validity();
                 if !matches!(validity, Validity::Valid) {
@@ -826,10 +828,10 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 let transfer: RgbTransfer = consignment.unbindle();
                 let validated_transfer = transfer
                     .clone()
-                    .validate(runtime.resolver())
+                    .validate(&mut resolver)
                     .expect("invalid contract");
                 let _status = runtime
-                    .accept_transfer(validated_transfer, true)
+                    .accept_transfer(validated_transfer, &mut resolver, false)
                     .expect("valid consignment");
             }
             drop(runtime);
@@ -858,6 +860,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 hex_str(&counterparty_node_id.serialize()),
             );
             let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+            let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
             let funding_consignment_path = format!(
                 "{}/consignment_{}",
@@ -870,10 +873,10 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
             let transfer: RgbTransfer = funding_consignment_bindle.unbindle();
 
             let validated_transfer = transfer
-                .validate(runtime.resolver())
+                .validate(&mut resolver)
                 .expect("invalid contract");
             let _status = runtime
-                .accept_transfer(validated_transfer, true)
+                .accept_transfer(validated_transfer, &mut resolver, false)
                 .expect("valid consignment");
 
             drop(runtime);

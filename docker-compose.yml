@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
   bitcoind:
-    container_name: bitcoind
     image: registry.gitlab.com/hashbeam/docker/bitcoind:25.0
     command: "-fallbackfee=0.0002"
     environment:
@@ -14,7 +13,6 @@ services:
     volumes:
       - ./datacore:/srv/app/.bitcoin
   electrs:
-    container_name: electrs
     image: registry.gitlab.com/hashbeam/docker/electrs:0.9.14
     environment:
       MYUID: 1000
