@@ -45,6 +45,7 @@ use std::{
     path::{Path, PathBuf},
     process::{id, Command},
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 use strict_encoding::{FieldName, TypeName};
@@ -323,7 +324,7 @@ pub(crate) struct Unspent {
 }
 
 pub(crate) async fn address(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<AddressResponse>, APIError> {
     let wallet = state.wallet.lock().unwrap();
     let address = wallet
@@ -335,7 +336,7 @@ pub(crate) async fn address(
 }
 
 pub(crate) async fn asset_balance(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<AssetBalanceRequest>, APIError>,
 ) -> Result<Json<AssetBalanceResponse>, APIError> {
     let asset_id = payload.asset_id;
@@ -352,7 +353,7 @@ pub(crate) async fn asset_balance(
     )?;
 
     drop(runtime);
-    drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir));
+    drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
 
     Ok(Json(AssetBalanceResponse {
         amount: total_rgb_amount,
@@ -360,7 +361,7 @@ pub(crate) async fn asset_balance(
 }
 
 pub(crate) async fn close_channel(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<CloseChannelRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let channel_id_str = payload.channel_id;
@@ -405,7 +406,7 @@ pub(crate) async fn close_channel(
 }
 
 pub(crate) async fn connect_peer(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<ConnectPeerRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let peer_pubkey_and_addr = payload.peer_pubkey_and_addr;
@@ -418,7 +419,7 @@ pub(crate) async fn connect_peer(
 }
 
 pub(crate) async fn create_utxos(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let wallet = state.wallet.lock().unwrap();
     sync_wallet(&wallet, state.electrum_url.clone());
@@ -485,7 +486,7 @@ pub(crate) async fn create_utxos(
 }
 
 pub(crate) async fn disconnect_peer(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<DisconnectPeerRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let peer_pubkey_str = payload.peer_pubkey;
@@ -519,7 +520,7 @@ pub(crate) async fn disconnect_peer(
 }
 
 pub(crate) async fn invoice_status(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<InvoiceStatusRequest>, APIError>,
 ) -> Result<Json<InvoiceStatusResponse>, APIError> {
     let invoice_str = payload.invoice;
@@ -546,7 +547,7 @@ pub(crate) async fn invoice_status(
 }
 
 pub(crate) async fn issue_asset(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<IssueAssetRequest>, APIError>,
 ) -> Result<Json<IssueAssetResponse>, APIError> {
     let amount = payload.amount;
@@ -613,7 +614,7 @@ pub(crate) async fn issue_asset(
 }
 
 pub(crate) async fn keysend(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<KeysendRequest>, APIError>,
 ) -> Result<Json<KeysendResponse>, APIError> {
     let asset_id = payload.asset_id;
@@ -686,7 +687,7 @@ pub(crate) async fn keysend(
 }
 
 pub(crate) async fn list_channels(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListChannelsResponse>, APIError> {
     let mut channels = vec![];
     for chan_info in state.channel_manager.list_channels() {
@@ -741,7 +742,7 @@ pub(crate) async fn list_channels(
 }
 
 pub(crate) async fn list_payments(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListPaymentsResponse>, APIError> {
     let inbound = state.inbound_payments.lock().unwrap();
     let outbound = state.outbound_payments.lock().unwrap();
@@ -769,7 +770,7 @@ pub(crate) async fn list_payments(
 }
 
 pub(crate) async fn list_peers(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListPeersResponse>, APIError> {
     let mut peers = vec![];
     for (pubkey, _) in state.peer_manager.get_peer_node_ids() {
@@ -782,7 +783,7 @@ pub(crate) async fn list_peers(
 }
 
 pub(crate) async fn list_unspents(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListUnspentsResponse>, APIError> {
     let wallet = state.wallet.lock().unwrap();
     sync_wallet(&wallet, state.electrum_url.clone());
@@ -806,7 +807,7 @@ pub(crate) async fn list_unspents(
 }
 
 pub(crate) async fn ln_invoice(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<LNInvoiceRequest>, APIError>,
 ) -> Result<Json<LNInvoiceResponse>, APIError> {
     let amt_msat = payload.amt_msat;
@@ -865,7 +866,7 @@ pub(crate) async fn ln_invoice(
 }
 
 pub(crate) async fn node_info(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<NodeInfoResponse>, APIError> {
     let chans = state.channel_manager.list_channels();
 
@@ -879,7 +880,7 @@ pub(crate) async fn node_info(
 }
 
 pub(crate) async fn open_channel(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<OpenChannelRequest>, APIError>,
 ) -> Result<Json<OpenChannelResponse>, APIError> {
     let peer_pubkey_and_addr = payload.peer_pubkey_and_addr;
@@ -975,7 +976,7 @@ pub(crate) async fn open_channel(
 }
 
 pub(crate) async fn refresh_transfers(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let blinded_dir = PathBuf::from_str(&state.ldk_data_dir)
         .expect("valid data dir")
@@ -1051,7 +1052,7 @@ pub(crate) async fn refresh_transfers(
 }
 
 pub(crate) async fn rgb_invoice(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<RgbInvoiceResponse>, APIError> {
     check_uncolored_utxos(&state.ldk_data_dir).await?;
     let outpoint = get_utxo(&state.ldk_data_dir).await.outpoint;
@@ -1103,7 +1104,7 @@ pub(crate) async fn rgb_invoice(
 }
 
 pub(crate) async fn send_asset(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<SendAssetRequest>, APIError>,
 ) -> Result<Json<SendAssetResponse>, APIError> {
     let asset_id = payload.asset_id;
@@ -1266,7 +1267,7 @@ pub(crate) async fn send_asset(
 }
 
 pub(crate) async fn send_onion_message(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<SendOnionMessageRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let node_ids = payload.node_ids;
@@ -1327,7 +1328,7 @@ pub(crate) async fn send_onion_message(
 }
 
 pub(crate) async fn send_payment(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<SendPaymentRequest>, APIError>,
 ) -> Result<Json<SendPaymentResponse>, APIError> {
     let invoice_str = payload.invoice;
@@ -1419,7 +1420,7 @@ pub(crate) async fn shutdown() -> Result<Json<EmptyResponse>, APIError> {
 }
 
 pub(crate) async fn sign_message(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<SignMessageRequest>, APIError>,
 ) -> Result<Json<SignMessageResponse>, APIError> {
     let message = payload.message;

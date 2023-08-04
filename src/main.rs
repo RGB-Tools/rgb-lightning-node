@@ -85,7 +85,8 @@ async fn main() -> Result<()> {
 }
 
 pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServices), AppError> {
-    let (ldk_background_services, shared_state) = start_ldk(args).await?;
+    let (ldk_background_services, app_state) = start_ldk(args).await?;
+    let shared_state = Arc::new(app_state);
 
     let router = Router::new()
         .route("/address", post(address))
