@@ -1,9 +1,6 @@
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bdk::bitcoin::OutPoint;
-use bdk::bitcoin::Txid;
-use bdk::database::SqliteDatabase;
+use bdk::bitcoin::{OutPoint, Txid};
 use bdk::wallet::AddressIndex;
-use bdk::Wallet;
 use bdk::{FeeRate, SignOptions};
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::hashes::hex::FromHex;
@@ -80,9 +77,7 @@ use crate::error::AppError;
 use crate::proxy::post_consignment;
 use crate::rgb::{get_asset_owned_values, update_transition_beneficiary, RgbUtilities};
 use crate::routes::HTLCStatus;
-use crate::utils::do_connect_peer;
-use crate::utils::hex_str;
-use crate::AppState;
+use crate::utils::{do_connect_peer, hex_str, AppState};
 
 pub(crate) const FEE_RATE: f32 = 10.0;
 const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
@@ -138,21 +133,7 @@ pub(crate) type NetworkGraph = gossip::NetworkGraph<Arc<FilesystemLogger>>;
 
 pub(crate) type OnionMessenger = SimpleArcOnionMessenger<FilesystemLogger>;
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_ldk_events(
-    channel_manager: &Arc<ChannelManager>,
-    network_graph: &NetworkGraph,
-    keys_manager: &KeysManager,
-    inbound_payments: &PaymentInfoStorage,
-    outbound_payments: &PaymentInfoStorage,
-    network: Network,
-    event: Event,
-    ldk_data_dir: String,
-    proxy_client: Arc<RestClient>,
-    proxy_url: String,
-    wallet_arc: Arc<Mutex<Wallet<SqliteDatabase>>>,
-    electrum_url: String,
-) {
+async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
     match event {
         Event::FundingGenerationReady {
             temporary_channel_id,
@@ -163,7 +144,7 @@ async fn handle_ldk_events(
         } => {
             let addr = WitnessProgram::from_scriptpubkey(
                 &output_script[..],
-                match network {
+                match state.network {
                     Network::Bitcoin => bitcoin_bech32::constants::Network::Bitcoin,
                     Network::Testnet => bitcoin_bech32::constants::Network::Testnet,
                     Network::Regtest => bitcoin_bech32::constants::Network::Regtest,
@@ -175,58 +156,58 @@ async fn handle_ldk_events(
             let script = Script::from_byte_iter(addr.into_iter().map(Ok)).expect("valid script");
 
             let (rgb_info, _) =
-                get_rgb_channel_info(&temporary_channel_id, &PathBuf::from(&ldk_data_dir));
+                get_rgb_channel_info(&temporary_channel_id, &PathBuf::from(&state.ldk_data_dir));
 
-            let mut runtime = get_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
+            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
-            let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
-            let asset_owned_values = get_asset_owned_values(
-                rgb_info.contract_id,
-                &runtime,
-                wallet_arc.clone(),
-                electrum_url,
-            )
-            .expect("known contract");
-
-            let mut asset_transition_builder = runtime
-                .transition_builder(
-                    rgb_info.contract_id,
-                    TypeName::try_from("RGB20").unwrap(),
-                    None::<&str>,
-                )
-                .expect("ok");
-            let assignment_id = asset_transition_builder
-                .assignments_type(&FieldName::from("beneficiary"))
-                .expect("valid assignment");
-            let mut beneficiaries = vec![];
-
-            let mut rgb_inputs: Vec<OutPoint> = vec![];
-            let mut input_amount: u64 = 0;
-            for (_opout, (outpoint, amount)) in asset_owned_values {
-                if input_amount >= channel_rgb_amount {
-                    break;
-                }
-                rgb_inputs.push(OutPoint {
-                    txid: Txid::from_str(&outpoint.txid.to_string()).unwrap(),
-                    vout: outpoint.vout.into_u32(),
-                });
-                input_amount += amount;
-            }
-            let rgb_change_amount = input_amount - channel_rgb_amount;
-
-            let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
-            let serialized_utxos =
-                fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
-            let mut rgb_utxos: RgbUtxos =
-                serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
-            let unspendable_utxos: Vec<OutPoint> = rgb_utxos
-                .utxos
-                .iter()
-                .filter(|u| !rgb_inputs.contains(&u.outpoint) || !u.colored)
-                .map(|u| u.outpoint)
-                .collect();
             let (funding_tx, funding_txid, consignment_path) = {
-                let wallet = wallet_arc.lock().unwrap();
+                let wallet = state.get_wallet();
+                let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
+                let asset_owned_values = get_asset_owned_values(
+                    rgb_info.contract_id,
+                    &runtime,
+                    &wallet,
+                    state.electrum_url.clone(),
+                )
+                .expect("known contract");
+
+                let mut asset_transition_builder = runtime
+                    .transition_builder(
+                        rgb_info.contract_id,
+                        TypeName::try_from("RGB20").unwrap(),
+                        None::<&str>,
+                    )
+                    .expect("ok");
+                let assignment_id = asset_transition_builder
+                    .assignments_type(&FieldName::from("beneficiary"))
+                    .expect("valid assignment");
+                let mut beneficiaries = vec![];
+
+                let mut rgb_inputs: Vec<OutPoint> = vec![];
+                let mut input_amount: u64 = 0;
+                for (_opout, (outpoint, amount)) in asset_owned_values {
+                    if input_amount >= channel_rgb_amount {
+                        break;
+                    }
+                    rgb_inputs.push(OutPoint {
+                        txid: Txid::from_str(&outpoint.txid.to_string()).unwrap(),
+                        vout: outpoint.vout.into_u32(),
+                    });
+                    input_amount += amount;
+                }
+                let rgb_change_amount = input_amount - channel_rgb_amount;
+
+                let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir);
+                let serialized_utxos =
+                    fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
+                let mut rgb_utxos: RgbUtxos =
+                    serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
+                let unspendable_utxos: Vec<OutPoint> = rgb_utxos
+                    .utxos
+                    .iter()
+                    .filter(|u| !rgb_inputs.contains(&u.outpoint) || !u.colored)
+                    .map(|u| u.outpoint)
+                    .collect();
                 let mut builder = wallet.build_tx();
                 builder
                     .add_utxos(&rgb_inputs)
@@ -291,7 +272,7 @@ async fn handle_ldk_events(
                 let funding_tx = psbt.extract_tx();
                 let funding_txid = funding_tx.txid();
 
-                let consignment_path = format!("{}/consignment_{funding_txid}", ldk_data_dir);
+                let consignment_path = format!("{}/consignment_{funding_txid}", state.ldk_data_dir);
                 consignment
                     .save(&consignment_path)
                     .expect("successful save");
@@ -312,7 +293,7 @@ async fn handle_ldk_events(
                 }
                 let funding_consignment_path = format!(
                     "{}/consignment_{}",
-                    ldk_data_dir,
+                    state.ldk_data_dir,
                     hex::encode(temporary_channel_id)
                 );
                 consignment
@@ -323,10 +304,10 @@ async fn handle_ldk_events(
             };
 
             drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
-            let proxy_ref = (*proxy_client).clone();
-            let proxy_url_copy = proxy_url;
-            let channel_manager_copy = channel_manager.clone();
+            drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+            let proxy_ref = (*state.proxy_client).clone();
+            let proxy_url_copy = state.proxy_url.clone();
+            let channel_manager_copy = state.channel_manager.clone();
             let res = post_consignment(
                 proxy_ref,
                 &proxy_url_copy,
@@ -373,7 +354,7 @@ async fn handle_ldk_events(
                 } => payment_preimage,
                 PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
             };
-            channel_manager.claim_funds(payment_preimage.unwrap());
+            state.channel_manager.claim_funds(payment_preimage.unwrap());
         }
         Event::PaymentClaimed {
             payment_hash,
@@ -394,7 +375,7 @@ async fn handle_ldk_events(
                 } => (payment_preimage, Some(payment_secret)),
                 PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
             };
-            let mut payments = inbound_payments.lock().unwrap();
+            let mut payments = state.get_inbound_payments();
             match payments.entry(payment_hash) {
                 Entry::Occupied(mut e) => {
                     let payment = e.get_mut();
@@ -418,7 +399,7 @@ async fn handle_ldk_events(
             fee_paid_msat,
             ..
         } => {
-            let mut payments = outbound_payments.lock().unwrap();
+            let mut payments = state.get_outbound_payments();
             for (hash, payment) in payments.iter_mut() {
                 if *hash == payment_hash {
                     payment.preimage = Some(payment_preimage);
@@ -460,7 +441,7 @@ async fn handle_ldk_events(
                 }
             );
 
-            let mut payments = outbound_payments.lock().unwrap();
+            let mut payments = state.get_outbound_payments();
             if payments.contains_key(&payment_hash) {
                 let payment = payments.get_mut(&payment_hash).unwrap();
                 payment.status = HTLCStatus::Failed;
@@ -473,9 +454,9 @@ async fn handle_ldk_events(
             claim_from_onchain_tx,
             outbound_amount_forwarded_msat,
         } => {
-            let read_only_network_graph = network_graph.read_only();
+            let read_only_network_graph = state.network_graph.read_only();
             let nodes = read_only_network_graph.nodes();
-            let channels = channel_manager.list_channels();
+            let channels = state.channel_manager.list_channels();
 
             let node_str = |channel_id: &Option<[u8; 32]>| match channel_id {
                 None => String::new(),
@@ -541,7 +522,7 @@ async fn handle_ldk_events(
         }
         Event::HTLCHandlingFailed { .. } => {}
         Event::PendingHTLCsForwardable { time_forwardable } => {
-            let forwarding_channel_manager = channel_manager.clone();
+            let forwarding_channel_manager = state.channel_manager.clone();
             let min = time_forwardable.as_millis() as u64;
             tokio::spawn(async move {
                 let millis_to_sleep = thread_rng().gen_range(min, min * 5);
@@ -553,7 +534,7 @@ async fn handle_ldk_events(
             let secp_ctx = Secp256k1::new();
             let output_descriptors = &outputs.iter().collect::<Vec<_>>();
             let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
-            let mut runtime = get_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
+            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
             for outp in output_descriptors {
                 let outpoint = match outp {
@@ -572,7 +553,7 @@ async fn handle_ldk_events(
                 let txid = outpoint.txid;
                 let witness_txid = RgbTxid::from_str(&txid.to_string()).unwrap();
 
-                let transfer_info_path = format!("{ldk_data_dir}/{txid}_transfer_info");
+                let transfer_info_path = format!("{}/{txid}_transfer_info", state.ldk_data_dir);
                 let transfer_info = read_rgb_transfer_info(&transfer_info_path);
                 let contract_id = transfer_info.contract_id;
 
@@ -622,7 +603,7 @@ async fn handle_ldk_events(
                     continue;
                 }
 
-                let wallet = wallet_arc.lock().unwrap();
+                let wallet = state.get_wallet();
                 let address = wallet
                     .get_address(AddressIndex::New)
                     .expect("valid address")
@@ -667,16 +648,16 @@ async fn handle_ldk_events(
 
                 let (tx, vout, consignment) = match outp {
                     SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
-                        let signer = keys_manager.derive_channel_keys(
+                        let signer = state.keys_manager.derive_channel_keys(
                             descriptor.channel_value_satoshis,
                             &descriptor.channel_keys_id,
                         );
                         let intermediate_wallet = get_bdk_wallet_seckey(
-                            format!("{ldk_data_dir}/intermediate"),
-                            network,
+                            format!("{}/intermediate", state.ldk_data_dir),
+                            state.network,
                             signer.payment_key,
                         );
-                        sync_wallet(&intermediate_wallet, electrum_url.clone());
+                        sync_wallet(&intermediate_wallet, state.electrum_url.clone());
                         let mut builder = intermediate_wallet.build_tx();
                         builder
                             .add_utxos(&rgb_inputs)
@@ -708,7 +689,7 @@ async fn handle_ldk_events(
                         (psbt.extract_tx(), vout, consignment)
                     }
                     SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
-                        let signer = keys_manager.derive_channel_keys(
+                        let signer = state.keys_manager.derive_channel_keys(
                             descriptor.channel_value_satoshis,
                             &descriptor.channel_keys_id,
                         );
@@ -773,12 +754,13 @@ async fn handle_ldk_events(
                         ref output,
                     } => {
                         let derivation_idx =
-                            if output.script_pubkey == keys_manager.destination_script {
+                            if output.script_pubkey == state.keys_manager.destination_script {
                                 1
                             } else {
                                 2
                             };
-                        let secret = keys_manager
+                        let secret = state
+                            .keys_manager
                             .master_key
                             .ckd_priv(
                                 &secp_ctx,
@@ -786,11 +768,11 @@ async fn handle_ldk_events(
                             )
                             .unwrap();
                         let intermediate_wallet = get_bdk_wallet_seckey(
-                            format!("{ldk_data_dir}/intermediate"),
-                            network,
+                            format!("{}/intermediate", state.ldk_data_dir),
+                            state.network,
                             secret.private_key,
                         );
-                        sync_wallet(&intermediate_wallet, electrum_url.clone());
+                        sync_wallet(&intermediate_wallet, state.electrum_url.clone());
                         let mut builder = intermediate_wallet.build_tx();
                         builder
                             .add_utxos(&rgb_inputs)
@@ -823,10 +805,10 @@ async fn handle_ldk_events(
                     }
                 };
 
-                broadcast_tx(&tx, electrum_url.clone());
-                sync_wallet(&wallet, electrum_url.clone());
+                broadcast_tx(&tx, state.electrum_url.clone());
+                sync_wallet(&wallet, state.electrum_url.clone());
 
-                let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
+                let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir);
                 let serialized_utxos =
                     fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
                 let mut rgb_utxos: RgbUtxos =
@@ -851,7 +833,7 @@ async fn handle_ldk_events(
                     .expect("valid consignment");
             }
             drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(ldk_data_dir));
+            drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
         }
         Event::ChannelPending {
             channel_id,
@@ -875,10 +857,13 @@ async fn handle_ldk_events(
                 hex_str(channel_id),
                 hex_str(&counterparty_node_id.serialize()),
             );
-            let mut runtime = get_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
+            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
-            let funding_consignment_path =
-                format!("{}/consignment_{}", ldk_data_dir, hex::encode(channel_id));
+            let funding_consignment_path = format!(
+                "{}/consignment_{}",
+                state.ldk_data_dir,
+                hex::encode(channel_id)
+            );
 
             let funding_consignment_bindle = Bindle::<RgbTransfer>::load(funding_consignment_path)
                 .expect("successful consignment load");
@@ -892,7 +877,7 @@ async fn handle_ldk_events(
                 .expect("valid consignment");
 
             drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(ldk_data_dir));
+            drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
         }
         Event::ChannelClosed {
             channel_id,
@@ -915,7 +900,7 @@ async fn handle_ldk_events(
 
 pub(crate) async fn start_ldk(
     args: LdkUserInfo,
-) -> Result<(LdkBackgroundServices, AppState), AppError> {
+) -> Result<(LdkBackgroundServices, Arc<AppState>), AppError> {
     // Initialize the LDK data directory if necessary.
     let ldk_data_dir = format!("{}/.ldk", args.storage_dir_path);
     let ldk_data_dir_path = PathBuf::from(&ldk_data_dir);
@@ -1298,41 +1283,30 @@ pub(crate) async fn start_ldk(
     let inbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
     let outbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
 
+    let app_state = Arc::new(AppState {
+        channel_manager: Arc::clone(&channel_manager),
+        electrum_url: electrum_url.to_string(),
+        inbound_payments,
+        keys_manager,
+        ldk_data_dir: ldk_data_dir.clone(),
+        logger: Arc::clone(&logger),
+        network,
+        network_graph,
+        onion_messenger,
+        outbound_payments,
+        peer_manager: Arc::clone(&peer_manager),
+        proxy_client,
+        proxy_endpoint: proxy_endpoint.to_string(),
+        proxy_url: proxy_url.to_string(),
+        wallet,
+    });
+
     // Step 18: Handle LDK Events
-    let channel_manager_event_listener = Arc::clone(&channel_manager);
-    let network_graph_event_listener = Arc::clone(&network_graph);
-    let keys_manager_event_listener = Arc::clone(&keys_manager);
-    let inbound_payments_event_listener = Arc::clone(&inbound_payments);
-    let outbound_payments_event_listener = Arc::clone(&outbound_payments);
-    let network = args.network;
-    let ldk_data_dir_copy = ldk_data_dir.clone();
-    let proxy_client_copy = proxy_client.clone();
-    let wallet_copy = wallet.clone();
+    let app_state_copy = Arc::clone(&app_state);
     let event_handler = move |event: Event| {
-        let channel_manager_event_listener = Arc::clone(&channel_manager_event_listener);
-        let network_graph_event_listener = Arc::clone(&network_graph_event_listener);
-        let keys_manager_event_listener = Arc::clone(&keys_manager_event_listener);
-        let inbound_payments_event_listener = Arc::clone(&inbound_payments_event_listener);
-        let outbound_payments_event_listener = Arc::clone(&outbound_payments_event_listener);
-        let ldk_data_dir_copy = ldk_data_dir_copy.clone();
-        let proxy_client_copy = proxy_client_copy.clone();
-        let wallet_copy = wallet_copy.clone();
+        let app_state_copy = Arc::clone(&app_state_copy);
         async move {
-            handle_ldk_events(
-                &channel_manager_event_listener,
-                &network_graph_event_listener,
-                &keys_manager_event_listener,
-                &inbound_payments_event_listener,
-                &outbound_payments_event_listener,
-                network,
-                event,
-                ldk_data_dir_copy,
-                proxy_client_copy,
-                proxy_url.to_string(),
-                wallet_copy,
-                electrum_url.to_string(),
-            )
-            .await;
+            handle_ldk_events(event, app_state_copy).await;
         }
     };
 
@@ -1405,7 +1379,6 @@ pub(crate) async fn start_ldk(
     // In a production environment, this should occur only after the announcement of new channels
     // to avoid churn in the global network graph.
     let peer_man = Arc::clone(&peer_manager);
-    let network = args.network;
     if !args.ldk_announced_listen_addr.is_empty() {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -1430,23 +1403,7 @@ pub(crate) async fn start_ldk(
             bp_exit,
             background_processor,
         },
-        AppState {
-            channel_manager,
-            electrum_url: electrum_url.to_string(),
-            inbound_payments,
-            keys_manager,
-            ldk_data_dir,
-            logger,
-            network,
-            network_graph,
-            onion_messenger,
-            outbound_payments,
-            peer_manager,
-            proxy_client,
-            proxy_endpoint: proxy_endpoint.to_string(),
-            proxy_url: proxy_url.to_string(),
-            wallet,
-        },
+        app_state,
     ))
 }
 

@@ -12,24 +12,13 @@ mod utils;
 #[cfg(test)]
 mod test;
 
-use ::bdk::{database::SqliteDatabase, Wallet};
 use anyhow::Result;
 use axum::{
     routing::{get, post},
     Router,
 };
-use bitcoin::Network;
-use disk::FilesystemLogger;
-use ldk::{
-    ChannelManager, LdkBackgroundServices, NetworkGraph, OnionMessenger, PaymentInfo, PeerManager,
-};
-use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
-use reqwest::Client as RestClient;
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use ldk::LdkBackgroundServices;
+use std::net::SocketAddr;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 
@@ -42,25 +31,6 @@ use crate::routes::{
     ln_invoice, node_info, open_channel, refresh_transfers, rgb_invoice, send_asset,
     send_onion_message, send_payment, shutdown, sign_message,
 };
-
-#[derive(Clone)]
-pub(crate) struct AppState {
-    channel_manager: Arc<ChannelManager>,
-    electrum_url: String,
-    inbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
-    keys_manager: Arc<KeysManager>,
-    ldk_data_dir: String,
-    logger: Arc<FilesystemLogger>,
-    network: Network,
-    network_graph: Arc<NetworkGraph>,
-    onion_messenger: Arc<OnionMessenger>,
-    outbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
-    peer_manager: Arc<PeerManager>,
-    proxy_client: Arc<RestClient>,
-    proxy_endpoint: String,
-    proxy_url: String,
-    wallet: Arc<Mutex<Wallet<SqliteDatabase>>>,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -85,8 +55,7 @@ async fn main() -> Result<()> {
 }
 
 pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServices), AppError> {
-    let (ldk_background_services, app_state) = start_ldk(args).await?;
-    let shared_state = Arc::new(app_state);
+    let (ldk_background_services, shared_state) = start_ldk(args).await?;
 
     let router = Router::new()
         .route("/address", post(address))

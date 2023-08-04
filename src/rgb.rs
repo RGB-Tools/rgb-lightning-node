@@ -30,7 +30,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::fs;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::bdk::sync_wallet;
@@ -43,7 +42,7 @@ pub(crate) struct BlindedInfo {
     pub(crate) consumed: bool,
 }
 
-pub(crate) async fn check_uncolored_utxos(ldk_data_dir: &str) -> Result<(), APIError> {
+pub(crate) fn check_uncolored_utxos(ldk_data_dir: &str) -> Result<(), APIError> {
     let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
     let serialized_utxos = fs::read_to_string(rgb_utxos_path).expect("able to read rgb utxos file");
     let rgb_utxos: RgbUtxos = serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
@@ -54,7 +53,7 @@ pub(crate) async fn check_uncolored_utxos(ldk_data_dir: &str) -> Result<(), APIE
     }
 }
 
-pub(crate) async fn get_utxo(ldk_data_dir: &str) -> RgbUtxo {
+pub(crate) fn get_utxo(ldk_data_dir: &str) -> RgbUtxo {
     let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
     let serialized_utxos = fs::read_to_string(rgb_utxos_path).expect("able to read rgb utxos file");
     let rgb_utxos: RgbUtxos = serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
@@ -68,22 +67,20 @@ pub(crate) async fn get_utxo(ldk_data_dir: &str) -> RgbUtxo {
 pub(crate) fn get_rgb_total_amount(
     contract_id: ContractId,
     runtime: &Runtime,
-    wallet_arc: Arc<Mutex<Wallet<SqliteDatabase>>>,
+    wallet: &Wallet<SqliteDatabase>,
     electrum_url: String,
 ) -> Result<u64, APIError> {
-    let asset_owned_values =
-        get_asset_owned_values(contract_id, runtime, wallet_arc, electrum_url)?;
+    let asset_owned_values = get_asset_owned_values(contract_id, runtime, wallet, electrum_url)?;
     Ok(asset_owned_values.iter().map(|(_, (_, amt))| amt).sum())
 }
 
 pub(crate) fn get_asset_owned_values(
     contract_id: ContractId,
     runtime: &Runtime,
-    wallet_arc: Arc<Mutex<Wallet<SqliteDatabase>>>,
+    wallet: &Wallet<SqliteDatabase>,
     electrum_url: String,
 ) -> Result<BTreeMap<Opout, (RgbOutpoint, u64)>, APIError> {
-    let wallet = wallet_arc.lock().unwrap();
-    sync_wallet(&wallet, electrum_url);
+    sync_wallet(wallet, electrum_url);
     let unspents_outpoints: Vec<OutPoint> = wallet
         .list_unspent()
         .expect("valid unspent list")

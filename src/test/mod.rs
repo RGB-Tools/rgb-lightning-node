@@ -1,4 +1,5 @@
 use amplify::s;
+use bitcoin::Network;
 use once_cell::sync::Lazy;
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;

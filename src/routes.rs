@@ -64,8 +64,7 @@ use crate::{
     rgb::{
         check_uncolored_utxos, get_asset_owned_values, get_rgb_total_amount, get_utxo, RgbUtilities,
     },
-    utils::{connect_peer_if_necessary, parse_peer_info},
-    AppState,
+    utils::{connect_peer_if_necessary, parse_peer_info, AppState},
 };
 
 const MIN_CREATE_UTXOS_SATS: u64 = 10000;
@@ -326,7 +325,7 @@ pub(crate) struct Unspent {
 pub(crate) async fn address(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AddressResponse>, APIError> {
-    let wallet = state.wallet.lock().unwrap();
+    let wallet = state.get_wallet();
     let address = wallet
         .get_address(bdk::wallet::AddressIndex::New)
         .expect("valid address")
@@ -345,12 +344,9 @@ pub(crate) async fn asset_balance(
         ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?;
 
     let runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-    let total_rgb_amount = get_rgb_total_amount(
-        contract_id,
-        &runtime,
-        state.wallet.clone(),
-        state.electrum_url.clone(),
-    )?;
+    let wallet = state.get_wallet();
+    let total_rgb_amount =
+        get_rgb_total_amount(contract_id, &runtime, &wallet, state.electrum_url.clone())?;
 
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
@@ -421,7 +417,7 @@ pub(crate) async fn connect_peer(
 pub(crate) async fn create_utxos(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<EmptyResponse>, APIError> {
-    let wallet = state.wallet.lock().unwrap();
+    let wallet = state.get_wallet();
     sync_wallet(&wallet, state.electrum_url.clone());
 
     let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir.clone());
@@ -530,7 +526,7 @@ pub(crate) async fn invoice_status(
         Ok(v) => v,
     };
 
-    let inbound = state.inbound_payments.lock().unwrap();
+    let inbound = state.get_inbound_payments();
 
     let payment_hash = PaymentHash(invoice.payment_hash().into_inner());
     let status = match inbound.get(&payment_hash) {
@@ -588,8 +584,8 @@ pub(crate) async fn issue_asset(
         return Err(APIError::InvalidPrecision(s!("precision is too high")));
     }
 
-    check_uncolored_utxos(&state.ldk_data_dir).await?;
-    let outpoint = get_utxo(&state.ldk_data_dir).await.outpoint;
+    check_uncolored_utxos(&state.ldk_data_dir)?;
+    let outpoint = get_utxo(&state.ldk_data_dir).outpoint;
     let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir.clone());
     let serialized_utxos =
         fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
@@ -668,7 +664,7 @@ pub(crate) async fn keysend(
         }
     };
 
-    let mut payments = state.outbound_payments.lock().unwrap();
+    let mut payments = state.get_outbound_payments();
     payments.insert(
         payment_hash,
         PaymentInfo {
@@ -744,8 +740,8 @@ pub(crate) async fn list_channels(
 pub(crate) async fn list_payments(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListPaymentsResponse>, APIError> {
-    let inbound = state.inbound_payments.lock().unwrap();
-    let outbound = state.outbound_payments.lock().unwrap();
+    let inbound = state.get_inbound_payments();
+    let outbound = state.get_outbound_payments();
     let mut payments = vec![];
 
     for (payment_hash, payment_info) in inbound.deref() {
@@ -785,7 +781,7 @@ pub(crate) async fn list_peers(
 pub(crate) async fn list_unspents(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListUnspentsResponse>, APIError> {
-    let wallet = state.wallet.lock().unwrap();
+    let wallet = state.get_wallet();
     sync_wallet(&wallet, state.electrum_url.clone());
     let local_utxos = wallet.list_unspent().expect("unspents");
     let mut unspents = vec![];
@@ -826,7 +822,7 @@ pub(crate) async fn ln_invoice(
         )));
     }
 
-    let mut payments = state.inbound_payments.lock().unwrap();
+    let mut payments = state.get_inbound_payments();
     let currency = match state.network {
         Network::Bitcoin => Currency::Bitcoin,
         Network::Testnet => Currency::BitcoinTestnet,
@@ -912,14 +908,13 @@ pub(crate) async fn open_channel(
         )));
     }
 
+    connect_peer_if_necessary(peer_pubkey, peer_addr, state.peer_manager.clone()).await?;
+
     let runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
-    let total_rgb_amount = get_rgb_total_amount(
-        contract_id,
-        &runtime,
-        state.wallet.clone(),
-        state.electrum_url.clone(),
-    )?;
+    let wallet = state.get_wallet();
+    let total_rgb_amount =
+        get_rgb_total_amount(contract_id, &runtime, &wallet, state.electrum_url.clone())?;
 
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
@@ -927,8 +922,6 @@ pub(crate) async fn open_channel(
     if chan_amt_rgb > total_rgb_amount {
         return Err(APIError::InsufficientAssets(total_rgb_amount));
     }
-
-    connect_peer_if_necessary(peer_pubkey, peer_addr, state.peer_manager.clone()).await?;
 
     let config = UserConfig {
         channel_handshake_limits: ChannelHandshakeLimits {
@@ -1040,7 +1033,7 @@ pub(crate) async fn refresh_transfers(
             continue;
         }
 
-        let wallet = state.wallet.lock().unwrap();
+        let wallet = state.get_wallet();
         sync_wallet(&wallet, state.electrum_url.clone());
 
         fs::remove_file(bf.unwrap().path()).expect("successful file remove");
@@ -1054,8 +1047,8 @@ pub(crate) async fn refresh_transfers(
 pub(crate) async fn rgb_invoice(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<RgbInvoiceResponse>, APIError> {
-    check_uncolored_utxos(&state.ldk_data_dir).await?;
-    let outpoint = get_utxo(&state.ldk_data_dir).await.outpoint;
+    check_uncolored_utxos(&state.ldk_data_dir)?;
+    let outpoint = get_utxo(&state.ldk_data_dir).outpoint;
     let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir.clone());
     let serialized_utxos =
         fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
@@ -1114,29 +1107,24 @@ pub(crate) async fn send_asset(
     let contract_id =
         ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?;
 
-    let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-
-    let total_rgb_amount = get_rgb_total_amount(
-        contract_id,
-        &runtime,
-        state.wallet.clone(),
-        state.electrum_url.clone(),
-    )?;
-
-    if rgb_amt > total_rgb_amount {
-        return Err(APIError::InsufficientAssets(total_rgb_amount));
-    }
-
     let concealed_seal = SecretSeal::from_str(&blinded_utxo)
         .map_err(|_| APIError::InvalidBlindedUTXO(blinded_utxo.clone()))?;
 
-    let asset_owned_values = get_asset_owned_values(
-        contract_id,
-        &runtime,
-        state.wallet.clone(),
-        state.electrum_url.clone(),
-    )
-    .expect("known contract");
+    let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+
+    let asset_owned_values = {
+        let wallet = state.get_wallet();
+
+        let total_rgb_amount =
+            get_rgb_total_amount(contract_id, &runtime, &wallet, state.electrum_url.clone())?;
+
+        if rgb_amt > total_rgb_amount {
+            return Err(APIError::InsufficientAssets(total_rgb_amount));
+        }
+
+        get_asset_owned_values(contract_id, &runtime, &wallet, state.electrum_url.clone())
+            .expect("known contract")
+    };
 
     let mut asset_transition_builder = runtime
         .transition_builder(
@@ -1165,8 +1153,8 @@ pub(crate) async fn send_asset(
 
     let rgb_change_amount = input_amount - rgb_amt;
     if rgb_change_amount > 0 {
-        check_uncolored_utxos(&state.ldk_data_dir).await?;
-        let rgb_change_outpoint = get_utxo(&state.ldk_data_dir).await.outpoint;
+        check_uncolored_utxos(&state.ldk_data_dir)?;
+        let rgb_change_outpoint = get_utxo(&state.ldk_data_dir).outpoint;
         let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir.clone());
         let serialized_utxos =
             fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
@@ -1195,7 +1183,7 @@ pub(crate) async fn send_asset(
     }
 
     let psbt = {
-        let wallet = state.wallet.lock().unwrap();
+        let wallet = state.get_wallet();
         let mut builder = wallet.build_tx();
         let address = wallet
             .get_address(bdk::wallet::AddressIndex::New)
@@ -1243,7 +1231,7 @@ pub(crate) async fn send_asset(
         return Err(APIError::FailedPostingConsignment);
     }
 
-    let wallet = state.wallet.lock().unwrap();
+    let wallet = state.get_wallet();
     wallet
         .sign(&mut psbt, SignOptions::default())
         .expect("able to sign");
@@ -1392,7 +1380,7 @@ pub(crate) async fn send_payment(
     };
     let payment_secret = *invoice.payment_secret();
 
-    let mut payments = state.outbound_payments.lock().unwrap();
+    let mut payments = state.get_outbound_payments();
     payments.insert(
         payment_hash,
         PaymentInfo {

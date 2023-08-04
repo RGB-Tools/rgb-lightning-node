@@ -1,17 +1,59 @@
 use amplify::s;
+use bdk::{database::SqliteDatabase, Wallet};
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::Network;
+use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
 use lightning::{
     onion_message::CustomOnionMessageContents,
     util::ser::{Writeable, Writer},
 };
+use reqwest::Client as RestClient;
 use std::{
+    collections::HashMap,
     fmt::Write,
     net::{SocketAddr, ToSocketAddrs},
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
 
-use crate::{error::APIError, ldk::PeerManager};
+use crate::{
+    disk::FilesystemLogger,
+    error::APIError,
+    ldk::{ChannelManager, NetworkGraph, OnionMessenger, PaymentInfo, PeerManager},
+};
+
+#[derive(Clone)]
+pub(crate) struct AppState {
+    pub(crate) channel_manager: Arc<ChannelManager>,
+    pub(crate) electrum_url: String,
+    pub(crate) inbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
+    pub(crate) keys_manager: Arc<KeysManager>,
+    pub(crate) ldk_data_dir: String,
+    pub(crate) logger: Arc<FilesystemLogger>,
+    pub(crate) network: Network,
+    pub(crate) network_graph: Arc<NetworkGraph>,
+    pub(crate) onion_messenger: Arc<OnionMessenger>,
+    pub(crate) outbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
+    pub(crate) peer_manager: Arc<PeerManager>,
+    pub(crate) proxy_client: Arc<RestClient>,
+    pub(crate) proxy_endpoint: String,
+    pub(crate) proxy_url: String,
+    pub(crate) wallet: Arc<Mutex<Wallet<SqliteDatabase>>>,
+}
+
+impl AppState {
+    pub(crate) fn get_inbound_payments(&self) -> MutexGuard<HashMap<PaymentHash, PaymentInfo>> {
+        self.inbound_payments.lock().unwrap()
+    }
+
+    pub(crate) fn get_outbound_payments(&self) -> MutexGuard<HashMap<PaymentHash, PaymentInfo>> {
+        self.outbound_payments.lock().unwrap()
+    }
+
+    pub(crate) fn get_wallet(&self) -> MutexGuard<Wallet<SqliteDatabase>> {
+        self.wallet.lock().unwrap()
+    }
+}
 
 pub(crate) struct UserOnionMessageContents {
     pub(crate) tlv_type: u64,
