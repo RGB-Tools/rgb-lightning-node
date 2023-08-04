@@ -27,9 +27,10 @@ use crate::error::AppError;
 use crate::ldk::{start_ldk, stop_ldk};
 use crate::routes::{
     address, asset_balance, close_channel, connect_peer, create_utxos, decode_ln_invoice,
-    disconnect_peer, invoice_status, issue_asset, keysend, list_channels, list_payments,
-    list_peers, list_unspents, ln_invoice, node_info, open_channel, refresh_transfers, rgb_invoice,
-    send_asset, send_onion_message, send_payment, shutdown, sign_message,
+    disconnect_peer, invoice_status, issue_asset, keysend, list_assets, list_channels,
+    list_payments, list_peers, list_unspents, ln_invoice, node_info, open_channel,
+    refresh_transfers, rgb_invoice, send_asset, send_onion_message, send_payment, shutdown,
+    sign_message,
 };
 
 #[tokio::main]
@@ -68,6 +69,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServi
         .route("/invoicestatus", post(invoice_status))
         .route("/issueasset", post(issue_asset))
         .route("/keysend", post(keysend))
+        .route("/listassets", get(list_assets))
         .route("/listchannels", get(list_channels))
         .route("/listpayments", get(list_payments))
         .route("/listpeers", get(list_peers))

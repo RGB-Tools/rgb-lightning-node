@@ -154,6 +154,7 @@ The node currently exposes the following APIs:
 - `/invoicestatus` (POST)
 - `/issueasset` (POST)
 - `/keysend` (POST)
+- `/listassets` (GET)
 - `/listchannels` (GET)
 - `/listpayments` (GET)
 - `/listpeers` (GET)

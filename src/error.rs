@@ -95,6 +95,9 @@ pub enum APIError {
     #[error("Proxy error: {0}")]
     Proxy(#[from] reqwest::Error),
 
+    #[error("Unexpected error")]
+    Unexpected,
+
     #[error("Unknown RGB contract ID")]
     UnknownContractId,
 
@@ -117,7 +120,8 @@ impl IntoResponse for APIError {
             | APIError::FailedPostingConsignment
             | APIError::FailedSendingOnionMessage(_)
             | APIError::IO(_)
-            | APIError::Proxy(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            | APIError::Proxy(_)
+            | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBlindedUTXO(_)

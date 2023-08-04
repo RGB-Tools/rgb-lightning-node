@@ -30,8 +30,8 @@ use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use rgb_core::validation::Validity;
 use rgbstd::containers::Bindle;
 use rgbstd::containers::Transfer as RgbTransfer;
-use rgbstd::interface::TypedState;
-use rgbstd::persistence::Inventory;
+use rgbstd::interface::{Rgb20, TypedState};
+use rgbstd::persistence::{Inventory, Stash};
 use rgbstd::Txid as RgbTxid;
 use rgbstd::{
     containers::BuilderSeal,
@@ -50,6 +50,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 use strict_encoding::{FieldName, TypeName};
+use strict_types::value::StrictNum;
+use strict_types::StrictVal;
 
 use crate::proxy::get_consignment;
 use crate::rgb::BlindedInfo;
@@ -83,6 +85,16 @@ const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AddressResponse {
     pub(crate) address: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Asset {
+    pub(crate) asset_id: String,
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) precision: u8,
+    pub(crate) issued_supply: u64,
+    pub(crate) timestamp: i64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -217,6 +229,11 @@ pub(crate) struct KeysendResponse {
     pub(crate) payment_hash: String,
     pub(crate) payment_preimage: String,
     pub(crate) status: HTLCStatus,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ListAssetsResponse {
+    pub(crate) assets: Vec<Asset>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -741,6 +758,57 @@ pub(crate) async fn keysend(
         payment_preimage: hex_str(&payment_preimage.0),
         status,
     }))
+}
+
+pub(crate) async fn list_assets(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ListAssetsResponse>, APIError> {
+    let mut assets = vec![];
+
+    let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+
+    let contract_ids = runtime.contract_ids().unwrap();
+
+    let iface = runtime
+        .iface_by_name(&TypeName::try_from("RGB20").unwrap())
+        .unwrap();
+    let iface_id = iface.iface_id();
+
+    for contract_id in contract_ids {
+        let contract = runtime.contract_iface(contract_id, iface_id).unwrap();
+
+        let timestamp = if let Ok(created) = contract.global("created") {
+            match &created[0] {
+                StrictVal::Tuple(fields) => match &fields[0] {
+                    StrictVal::Number(StrictNum::Int(num)) => Ok::<i64, APIError>(*num as i64),
+                    _ => Err(APIError::Unexpected),
+                },
+                _ => Err(APIError::Unexpected),
+            }
+        } else {
+            return Err(APIError::Unexpected);
+        }?;
+        let iface_rgb20 = Rgb20::from(contract);
+        let spec = iface_rgb20.spec();
+        let ticker = spec.ticker().to_string();
+        let name = spec.name().to_string();
+        let precision: u8 = spec.precision.into();
+        let issued_supply: u64 = iface_rgb20.total_issued_supply().into();
+
+        assets.push(Asset {
+            asset_id: contract_id.to_string(),
+            ticker,
+            name,
+            precision,
+            issued_supply,
+            timestamp,
+        })
+    }
+
+    drop(runtime);
+    drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+
+    Ok(Json(ListAssetsResponse { assets }))
 }
 
 pub(crate) async fn list_channels(

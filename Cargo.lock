@@ -2188,6 +2188,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "strict_encoding",
+ "strict_types",
  "thiserror",
  "time 0.3.23",
  "tokio",

@@ -198,6 +198,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KeysendResponse'
+  /listassets:
+    get:
+      tags:
+        - RGB
+      summary: List assets
+      description: List the node's RGB assets
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAssetsResponse'
   /listchannels:
     get:
       tags:
@@ -418,6 +431,27 @@ components:
         address:
           type: string
           example: bcrt1qnc5y6j6dmejrkwy93farhvpezk0lf46gk7aecs
+    Asset:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        precision:
+          type: integer
+          example: 0
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
     AssetBalanceRequest:
       type: object
       properties:
@@ -623,6 +657,13 @@ components:
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
         status:
           $ref: '#/components/schemas/HTLCStatus'
+    ListAssetsResponse:
+      type: object
+      properties:
+        assets:
+          type: array
+          items:
+              $ref: '#/components/schemas/Asset'
     ListChannelsResponse:
       type: object
       properties:
