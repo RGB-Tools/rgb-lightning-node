@@ -149,6 +149,7 @@ The node currently exposes the following APIs:
 - `/closechannel` (POST)
 - `/connectpeer` (POST)
 - `/createutxos` (POST)
+- `/decodelninvoice` (POST)
 - `/disconnectpeer` (POST)
 - `/invoicestatus` (POST)
 - `/issueasset` (POST)

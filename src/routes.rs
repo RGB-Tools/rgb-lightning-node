@@ -47,7 +47,7 @@ use std::{
     process::{id, Command},
     str::FromStr,
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use strict_encoding::{FieldName, TypeName};
 
@@ -95,6 +95,14 @@ pub(crate) struct AssetBalanceResponse {
     pub(crate) amount: u64,
 }
 
+#[derive(Deserialize, Serialize)]
+pub enum BitcoinNetwork {
+    Mainnet,
+    Testnet,
+    Signet,
+    Regtest,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Channel {
     pub(crate) channel_id: String,
@@ -124,6 +132,24 @@ pub(crate) struct CloseChannelRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ConnectPeerRequest {
     pub(crate) peer_pubkey_and_addr: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeLNInvoiceRequest {
+    pub(crate) invoice: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeLNInvoiceResponse {
+    pub(crate) amt_msat: Option<u64>,
+    pub(crate) expiry_sec: u64,
+    pub(crate) timestamp: u64,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) asset_amount: Option<u64>,
+    pub(crate) payment_hash: String,
+    pub(crate) payment_secret: String,
+    pub(crate) payee_pubkey: Option<String>,
+    pub(crate) network: BitcoinNetwork,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -482,6 +508,38 @@ pub(crate) async fn create_utxos(
     Ok(Json(EmptyResponse {}))
 }
 
+pub(crate) async fn decode_ln_invoice(
+    WithRejection(Json(payload), _): WithRejection<Json<DecodeLNInvoiceRequest>, APIError>,
+) -> Result<Json<DecodeLNInvoiceResponse>, APIError> {
+    let invoice_str = payload.invoice;
+
+    let invoice = match Invoice::from_str(&invoice_str) {
+        Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
+        Ok(v) => v,
+    };
+
+    Ok(Json(DecodeLNInvoiceResponse {
+        amt_msat: invoice.amount_milli_satoshis(),
+        expiry_sec: invoice.expiry_time().as_secs(),
+        timestamp: invoice
+            .timestamp()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        asset_id: invoice.rgb_contract_id().map(|c| c.to_string()),
+        asset_amount: invoice.rgb_amount(),
+        payment_hash: hex_str(&invoice.payment_hash().into_inner()),
+        payment_secret: hex_str(&invoice.payment_secret().0),
+        payee_pubkey: invoice.payee_pub_key().map(|p| p.to_string()),
+        network: match invoice.network() {
+            Network::Bitcoin => BitcoinNetwork::Mainnet,
+            Network::Testnet => BitcoinNetwork::Testnet,
+            Network::Regtest => BitcoinNetwork::Regtest,
+            Network::Signet => BitcoinNetwork::Signet,
+        },
+    }))
+}
+
 pub(crate) async fn disconnect_peer(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<DisconnectPeerRequest>, APIError>,
@@ -602,7 +660,8 @@ pub(crate) async fn issue_asset(
 
     let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
     let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
-    let contract_id = runtime.issue_contract(amount, outpoint, ticker, name, precision, &mut resolver);
+    let contract_id =
+        runtime.issue_contract(amount, outpoint, ticker, name, precision, &mut resolver);
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 
@@ -1013,8 +1072,7 @@ pub(crate) async fn refresh_transfers(
         let mut minimal_contract = transfer.clone().into_contract();
         minimal_contract.bundles = none!();
         minimal_contract.terminals = none!();
-        let minimal_contract_validated = match minimal_contract.clone().validate(&mut resolver)
-        {
+        let minimal_contract_validated = match minimal_contract.clone().validate(&mut resolver) {
             Ok(consignment) => consignment,
             Err(consignment) => consignment,
         };
@@ -1022,9 +1080,7 @@ pub(crate) async fn refresh_transfers(
             .import_contract(minimal_contract_validated, &mut resolver)
             .expect("failure importing issued contract");
 
-        let validated_transfer = transfer
-            .validate(&mut resolver)
-            .expect("invalid contract");
+        let validated_transfer = transfer.validate(&mut resolver).expect("invalid contract");
         let status = runtime
             .accept_transfer(validated_transfer, &mut resolver, false)
             .expect("valid transfer");

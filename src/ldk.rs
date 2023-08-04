@@ -872,9 +872,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 .expect("successful consignment load");
             let transfer: RgbTransfer = funding_consignment_bindle.unbindle();
 
-            let validated_transfer = transfer
-                .validate(&mut resolver)
-                .expect("invalid contract");
+            let validated_transfer = transfer.validate(&mut resolver).expect("invalid contract");
             let _status = runtime
                 .accept_transfer(validated_transfer, &mut resolver, false)
                 .expect("valid consignment");

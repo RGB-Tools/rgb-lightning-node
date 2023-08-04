@@ -108,6 +108,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /decodelninvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Decode a LN invoice
+      description: Decode the provided LN invoice string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecodeLNInvoiceRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecodeLNInvoiceResponse'
   /disconnectpeer:
     post:
       tags:
@@ -412,6 +430,14 @@ components:
         amount:
           type: integer
           example: 777
+    BitcoinNetwork:
+      type: string
+      example: Regtest
+      enum:
+        - Mainnet
+        - Testnet
+        - Signet
+        - Regtest
     Channel:
       type: object
       properties:
@@ -478,6 +504,41 @@ components:
         peer_pubkey_and_addr:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d@localhost:9736
+    DecodeLNInvoiceRequest:
+      type: object
+      properties:
+        invoice:
+          type: string
+          example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
+    DecodeLNInvoiceResponse:
+      type: object
+      properties:
+        amt_msat:
+          type: integer
+          example: 3000000
+        expiry_sec:
+          type: integer
+          example: 420
+        timestamp:
+          type: integer
+          example: 1691160659
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        asset_amount:
+          type: integer
+          example: 42
+        payment_hash:
+          type: string
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
+        payment_secret:
+          type: string
+          example: f9fa239a283a72fa351ec6d0d6fdb16f5e59a64cb10e64add0b57123855ff592
+        payee_pubkey:
+          type: string
+          example: 0343851df9e0e8aff0c10b3498ce723ff4c9b4a855e6c8819adcafbbb3e24ea2af
+        network:
+          $ref: '#/components/schemas/BitcoinNetwork'
     DisconnectPeerRequest:
       type: object
       properties:
@@ -504,7 +565,7 @@ components:
       properties:
         invoice:
           type: string
-          example: lnbcrt30u1pjv3wjtdqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qv7jtdvwf3f09a6hv08qypn2r508g6t2amxtuqc47led7aaa9q60jpp5u2tue8wlxkcytq6rtjzwmpc6lv8tz8d7zsq0ve8yz7cknvg4h2kqsp5s3nxjaphphhpr0e5juzvdwamgqcrdq32swerlk5j85jzsgrkrmcs9qyysgqcqpcxqzpuvf9jzfuec6s0vzthpm9a437fl4x5jk3g3ljl8ve243yh0jq0uspnad7keugzakpck238ls3e6yhaqaqva9muu6ptjkr6nsfhs2jxgxqqst3hdk
+          example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
     InvoiceStatusResponse:
       type: object
       properties:
@@ -610,7 +671,7 @@ components:
       properties:
         invoice:
           type: string
-          example: lnbcrt30u1pjv3wjtdqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qv7jtdvwf3f09a6hv08qypn2r508g6t2amxtuqc47led7aaa9q60jpp5u2tue8wlxkcytq6rtjzwmpc6lv8tz8d7zsq0ve8yz7cknvg4h2kqsp5s3nxjaphphhpr0e5juzvdwamgqcrdq32swerlk5j85jzsgrkrmcs9qyysgqcqpcxqzpuvf9jzfuec6s0vzthpm9a437fl4x5jk3g3ljl8ve243yh0jq0uspnad7keugzakpck238ls3e6yhaqaqva9muu6ptjkr6nsfhs2jxgxqqst3hdk
+          example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
     NodeInfoResponse:
       type: object
       properties:
@@ -718,7 +779,7 @@ components:
       properties:
         invoice:
           type: string
-          example: lnbcrt30u1pjv3wjtdqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qv7jtdvwf3f09a6hv08qypn2r508g6t2amxtuqc47led7aaa9q60jpp5u2tue8wlxkcytq6rtjzwmpc6lv8tz8d7zsq0ve8yz7cknvg4h2kqsp5s3nxjaphphhpr0e5juzvdwamgqcrdq32swerlk5j85jzsgrkrmcs9qyysgqcqpcxqzpuvf9jzfuec6s0vzthpm9a437fl4x5jk3g3ljl8ve243yh0jq0uspnad7keugzakpck238ls3e6yhaqaqva9muu6ptjkr6nsfhs2jxgxqqst3hdk
+          example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
     SendPaymentResponse:
       type: object
       properties:

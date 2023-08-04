@@ -9,7 +9,7 @@ use bp::seals::txout::blind::SingleBlindSeal;
 use bp::seals::txout::CloseMethod;
 use bp::Outpoint as RgbOutpoint;
 use lightning::rgb_utils::{RgbUtxo, RgbUtxos, STATIC_BLINDING};
-use rgb::{Runtime, BlockchainResolver};
+use rgb::{BlockchainResolver, Runtime};
 use rgb_core::{Operation, Opout};
 use rgb_schemata::{nia_rgb20, nia_schema};
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
