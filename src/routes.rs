@@ -1238,7 +1238,6 @@ pub(crate) async fn send_asset(
         .map_err(|_| APIError::InvalidBlindedUTXO(blinded_utxo.clone()))?;
 
     let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-    let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
     let asset_owned_values = {
         let wallet = state.get_wallet();
@@ -1366,13 +1365,6 @@ pub(crate) async fn send_asset(
     let tx = psbt.extract_tx();
     broadcast_tx(&tx, state.electrum_url.clone());
 
-    let transfer = consignment
-        .unbindle()
-        .validate(&mut resolver)
-        .unwrap_or_else(|c| c);
-    let _status = runtime
-        .accept_transfer(transfer, &mut resolver, false)
-        .expect("valid transfer");
     drop(runtime);
     drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
 

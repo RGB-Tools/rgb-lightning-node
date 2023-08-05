@@ -25,7 +25,6 @@ use lightning::ln::channelmanager::{
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
 use lightning::ln::{PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::SimpleArcOnionMessenger;
-use lightning::rgb_utils::get_resolver;
 use lightning::rgb_utils::{
     drop_rgb_runtime, get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, RgbUtxo,
     RgbUtxos, STATIC_BLINDING,
@@ -47,11 +46,10 @@ use reqwest::Client as RestClient;
 use rgb::validation::ConsignmentApi;
 use rgb_core::Assign;
 use rgb_schemata::{nia_rgb20, nia_schema};
-use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
+use rgbstd::containers::{BuilderSeal, Transfer as RgbTransfer};
 use rgbstd::contract::GraphSeal;
 use rgbstd::interface::{rgb20, TypedState};
 use rgbstd::persistence::{Inventory, Stash};
-use rgbstd::validation::Validity;
 use rgbstd::{Chain, Txid as RgbTxid};
 use seals::txout::blind::SingleBlindSeal;
 use std::collections::hash_map::Entry;
@@ -536,7 +534,6 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
             let output_descriptors = &outputs.iter().collect::<Vec<_>>();
             let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
             let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-            let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
 
             for outp in output_descriptors {
                 let outpoint = match outp {
@@ -592,19 +589,6 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                     .expect("valid transfer");
                 let transfer: RgbTransfer = consignment.clone().unbindle();
 
-                let validated_transfer = transfer
-                    .clone()
-                    .validate(&mut resolver)
-                    .expect("invalid contract");
-                let status = runtime
-                    .accept_transfer(validated_transfer.clone(), &mut resolver, false)
-                    .expect("valid transfer");
-                let validity = status.validity();
-                if !matches!(validity, Validity::Valid) {
-                    tracing::error!("ERROR: error consuming transfer");
-                    continue;
-                }
-
                 let wallet = state.get_wallet();
                 let address = wallet
                     .get_address(AddressIndex::New)
@@ -648,7 +632,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                     .expect("valid assignment");
                 let mut beneficiaries = vec![];
 
-                let (tx, vout, consignment) = match outp {
+                let (tx, vout) = match outp {
                     SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
                         let signer = state.keys_manager.derive_channel_keys(
                             descriptor.channel_value_satoshis,
@@ -677,7 +661,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (mut psbt, consignment) = runtime.send_rgb(
+                        let (mut psbt, _consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -688,7 +672,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .sign(&mut psbt, SignOptions::default())
                             .expect("able to sign");
 
-                        (psbt.extract_tx(), vout, consignment)
+                        (psbt.extract_tx(), vout)
                     }
                     SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
                         let signer = state.keys_manager.derive_channel_keys(
@@ -735,7 +719,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (psbt, consignment) = runtime.send_rgb(
+                        let (psbt, _consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -749,7 +733,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .expect("possible dynamic sign");
                         spend_tx.input[input_idx].witness = Witness::from_vec(witness_vec);
 
-                        (spend_tx, vout, consignment)
+                        (spend_tx, vout)
                     }
                     SpendableOutputDescriptor::StaticOutput {
                         outpoint: _,
@@ -792,7 +776,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (mut psbt, consignment) = runtime.send_rgb(
+                        let (mut psbt, _consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -803,7 +787,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .sign(&mut psbt, SignOptions::default())
                             .expect("able to sign");
 
-                        (psbt.extract_tx(), vout, consignment)
+                        (psbt.extract_tx(), vout)
                     }
                 };
 
@@ -824,15 +808,6 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 });
                 let serialized_utxos = serde_json::to_string(&rgb_utxos).expect("valid rgb utxos");
                 fs::write(rgb_utxos_path, serialized_utxos).expect("able to write rgb utxos file");
-
-                let transfer: RgbTransfer = consignment.unbindle();
-                let validated_transfer = transfer
-                    .clone()
-                    .validate(&mut resolver)
-                    .expect("invalid contract");
-                let _status = runtime
-                    .accept_transfer(validated_transfer, &mut resolver, false)
-                    .expect("valid consignment");
             }
             drop(runtime);
             drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
@@ -859,26 +834,6 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 hex_str(channel_id),
                 hex_str(&counterparty_node_id.serialize()),
             );
-            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
-            let mut resolver = get_resolver(&PathBuf::from(state.ldk_data_dir.clone()));
-
-            let funding_consignment_path = format!(
-                "{}/consignment_{}",
-                state.ldk_data_dir,
-                hex::encode(channel_id)
-            );
-
-            let funding_consignment_bindle = Bindle::<RgbTransfer>::load(funding_consignment_path)
-                .expect("successful consignment load");
-            let transfer: RgbTransfer = funding_consignment_bindle.unbindle();
-
-            let validated_transfer = transfer.validate(&mut resolver).expect("invalid contract");
-            let _status = runtime
-                .accept_transfer(validated_transfer, &mut resolver, false)
-                .expect("valid consignment");
-
-            drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
         }
         Event::ChannelClosed {
             channel_id,
