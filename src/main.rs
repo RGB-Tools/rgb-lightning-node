@@ -31,7 +31,7 @@ use crate::ldk::{start_ldk, stop_ldk};
 use crate::routes::{
     address, asset_balance, close_channel, connect_peer, create_utxos, decode_ln_invoice,
     disconnect_peer, invoice_status, issue_asset, keysend, list_assets, list_channels,
-    list_payments, list_peers, list_unspents, ln_invoice, node_info, open_channel,
+    list_payments, list_peers, list_transfers, list_unspents, ln_invoice, node_info, open_channel,
     refresh_transfers, rgb_invoice, send_asset, send_onion_message, send_payment, shutdown,
     sign_message,
 };
@@ -95,6 +95,7 @@ pub(crate) async fn app(
         .route("/listchannels", get(list_channels))
         .route("/listpayments", get(list_payments))
         .route("/listpeers", get(list_peers))
+        .route("/listtransfers", post(list_transfers))
         .route("/listunspents", get(list_unspents))
         .route("/lninvoice", post(ln_invoice))
         .route("/nodeinfo", get(node_info))

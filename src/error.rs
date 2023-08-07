@@ -20,6 +20,9 @@ pub enum APIError {
     #[error("Failed to create invoice: {0}")]
     FailedInvoiceCreation(String),
 
+    #[error("Failed to issue asset: {0}")]
+    FailedIssuingAsset(String),
+
     #[error("Failed to sign message: {0}")]
     FailedMessageSigning(String),
 
@@ -31,9 +34,6 @@ pub enum APIError {
 
     #[error("Failed to disconnect to peer: {0}")]
     FailedPeerDisconnection(String),
-
-    #[error("Failed to post consignment")]
-    FailedPostingConsignment,
 
     #[error("Failed to send onion message: {0}")]
     FailedSendingOnionMessage(String),
@@ -113,11 +113,11 @@ impl IntoResponse for APIError {
             }
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
+            | APIError::FailedIssuingAsset(_)
             | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
             | APIError::FailedPeerConnection
             | APIError::FailedPeerDisconnection(_)
-            | APIError::FailedPostingConsignment
             | APIError::FailedSendingOnionMessage(_)
             | APIError::IO(_)
             | APIError::Proxy(_)

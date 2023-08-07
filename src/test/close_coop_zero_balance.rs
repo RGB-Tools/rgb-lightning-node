@@ -23,29 +23,21 @@ async fn close_coop_zero_balance() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    stop_mining();
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 1000, &asset_id).await;
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 0);
 
-    stop_mining();
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if asset_balance(node1_addr, &asset_id).await == 1000
-            && asset_balance(node2_addr, &asset_id).await == 0
-        {
-            break;
-        }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
-            panic!("closing TX is not becoming spendable")
-        }
-    }
+
+    wait_for_balance(node1_addr, &asset_id, 1000).await;
+    assert_eq!(asset_balance(node2_addr, &asset_id).await, 0);
 
     let blinded_utxo = rgb_invoice(node2_addr).await;
     send_asset(node1_addr, &asset_id, 700, blinded_utxo).await;
     mine(false);
     refresh_transfers(node2_addr).await;
+    refresh_transfers(node2_addr).await;
+    refresh_transfers(node1_addr).await;
+
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 300);
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 700);
 }

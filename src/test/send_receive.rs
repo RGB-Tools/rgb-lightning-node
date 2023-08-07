@@ -23,21 +23,27 @@ async fn send_receive() {
     let blinded_utxo = rgb_invoice(node2_addr).await;
     send_asset(node1_addr, &asset_id, 400, blinded_utxo).await;
     mine(false);
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 600);
     refresh_transfers(node2_addr).await;
+    refresh_transfers(node2_addr).await;
+    refresh_transfers(node1_addr).await;
+    assert_eq!(asset_balance(node1_addr, &asset_id).await, 600);
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 400);
 
     let blinded_utxo = rgb_invoice(node1_addr).await;
     send_asset(node2_addr, &asset_id, 300, blinded_utxo).await;
     mine(false);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 100);
     refresh_transfers(node1_addr).await;
+    refresh_transfers(node1_addr).await;
+    refresh_transfers(node2_addr).await;
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
+    assert_eq!(asset_balance(node2_addr, &asset_id).await, 100);
 
     let blinded_utxo = rgb_invoice(node2_addr).await;
     send_asset(node1_addr, &asset_id, 200, blinded_utxo).await;
     mine(false);
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 700);
     refresh_transfers(node2_addr).await;
+    refresh_transfers(node2_addr).await;
+    refresh_transfers(node1_addr).await;
+    assert_eq!(asset_balance(node1_addr, &asset_id).await, 700);
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 300);
 }

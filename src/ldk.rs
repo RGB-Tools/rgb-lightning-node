@@ -1,15 +1,16 @@
+use amplify::map;
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bdk::bitcoin::{OutPoint, Txid};
-use bdk::wallet::AddressIndex;
+use bdk::bitcoin::{psbt::Psbt as BdkPsbt, OutPoint, Script as BdkScript};
+use bdk::keys::bip39::Mnemonic;
+use bdk::keys::{DerivableKey, ExtendedKey};
 use bdk::{FeeRate, SignOptions};
 use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::hashes::hex::FromHex;
 use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::{ChildNumber, ExtendedPrivKey};
 use bitcoin::{BlockHash, PackedLockTime, Script, Sequence, TxIn, TxOut, Witness};
+use bitcoin_30::{Address, ScriptBuf};
 use bitcoin_bech32::WitnessProgram;
-use bp::seals::txout::CloseMethod;
 use lightning::chain;
 use lightning::chain::keysinterface::{
     DelayedPaymentOutputDescriptor, EntropySource, InMemorySigner, KeysManager,
@@ -26,8 +27,7 @@ use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, Simple
 use lightning::ln::{PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::SimpleArcOnionMessenger;
 use lightning::rgb_utils::{
-    drop_rgb_runtime, get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, RgbUtxo,
-    RgbUtxos, STATIC_BLINDING,
+    get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, STATIC_BLINDING,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -43,21 +43,15 @@ use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::FilesystemPersister;
 use rand::{thread_rng, Rng};
 use reqwest::Client as RestClient;
-use rgb::validation::ConsignmentApi;
-use rgb_core::Assign;
-use rgb_schemata::{nia_rgb20, nia_schema};
-use rgbstd::containers::{BuilderSeal, Transfer as RgbTransfer};
-use rgbstd::contract::GraphSeal;
-use rgbstd::interface::{rgb20, TypedState};
-use rgbstd::persistence::{Inventory, Stash};
-use rgbstd::{Chain, Txid as RgbTxid};
-use seals::txout::blind::SingleBlindSeal;
+use rgb_lib::wallet::{DatabaseType, Recipient, RecipientData, Wallet, WalletData};
+use rgb_lib::{generate_keys, BitcoinNetwork};
+use rgbstd::containers::{Bindle, Transfer as RgbTransfer};
+use rgbstd::persistence::Inventory;
+use rgbstd::Txid as RgbTxid;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fs;
-use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,17 +63,17 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::args::LdkUserInfo;
-use crate::bdk::{broadcast_tx, get_bdk_wallet, get_bdk_wallet_seckey, sync_wallet};
+use crate::bdk::{broadcast_tx, get_bdk_wallet_seckey, sync_wallet};
 use crate::bitcoind::BitcoindClient;
 use crate::disk;
 use crate::disk::FilesystemLogger;
 use crate::error::AppError;
 use crate::proxy::post_consignment;
-use crate::rgb::{get_asset_owned_values, update_transition_beneficiary, RgbUtilities};
+use crate::rgb::{update_transition_beneficiary, RgbUtilities};
 use crate::routes::HTLCStatus;
 use crate::utils::{do_connect_peer, hex_str, AppState};
 
-pub(crate) const FEE_RATE: f32 = 10.0;
+pub(crate) const FEE_RATE: f32 = 7.0;
 const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 const PROXY_ENDPOINT_REGTEST: &str = "rpc://127.0.0.1:3000/json-rpc";
@@ -87,10 +81,8 @@ const PROXY_URL_REGTEST: &str = "http://127.0.0.1:3000/json-rpc";
 const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/json-rpc";
 const PROXY_URL_TESTNET: &str = "https://proxy.iriswallet.com/json-rpc";
 const PROXY_TIMEOUT: u8 = 90;
-pub(crate) const UTXO_SIZE_SAT: u64 = 32000;
-pub(crate) const MAX_LEN_NAME: usize = 256;
-pub(crate) const MAX_LEN_TICKER: usize = 8;
-pub(crate) const MAX_PRECISION: u8 = 18;
+pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
+pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
 pub(crate) struct LdkBackgroundServices {
     stop_listen_connect: Arc<AtomicBool>,
@@ -153,171 +145,77 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
             )
             .expect("Lightning funding tx should always be to a SegWit output")
             .to_scriptpubkey();
-            let script = Script::from_byte_iter(addr.into_iter().map(Ok)).expect("valid script");
+            let script_buf = ScriptBuf::from_bytes(addr);
 
             let (rgb_info, _) =
                 get_rgb_channel_info(&temporary_channel_id, &PathBuf::from(&state.ldk_data_dir));
 
-            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+            let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
+            let asset_id = rgb_info.contract_id.to_string();
 
-            let (funding_tx, funding_txid, consignment_path) = {
-                let wallet = state.get_wallet();
-                let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
-                let asset_owned_values = get_asset_owned_values(
-                    rgb_info.contract_id,
-                    &runtime,
-                    &wallet,
-                    state.electrum_url.clone(),
-                )
-                .expect("known contract");
-
-                let mut asset_transition_builder = runtime
-                    .transition_builder(
-                        rgb_info.contract_id,
-                        TypeName::try_from("RGB20").unwrap(),
-                        None::<&str>,
-                    )
-                    .expect("ok");
-                let assignment_id = asset_transition_builder
-                    .assignments_type(&FieldName::from("beneficiary"))
-                    .expect("valid assignment");
-                let mut beneficiaries = vec![];
-
-                let mut rgb_inputs: Vec<OutPoint> = vec![];
-                let mut input_amount: u64 = 0;
-                for (_opout, (outpoint, amount)) in asset_owned_values {
-                    if input_amount >= channel_rgb_amount {
-                        break;
-                    }
-                    rgb_inputs.push(OutPoint {
-                        txid: Txid::from_str(&outpoint.txid.to_string()).unwrap(),
-                        vout: outpoint.vout.into_u32(),
-                    });
-                    input_amount += amount;
-                }
-                let rgb_change_amount = input_amount - channel_rgb_amount;
-
-                let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir);
-                let serialized_utxos =
-                    fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
-                let mut rgb_utxos: RgbUtxos =
-                    serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
-                let unspendable_utxos: Vec<OutPoint> = rgb_utxos
-                    .utxos
-                    .iter()
-                    .filter(|u| !rgb_inputs.contains(&u.outpoint) || !u.colored)
-                    .map(|u| u.outpoint)
-                    .collect();
-                let mut builder = wallet.build_tx();
-                builder
-                    .add_utxos(&rgb_inputs)
-                    .expect("valid utxos")
-                    .unspendable(unspendable_utxos)
-                    .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
-                    .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
-                    .add_recipient(script, channel_value_satoshis)
-                    .drain_to(
-                        wallet
-                            .get_address(AddressIndex::New)
-                            .expect("able to get new address")
-                            .address
-                            .script_pubkey(),
-                    )
-                    .add_data(&[1]);
-
-                let funding_seal = BuilderSeal::Revealed(GraphSeal::with_vout(
-                    CloseMethod::OpretFirst,
-                    0,
-                    STATIC_BLINDING,
-                ));
-                beneficiaries.push(funding_seal);
-                asset_transition_builder = asset_transition_builder
-                    .add_raw_state(
-                        assignment_id,
-                        funding_seal,
-                        TypedState::Amount(channel_rgb_amount),
-                    )
-                    .expect("ok");
-
-                let change_vout = 2;
-                if rgb_change_amount > 0 {
-                    let change_seal = BuilderSeal::Revealed(GraphSeal::new_vout(
-                        CloseMethod::OpretFirst,
-                        change_vout,
-                    ));
-                    beneficiaries.push(change_seal);
-                    asset_transition_builder = asset_transition_builder
-                        .add_raw_state(
-                            assignment_id,
-                            change_seal,
-                            TypedState::Amount(rgb_change_amount),
-                        )
-                        .expect("ok");
-                }
-
-                let psbt = builder.finish().expect("valid psbt finish").0;
-                let (mut psbt, consignment) = runtime.send_rgb(
-                    rgb_info.contract_id,
-                    psbt,
-                    asset_transition_builder,
-                    beneficiaries,
-                );
-
-                // Sign the final funding transaction
-                wallet
-                    .sign(&mut psbt, SignOptions::default())
-                    .expect("able to sign");
-
-                let funding_tx = psbt.extract_tx();
-                let funding_txid = funding_tx.txid();
-
-                let consignment_path = format!("{}/consignment_{funding_txid}", state.ldk_data_dir);
-                consignment
-                    .save(&consignment_path)
-                    .expect("successful save");
-
-                if rgb_change_amount > 0 {
-                    let rgb_change_utxo = RgbUtxo {
-                        outpoint: OutPoint {
-                            txid: funding_txid,
-                            vout: change_vout,
-                        },
-                        colored: true,
-                    };
-                    rgb_utxos.utxos.push(rgb_change_utxo);
-                    let serialized_utxos =
-                        serde_json::to_string(&rgb_utxos).expect("valid rgb utxos");
-                    fs::write(rgb_utxos_path, serialized_utxos)
-                        .expect("able to write rgb utxos file");
-                }
-                let funding_consignment_path = format!(
-                    "{}/consignment_{}",
-                    state.ldk_data_dir,
-                    hex::encode(temporary_channel_id)
-                );
-                consignment
-                    .save(funding_consignment_path)
-                    .expect("successful save");
-
-                (funding_tx, funding_txid, consignment_path)
+            let recipient_map = map! {
+                asset_id.clone() => vec![Recipient {
+                    recipient_data: RecipientData::WitnessData {
+                        script_buf,
+                        amount_sat: channel_value_satoshis,
+                        blinding: Some(STATIC_BLINDING),
+                    },
+                    amount: channel_rgb_amount,
+                    transport_endpoints: vec![state.proxy_endpoint.clone()]
+                }]
             };
 
-            drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+            let state_copy = state.clone();
+            let online_copy = state.rgb_online.clone();
+            let unsigned_psbt = tokio::task::spawn_blocking(move || {
+                state_copy
+                    .get_rgb_wallet()
+                    .send_begin(
+                        online_copy,
+                        recipient_map,
+                        true,
+                        FEE_RATE,
+                        MIN_CHANNEL_CONFIRMATIONS,
+                    )
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+
+            let signed_psbt = state.get_rgb_wallet().sign_psbt(unsigned_psbt).unwrap();
+
+            let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
+
+            let funding_tx = psbt.clone().extract_tx();
+            let funding_txid = funding_tx.txid().to_string();
+
+            let psbt_path = format!("{}/psbt_{funding_txid}", state.ldk_data_dir);
+            fs::write(psbt_path, psbt.to_string()).unwrap();
+
+            let consignment_path = state
+                .get_rgb_wallet()
+                .get_wallet_dir()
+                .join("transfers")
+                .join(funding_txid.clone())
+                .join(asset_id)
+                .join("consignment_out");
             let proxy_ref = (*state.proxy_client).clone();
             let proxy_url_copy = state.proxy_url.clone();
-            let channel_manager_copy = state.channel_manager.clone();
             let res = post_consignment(
                 proxy_ref,
                 &proxy_url_copy,
-                funding_txid.to_string(),
-                consignment_path.into(),
+                funding_txid.clone(),
+                consignment_path,
+                funding_txid,
+                Some(0),
             )
             .await;
             if res.is_err() || res.unwrap().result.is_none() {
                 tracing::error!("Cannot post consignment");
                 return;
             }
+
+            let channel_manager_copy = state.channel_manager.clone();
 
             // Give the funding transaction back to LDK for opening the channel.
             if channel_manager_copy
@@ -533,7 +431,9 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
             let secp_ctx = Secp256k1::new();
             let output_descriptors = &outputs.iter().collect::<Vec<_>>();
             let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
-            let mut runtime = get_rgb_runtime(&PathBuf::from(state.ldk_data_dir.clone()));
+
+            let mut vanilla_output_descriptors = vec![];
+            let mut need_rgb_refresh = false;
 
             for outp in output_descriptors {
                 let outpoint = match outp {
@@ -553,74 +453,51 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 let witness_txid = RgbTxid::from_str(&txid.to_string()).unwrap();
 
                 let transfer_info_path = format!("{}/{txid}_transfer_info", state.ldk_data_dir);
+                if !Path::new(&transfer_info_path).exists() {
+                    vanilla_output_descriptors.push(*outp);
+                    continue;
+                };
+
                 let transfer_info = read_rgb_transfer_info(&transfer_info_path);
+                if transfer_info.rgb_amount == 0 {
+                    vanilla_output_descriptors.push(*outp);
+                    continue;
+                }
+
+                need_rgb_refresh = true;
+
                 let contract_id = transfer_info.contract_id;
 
+                let receive_data = state
+                    .get_rgb_wallet()
+                    .witness_receive(None, None, None, vec![state.proxy_endpoint.clone()], 0)
+                    .unwrap();
+                let script_buf_str = receive_data.recipient_id;
+                let script_buf = ScriptBuf::from_hex(&script_buf_str).unwrap();
+                let bdk_script = BdkScript::from(script_buf.clone().into_bytes());
+
+                let mut runtime = get_rgb_runtime(Path::new(&state.ldk_data_dir));
+
                 runtime
+                    .runtime
                     .consume_anchor(transfer_info.anchor)
                     .expect("should consume anchor");
                 for (id, bundle) in transfer_info.bundles {
                     runtime
+                        .runtime
                         .consume_bundle(id, bundle, witness_txid)
                         .expect("should consume bundle");
                 }
-                let seal_holder = BuilderSeal::Revealed(GraphSeal::with_vout(
-                    CloseMethod::OpretFirst,
-                    transfer_info.vout,
-                    STATIC_BLINDING,
-                ));
-                let seal_counterparty = BuilderSeal::Revealed(GraphSeal::with_vout(
-                    CloseMethod::OpretFirst,
-                    transfer_info.vout ^ 1,
-                    STATIC_BLINDING,
-                ));
-                let beneficiaries = vec![seal_holder, seal_counterparty];
-                let beneficiaries: Vec<BuilderSeal<SingleBlindSeal>> = beneficiaries
-                    .into_iter()
-                    .map(|b| match b {
-                        BuilderSeal::Revealed(graph_seal) => {
-                            BuilderSeal::Revealed(graph_seal.resolve(witness_txid))
-                        }
-                        BuilderSeal::Concealed(seal) => BuilderSeal::Concealed(seal),
-                    })
-                    .collect();
-                let consignment = runtime
-                    .transfer(contract_id, beneficiaries)
-                    .expect("valid transfer");
-                let transfer: RgbTransfer = consignment.clone().unbindle();
 
-                let wallet = state.get_wallet();
-                let address = wallet
-                    .get_address(AddressIndex::New)
-                    .expect("valid address")
-                    .address;
                 let rgb_inputs: Vec<OutPoint> = vec![OutPoint {
                     txid: outpoint.txid,
                     vout: outpoint.index as u32,
                 }];
 
-                let bundle = &transfer
-                    .anchored_bundles()
-                    .find(|ab| ab.anchor.txid.to_string() == outpoint.txid.to_string())
-                    .expect("found bundle for closing tx")
-                    .bundle;
-
-                let mut amt_rgb = 0;
-                for bundle_item in bundle.values() {
-                    if let Some(transition) = &bundle_item.transition {
-                        for assignment in transition.assignments.values() {
-                            for fungible_assignment in assignment.as_fungible() {
-                                if let Assign::Revealed { seal, state } = fungible_assignment {
-                                    if seal.vout == (outpoint.index as u32).into() {
-                                        amt_rgb += state.value.as_u64();
-                                    }
-                                };
-                            }
-                        }
-                    }
-                }
+                let amt_rgb = transfer_info.rgb_amount;
 
                 let asset_transition_builder = runtime
+                    .runtime
                     .transition_builder(
                         contract_id,
                         TypeName::try_from("RGB20").unwrap(),
@@ -632,26 +509,24 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                     .expect("valid assignment");
                 let mut beneficiaries = vec![];
 
-                let (tx, vout) = match outp {
+                let (tx, vout, consignment) = match outp {
                     SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
                         let signer = state.keys_manager.derive_channel_keys(
                             descriptor.channel_value_satoshis,
                             &descriptor.channel_keys_id,
                         );
-                        let intermediate_wallet = get_bdk_wallet_seckey(
-                            format!("{}/intermediate", state.ldk_data_dir),
-                            state.network,
-                            signer.payment_key,
-                        );
+                        let intermediate_wallet =
+                            get_bdk_wallet_seckey(state.network, signer.payment_key);
                         sync_wallet(&intermediate_wallet, state.electrum_url.clone());
                         let mut builder = intermediate_wallet.build_tx();
                         builder
                             .add_utxos(&rgb_inputs)
                             .expect("valid utxos")
-                            .add_data(&[1])
                             .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
                             .manually_selected_only()
-                            .drain_to(address.script_pubkey());
+                            .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
+                            .add_data(&[1])
+                            .drain_to(bdk_script);
                         let psbt = builder.finish().expect("valid psbt finish").0;
 
                         let (vout, asset_transition_builder) = update_transition_beneficiary(
@@ -661,7 +536,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (mut psbt, _consignment) = runtime.send_rgb(
+                        let (mut psbt, consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -672,7 +547,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .sign(&mut psbt, SignOptions::default())
                             .expect("able to sign");
 
-                        (psbt.extract_tx(), vout)
+                        (psbt.extract_tx(), vout, consignment)
                     }
                     SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
                         let signer = state.keys_manager.derive_channel_keys(
@@ -687,7 +562,10 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                         }];
                         let witness_weight = DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH;
                         let input_value = descriptor.output.value;
-                        let output = vec![];
+                        let output = vec![TxOut {
+                            value: 0,
+                            script_pubkey: Script::new_op_return(&[1]),
+                        }];
                         let mut spend_tx = Transaction {
                             version: 2,
                             lock_time: PackedLockTime(0),
@@ -700,14 +578,9 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                                 input_value,
                                 witness_weight,
                                 tx_feerate,
-                                address.script_pubkey(),
+                                bdk_script,
                             )
                             .expect("can add change");
-
-                        spend_tx.output.push(TxOut {
-                            value: 0,
-                            script_pubkey: Script::new_op_return(&[1]),
-                        });
 
                         let psbt = PartiallySignedTransaction::from_unsigned_tx(spend_tx.clone())
                             .expect("valid transaction");
@@ -719,7 +592,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (psbt, _consignment) = runtime.send_rgb(
+                        let (psbt, consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -733,7 +606,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .expect("possible dynamic sign");
                         spend_tx.input[input_idx].witness = Witness::from_vec(witness_vec);
 
-                        (spend_tx, vout)
+                        (spend_tx, vout, consignment)
                     }
                     SpendableOutputDescriptor::StaticOutput {
                         outpoint: _,
@@ -753,20 +626,18 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                                 ChildNumber::from_hardened_idx(derivation_idx).unwrap(),
                             )
                             .unwrap();
-                        let intermediate_wallet = get_bdk_wallet_seckey(
-                            format!("{}/intermediate", state.ldk_data_dir),
-                            state.network,
-                            secret.private_key,
-                        );
+                        let intermediate_wallet =
+                            get_bdk_wallet_seckey(state.network, secret.private_key);
                         sync_wallet(&intermediate_wallet, state.electrum_url.clone());
                         let mut builder = intermediate_wallet.build_tx();
                         builder
                             .add_utxos(&rgb_inputs)
                             .expect("valid utxos")
-                            .add_data(&[1])
                             .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
                             .manually_selected_only()
-                            .drain_to(address.script_pubkey());
+                            .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
+                            .add_data(&[1])
+                            .drain_to(bdk_script);
                         let psbt = builder.finish().expect("valid psbt finish").0;
 
                         let (vout, asset_transition_builder) = update_transition_beneficiary(
@@ -776,7 +647,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             assignment_id,
                             amt_rgb,
                         );
-                        let (mut psbt, _consignment) = runtime.send_rgb(
+                        let (mut psbt, consignment) = runtime.send_rgb(
                             contract_id,
                             psbt,
                             asset_transition_builder,
@@ -787,34 +658,72 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                             .sign(&mut psbt, SignOptions::default())
                             .expect("able to sign");
 
-                        (psbt.extract_tx(), vout)
+                        (psbt.extract_tx(), vout, consignment)
                     }
                 };
 
                 broadcast_tx(&tx, state.electrum_url.clone());
-                sync_wallet(&wallet, state.electrum_url.clone());
 
-                let rgb_utxos_path = format!("{}/rgb_utxos", state.ldk_data_dir);
-                let serialized_utxos =
-                    fs::read_to_string(&rgb_utxos_path).expect("able to read rgb utxos file");
-                let mut rgb_utxos: RgbUtxos =
-                    serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
-                rgb_utxos.utxos.push(RgbUtxo {
-                    outpoint: OutPoint {
-                        txid: tx.txid(),
-                        vout,
-                    },
-                    colored: true,
-                });
-                let serialized_utxos = serde_json::to_string(&rgb_utxos).expect("valid rgb utxos");
-                fs::write(rgb_utxos_path, serialized_utxos).expect("able to write rgb utxos file");
+                let closing_txid = tx.txid().to_string();
+                let consignment_path = format!("{}/consignment_{closing_txid}", state.ldk_data_dir);
+                consignment
+                    .save(&consignment_path)
+                    .expect("successful save");
+                let proxy_ref = (*state.proxy_client).clone();
+                let proxy_url_copy = state.proxy_url.clone();
+                let res = post_consignment(
+                    proxy_ref,
+                    &proxy_url_copy,
+                    script_buf_str,
+                    consignment_path.into(),
+                    closing_txid,
+                    Some(vout),
+                )
+                .await;
+                if res.is_err() || res.unwrap().result.is_none() {
+                    tracing::error!("Cannot post consignment");
+                    return;
+                }
             }
-            drop(runtime);
-            drop_rgb_runtime(&PathBuf::from(&state.ldk_data_dir));
+
+            if !vanilla_output_descriptors.is_empty() {
+                let address_str = state.get_rgb_wallet().get_address();
+                let address = Address::from_str(&address_str).unwrap().assume_checked();
+                let script_buf = address.script_pubkey();
+                let bdk_script = BdkScript::from(script_buf.into_bytes());
+
+                let spending_tx = state
+                    .keys_manager
+                    .spend_spendable_outputs(
+                        &vanilla_output_descriptors[..],
+                        Vec::new(),
+                        bdk_script,
+                        tx_feerate,
+                        &Secp256k1::new(),
+                    )
+                    .unwrap();
+                broadcast_tx(&spending_tx, state.electrum_url.clone());
+            }
+
+            if need_rgb_refresh {
+                tokio::task::spawn_blocking(move || {
+                    state
+                        .get_rgb_wallet()
+                        .refresh(state.rgb_online.clone(), None, vec![])
+                        .unwrap();
+                    state
+                        .get_rgb_wallet()
+                        .refresh(state.rgb_online.clone(), None, vec![])
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+            }
         }
         Event::ChannelPending {
             channel_id,
             counterparty_node_id,
+            funding_txo,
             ..
         } => {
             tracing::info!(
@@ -822,6 +731,39 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 hex_str(&channel_id),
                 hex_str(&counterparty_node_id.serialize()),
             );
+
+            let funding_txid = funding_txo.txid.to_string();
+            let psbt_path = format!("{}/psbt_{funding_txid}", state.ldk_data_dir);
+
+            if Path::new(&psbt_path).exists() {
+                let psbt_str = fs::read_to_string(psbt_path).unwrap();
+
+                let state_copy = state.clone();
+                let online_copy = state.rgb_online.clone();
+                let psbt_str_copy = psbt_str.clone();
+                let _txid = tokio::task::spawn_blocking(move || {
+                    state_copy
+                        .get_rgb_wallet()
+                        .send_end(online_copy, psbt_str_copy)
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+            } else {
+                // acceptor
+                let consignment_path = format!("{}/consignment_{funding_txid}", state.ldk_data_dir);
+                let consignment = Bindle::<RgbTransfer>::load(consignment_path)
+                    .expect("successful consignment load");
+                let contract_id = consignment.contract_id();
+                match state
+                    .get_rgb_wallet()
+                    .save_new_asset(contract_id.to_string())
+                {
+                    Ok(_) => {}
+                    Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
+                    Err(e) => panic!("Failed saving asset: {}", e),
+                }
+            }
         }
         Event::ChannelReady {
             ref channel_id,
@@ -834,6 +776,19 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 hex_str(channel_id),
                 hex_str(&counterparty_node_id.serialize()),
             );
+
+            tokio::task::spawn_blocking(move || {
+                state
+                    .get_rgb_wallet()
+                    .refresh(state.rgb_online.clone(), None, vec![])
+                    .unwrap();
+                state
+                    .get_rgb_wallet()
+                    .refresh(state.rgb_online.clone(), None, vec![])
+                    .unwrap()
+            })
+            .await
+            .unwrap();
         }
         Event::ChannelClosed {
             channel_id,
@@ -861,9 +816,6 @@ pub(crate) async fn start_ldk(
     let ldk_data_dir = format!("{}/.ldk", args.storage_dir_path);
     let ldk_data_dir_path = PathBuf::from(&ldk_data_dir);
     fs::create_dir_all(ldk_data_dir.clone()).unwrap();
-
-    let blinded_dir = ldk_data_dir_path.join("blinded_utxos");
-    fs::create_dir_all(blinded_dir).expect("successful directory creation");
 
     // ## Setup
     // Step 1: Initialize the Logger
@@ -903,37 +855,28 @@ pub(crate) async fn start_ldk(
     }
 
     // RGB setup
-    let (electrum_url, proxy_url, proxy_endpoint, rgb_network) = match args.network {
+    let (electrum_url, proxy_url, proxy_endpoint) = match args.network {
         bitcoin::Network::Testnet => (
             ELECTRUM_URL_TESTNET,
             PROXY_URL_TESTNET,
             PROXY_ENDPOINT_TESTNET,
-            Chain::Testnet3,
         ),
         bitcoin::Network::Regtest => (
             ELECTRUM_URL_REGTEST,
             PROXY_URL_REGTEST,
             PROXY_ENDPOINT_REGTEST,
-            Chain::Regtest,
         ),
         _ => {
             return Err(AppError::UnsupportedBitcoinNetwork);
         }
     };
     fs::write(format!("{ldk_data_dir}/electrum_url"), electrum_url).expect("able to write");
+    let bitcoin_network: BitcoinNetwork = args.network.into();
     fs::write(
-        format!("{ldk_data_dir}/rgb_network"),
-        rgb_network.to_string(),
+        format!("{ldk_data_dir}/bitcoin_network"),
+        bitcoin_network.to_string(),
     )
     .expect("able to write");
-    let mut runtime = get_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
-    if runtime.schema_ids().unwrap().is_empty() {
-        runtime.import_iface(rgb20()).unwrap();
-        runtime.import_schema(nia_schema()).unwrap();
-        runtime.import_iface_impl(nia_rgb20()).unwrap();
-    }
-    drop(runtime);
-    drop_rgb_runtime(&PathBuf::from(ldk_data_dir.clone()));
 
     let rest_client = RestClient::builder()
         .timeout(Duration::from_secs(PROXY_TIMEOUT as u64))
@@ -970,47 +913,42 @@ pub(crate) async fn start_ldk(
 
     // The key seed that we use to derive the node privkey (that corresponds to the node pubkey) and
     // other secret key material.
-    let keys_seed_path = format!("{}/keys_seed", ldk_data_dir.clone());
-    let keys_seed = if let Ok(seed) = fs::read(keys_seed_path.clone()) {
-        assert_eq!(seed.len(), 32);
-        let mut key = [0; 32];
-        key.copy_from_slice(&seed);
-        key
+    let mnemonic_path = format!("{}/mnemonic", args.storage_dir_path.clone());
+    let mnemonic = if let Ok(mnemonic) = fs::read_to_string(mnemonic_path.clone()) {
+        Mnemonic::from_str(&mnemonic)
     } else {
-        let mut key = [0; 32];
-        thread_rng().fill_bytes(&mut key);
-        match File::create(keys_seed_path.clone()) {
-            Ok(mut f) => {
-                f.write_all(&key)
-                    .expect("Failed to write node keys seed to disk");
-                f.sync_all().expect("Failed to sync node keys seed to disk");
-            }
-            Err(e) => {
-                return Err(AppError::FailedKeysCreation(keys_seed_path, e.to_string()));
-            }
+        let keys = generate_keys(args.network.into());
+        let mnemonic = keys.mnemonic;
+        match fs::write(mnemonic_path.clone(), &mnemonic) {
+            Ok(()) => tracing::info!("Created a new wallet with mnemonic '{}'", mnemonic),
+            Err(e) => return Err(AppError::FailedKeysCreation(mnemonic_path, e.to_string())),
         }
-        key
-    };
-    let cur = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap();
+        Mnemonic::from_str(&mnemonic)
+    }
+    .expect("valid mnemonic");
+    let xkey: ExtendedKey = mnemonic
+        .clone()
+        .into_extended_key()
+        .expect("a valid key should have been provided");
+    let master_xprv = &xkey
+        .into_xprv(args.network)
+        .expect("should be possible to get an extended private key");
 
-    let master_xprv = ExtendedPrivKey::new_master(Network::Testnet, &keys_seed).unwrap();
     let secp = Secp256k1::new();
     let xprv: ExtendedPrivKey = master_xprv
         .ckd_priv(&secp, ChildNumber::Hardened { index: 535 })
         .unwrap();
     let ldk_seed: [u8; 32] = xprv.private_key.secret_bytes();
 
+    let cur = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
     let keys_manager = Arc::new(KeysManager::new(
         &ldk_seed,
         cur.as_secs(),
         cur.subsec_nanos(),
         ldk_data_dir_path.clone(),
     ));
-    let bdk_wallet = get_bdk_wallet(ldk_data_dir.clone(), keys_manager.master_key, args.network);
-    sync_wallet(&bdk_wallet, electrum_url.to_string());
-    let wallet = Arc::new(Mutex::new(bdk_wallet));
 
     // Step 7: Read ChannelMonitor state from disk
     let mut channelmonitors = persister
@@ -1097,14 +1035,6 @@ pub(crate) async fn start_ldk(
             (polled_best_block_hash, fresh_channel_manager)
         }
     };
-
-    // initialize RGB UTXOs file on first run
-    if !restarting_node {
-        let rgb_utxos = RgbUtxos { utxos: vec![] };
-        let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
-        let serialized_utxos = serde_json::to_string(&rgb_utxos).expect("valid rgb utxos");
-        fs::write(rgb_utxos_path, serialized_utxos).expect("able to write rgb utxos file");
-    }
 
     // Step 12: Sync ChannelMonitors and ChannelManager to chain tip
     let mut chain_listener_channel_monitors = Vec::new();
@@ -1239,6 +1169,35 @@ pub(crate) async fn start_ldk(
     let inbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
     let outbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
 
+    let xkey: ExtendedKey = mnemonic
+        .clone()
+        .into_extended_key()
+        .expect("a valid key should have been provided");
+    let xpub = xkey.into_xpub(network, &secp);
+    let pubkey = xpub.to_string();
+    let data_dir = args.storage_dir_path.clone();
+    let mut rgb_wallet = tokio::task::spawn_blocking(move || {
+        Wallet::new(WalletData {
+            data_dir,
+            bitcoin_network,
+            database_type: DatabaseType::Sqlite,
+            max_allocations_per_utxo: 1,
+            pubkey,
+            mnemonic: Some(mnemonic.to_string()),
+        })
+        .expect("valid rgb-lib wallet")
+    })
+    .await
+    .unwrap();
+    let rgb_online = rgb_wallet
+        .go_online(false, electrum_url.to_string())
+        .expect("should be online");
+    fs::write(
+        format!("{ldk_data_dir}/wallet_fingerprint"),
+        xpub.fingerprint().to_string(),
+    )
+    .expect("able to write");
+
     let cancel_token = CancellationToken::new();
 
     let app_state = Arc::new(AppState {
@@ -1256,8 +1215,9 @@ pub(crate) async fn start_ldk(
         proxy_client,
         proxy_endpoint: proxy_endpoint.to_string(),
         proxy_url: proxy_url.to_string(),
-        wallet,
         cancel_token,
+        rgb_wallet: Arc::new(Mutex::new(rgb_wallet)),
+        rgb_online,
     });
 
     // Step 18: Handle LDK Events

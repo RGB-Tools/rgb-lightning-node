@@ -126,10 +126,11 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
         .json::<AssetBalanceResponse>()
         .await
         .unwrap()
-        .amount
+        .spendable
 }
 
 async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: &str, force: bool) {
+    stop_mining();
     let payload = CloseChannelRequest {
         channel_id: channel_id.to_string(),
         peer_pubkey: peer_pubkey.to_string(),
@@ -290,6 +291,7 @@ async fn open_channel(
     asset_amount: u64,
     asset_id: &str,
 ) -> Channel {
+    stop_mining();
     let payload = OpenChannelRequest {
         peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
         capacity_sat: 30010,
@@ -298,15 +300,17 @@ async fn open_channel(
         asset_id: asset_id.to_string(),
         public: true,
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
-        .json::<OpenChannelResponse>()
-        .await
         .unwrap();
+    if res.status() != reqwest::StatusCode::OK {
+        let res = res.text().await.unwrap();
+        panic!("RES: {res:?}")
+    }
+    res.json::<OpenChannelResponse>().await.unwrap();
 
     let t_0 = OffsetDateTime::now_utc();
     let mut channel_id = None;
@@ -325,7 +329,7 @@ async fn open_channel(
                 }
             }
         }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 50.0 {
             panic!("cannot find funding TX")
         }
     }
@@ -385,14 +389,16 @@ async fn rgb_invoice(node_address: SocketAddr) -> String {
 }
 
 async fn refresh_transfers(node_address: SocketAddr) {
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/refreshtransfers", node_address))
         .send()
         .await
-        .unwrap()
-        .json::<EmptyResponse>()
-        .await
         .unwrap();
+    if res.status() != reqwest::StatusCode::OK {
+        let res = res.text().await.unwrap();
+        panic!("RES: {res:?}")
+    }
+    res.json::<EmptyResponse>().await.unwrap();
 }
 
 async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blinded_utxo: String) {
@@ -400,16 +406,19 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         asset_id: asset_id.to_string(),
         amount,
         blinded_utxo,
+        donation: true,
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/sendasset", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
-        .json::<SendAssetResponse>()
-        .await
         .unwrap();
+    if res.status() != reqwest::StatusCode::OK {
+        let res = res.text().await.unwrap();
+        panic!("RES: {res:?}")
+    }
+    res.json::<SendAssetResponse>().await.unwrap();
 }
 
 async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
@@ -438,6 +447,19 @@ async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
             panic!("cannot find successful payment")
+        }
+    }
+}
+
+async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_balance: u64) {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if asset_balance(node_address, asset_id).await == expected_balance {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("balance is not becoming the expected one");
         }
     }
 }

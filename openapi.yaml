@@ -250,6 +250,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPeersResponse'
+  /listtransfers:
+    post:
+      tags:
+        - RGB
+      summary: List transfers
+      description: List the node's on-chain RGB transfers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListTransfersRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTransfersResponse'
   /listunspents:
     get:
       tags:
@@ -461,9 +479,21 @@ components:
     AssetBalanceResponse:
       type: object
       properties:
-        amount:
+        settled:
           type: integer
           example: 777
+        future:
+          type: integer
+          example: 777
+        spendable:
+          type: integer
+          example: 777
+        offchain_outbound:
+          type: integer
+          example: 444
+        offchain_inbound:
+          type: integer
+          example: 0
     BitcoinNetwork:
       type: string
       example: Regtest
@@ -626,11 +656,6 @@ components:
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
-    KeychainKind:
-      type: string
-      enum:
-        - External
-        - Internal
     KeysendRequest:
       type: object
       properties:
@@ -685,6 +710,19 @@ components:
           type: array
           items:
               $ref: '#/components/schemas/Peer'
+    ListTransfersRequest:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+    ListTransfersResponse:
+      type: object
+      properties:
+        transfers:
+          type: array
+          items:
+              $ref: '#/components/schemas/Transfer'
     ListUnspentsResponse:
       type: object
       properties:
@@ -745,7 +783,7 @@ components:
           example: 1394000
         asset_amount:
           type: integer
-          example: 777
+          example: 333
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
@@ -778,12 +816,24 @@ components:
         pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+    RgbAllocation:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        amount:
+          type: integer
+          example: 42
+        settled:
+          type: boolean
+          example: false
     RgbInvoiceResponse:
       type: object
       properties:
         blinded_utxo:
           type: string
-          example: 61qsVbWtkNmU54F2i6qtB9uSmEGsPoaeypCi5uC5uctZ
+          example: utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
     SendAssetRequest:
       type: object
       properties:
@@ -795,7 +845,10 @@ components:
           example: 42
         blinded_utxo:
           type: string
-          example: 61qsVbWtkNmU54F2i6qtB9uSmEGsPoaeypCi5uC5uctZ
+          example: utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+        donation:
+          type: boolean
+          example: false
     SendAssetResponse:
       type: object
       properties:
@@ -844,25 +897,92 @@ components:
         signed_message:
           type: string
           example: signed message
-    TxOut:
+    Transfer:
       type: object
       properties:
-        value:
+        idx:
           type: integer
-          example: 32000
-        script_pubkey:
+          example: 1
+        created_at:
+          type: integer
+          example: 1691160765
+        updated_at:
+          type: integer
+          example: 1691162674
+        status:
+          $ref: '#/components/schemas/TransferStatus'
+        amount:
+          type: integer
+          example: 77
+        kind:
+          $ref: '#/components/schemas/TransferKind'
+        txid:
           type: string
-          example: 00141a28f5815b26f5c99c509fc7747eb48304ab8c3a
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
+        recipient_id:
+          type: string
+          example: 61qsVbWtkNmU54F2i6qtB9uSmEGsPoaeypCi5uC5uctZ
+        receive_utxo:
+          type: string
+          example: efed66f5309396ff43c8a09941c8103d9d5bbffd473ad9f13013ac89fb6b4671:0
+        change_utxo:
+          type: string
+          example: null
+        expiration:
+          type: integer
+          example: 1691171612
+        transport_endpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferTransportEndpoint'
+    TransferKind:
+      type: string
+      example: ReceiveBlind
+      enum:
+        - Issuance
+        - ReceiveBlind
+        - ReceiveWitness
+        - Send
+    TransferStatus:
+      type: string
+      enum:
+        - WaitingCounterparty
+        - WaitingConfirmations
+        - Settled
+        - Failed
+    TransferTransportEndpoint:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          example: http://127.0.0.1:3000/json-rpc
+        transport_type:
+          $ref: '#/components/schemas/TransportType'
+        used:
+          type: boolean
+          example: false
+    TransportType:
+      type: string
+      enum:
+        - JsonRpc
     Unspent:
+      type: object
+      properties:
+        utxo:
+          $ref: '#/components/schemas/Utxo'
+        rgb_allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RgbAllocation'
+    Utxo:
       type: object
       properties:
         outpoint:
           type: string
           example: efed66f5309396ff43c8a09941c8103d9d5bbffd473ad9f13013ac89fb6b4671:0
-        txout:
-          $ref: '#/components/schemas/TxOut'
-        keychain:
-          $ref: '#/components/schemas/KeychainKind'
-        is_spent:
+        btc_amount:
+          type: integer
+          example: 1000
+        colorable:
           type: boolean
-          example: false
+          example: true

@@ -1,107 +1,43 @@
 use amplify::RawArray;
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bdk::bitcoin::OutPoint;
-use bdk::database::SqliteDatabase;
-use bdk::Wallet;
 use bitcoin_30::hashes::Hash;
 use bitcoin_30::psbt::PartiallySignedTransaction as RgbPsbt;
-use bp::seals::txout::blind::SingleBlindSeal;
-use bp::seals::txout::CloseMethod;
+use bp::seals::txout::blind::{BlindSeal, SingleBlindSeal};
+use bp::seals::txout::{CloseMethod, TxPtr};
 use bp::Outpoint as RgbOutpoint;
-use lightning::rgb_utils::{RgbUtxo, RgbUtxos, STATIC_BLINDING};
-use rgb::{BlockchainResolver, Runtime};
-use rgb_core::{Operation, Opout};
-use rgb_schemata::{nia_rgb20, nia_schema};
+use lightning::rgb_utils::STATIC_BLINDING;
+use rgb_core::Operation;
+use rgb_lib::utils::RgbRuntime;
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
-use rgbstd::contract::{ContractId, GenesisSeal, GraphSeal};
-use rgbstd::interface::{rgb20, ContractBuilder, TransitionBuilder, TypedState};
+use rgbstd::contract::{ContractId, GraphSeal};
+use rgbstd::interface::{TransitionBuilder, TypedState};
 use rgbstd::persistence::Inventory;
-use rgbstd::stl::{
-    Amount, AssetNaming, ContractData, DivisibleAssetSpec, Name, Precision, RicardianContract,
-    Ticker, Timestamp,
-};
 use rgbstd::Txid as RgbTxid;
 use rgbwallet::psbt::opret::OutputOpret;
 use rgbwallet::psbt::{PsbtDbc, RgbExt, RgbInExt};
-use seals::txout::blind::BlindSeal;
-use seals::txout::{ExplicitSeal, TxPtr};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::convert::TryFrom;
-use std::fs;
+use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::SystemTime;
 
-use crate::bdk::sync_wallet;
 use crate::error::APIError;
 
-#[derive(Deserialize, Serialize)]
-pub(crate) struct BlindedInfo {
-    pub(crate) contract_id: Option<ContractId>,
-    pub(crate) seal: BlindSeal<TxPtr>,
-    pub(crate) consumed: bool,
-}
-
-pub(crate) fn check_uncolored_utxos(ldk_data_dir: &str) -> Result<(), APIError> {
-    let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
-    let serialized_utxos = fs::read_to_string(rgb_utxos_path).expect("able to read rgb utxos file");
-    let rgb_utxos: RgbUtxos = serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
-    let utxo = rgb_utxos.utxos.iter().find(|u| !u.colored);
-    match utxo {
-        Some(_) => Ok(()),
-        None => Err(APIError::NoAvailableUtxos),
-    }
-}
-
-pub(crate) fn get_utxo(ldk_data_dir: &str) -> RgbUtxo {
-    let rgb_utxos_path = format!("{}/rgb_utxos", ldk_data_dir);
-    let serialized_utxos = fs::read_to_string(rgb_utxos_path).expect("able to read rgb utxos file");
-    let rgb_utxos: RgbUtxos = serde_json::from_str(&serialized_utxos).expect("valid rgb utxos");
-    rgb_utxos
-        .utxos
-        .into_iter()
-        .find(|u| !u.colored)
-        .expect("at least one unlocked UTXO")
-}
-
-pub(crate) fn get_rgb_total_amount(
-    contract_id: ContractId,
-    runtime: &Runtime,
-    wallet: &Wallet<SqliteDatabase>,
-    electrum_url: String,
-) -> Result<u64, APIError> {
-    let asset_owned_values = get_asset_owned_values(contract_id, runtime, wallet, electrum_url)?;
-    Ok(asset_owned_values.iter().map(|(_, (_, amt))| amt).sum())
-}
-
-pub(crate) fn get_asset_owned_values(
-    contract_id: ContractId,
-    runtime: &Runtime,
-    wallet: &Wallet<SqliteDatabase>,
-    electrum_url: String,
-) -> Result<BTreeMap<Opout, (RgbOutpoint, u64)>, APIError> {
-    sync_wallet(wallet, electrum_url);
-    let unspents_outpoints: Vec<OutPoint> = wallet
-        .list_unspent()
-        .expect("valid unspent list")
-        .iter()
-        .map(|u| u.outpoint)
-        .collect();
-    let outpoints: Vec<RgbOutpoint> = unspents_outpoints
-        .iter()
-        .map(|o| RgbOutpoint::new(RgbTxid::from_str(&o.txid.to_string()).unwrap(), o.vout))
-        .collect();
-    let history = runtime
-        .debug_history()
-        .get(&contract_id)
-        .ok_or(APIError::UnknownContractId)?;
-    let mut contract_state = BTreeMap::new();
-    for output in history.fungibles() {
-        if outpoints.contains(&output.seal) {
-            contract_state.insert(output.opout, (output.seal, output.state.value.as_u64()));
+pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> APIError {
+    tracing::error!("ERR from rgb-lib: {error:?}");
+    match error {
+        rgb_lib::Error::AssetNotFound { .. } => APIError::UnknownContractId,
+        rgb_lib::Error::BlindedUTXOAlreadyUsed => APIError::BlindedUTXOAlreadyUsed,
+        rgb_lib::Error::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
+        rgb_lib::Error::InsufficientBitcoins { needed, available } => {
+            APIError::InsufficientFunds(needed - available)
         }
+        rgb_lib::Error::InvalidBlindedUTXO { details } => {
+            APIError::InvalidBlindedUTXO(details.clone())
+        }
+        rgb_lib::Error::InvalidName { details } => APIError::InvalidName(details.clone()),
+        rgb_lib::Error::InvalidPrecision { details } => APIError::InvalidPrecision(details.clone()),
+        rgb_lib::Error::InvalidTicker { details } => APIError::InvalidTicker(details.clone()),
+        rgb_lib::Error::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
+        _ => default,
     }
-    Ok(contract_state)
 }
 
 pub(crate) fn update_transition_beneficiary(
@@ -135,16 +71,6 @@ pub(crate) fn update_transition_beneficiary(
 }
 
 pub(crate) trait RgbUtilities {
-    fn issue_contract(
-        &mut self,
-        amount: u64,
-        outpoint: OutPoint,
-        ticker: String,
-        name: String,
-        precision: u8,
-        resolver: &mut BlockchainResolver,
-    ) -> ContractId;
-
     fn send_rgb(
         &mut self,
         contract_id: ContractId,
@@ -154,57 +80,7 @@ pub(crate) trait RgbUtilities {
     ) -> (PartiallySignedTransaction, Bindle<RgbTransfer>);
 }
 
-impl RgbUtilities for Runtime {
-    fn issue_contract(
-        &mut self,
-        amount: u64,
-        outpoint: OutPoint,
-        ticker: String,
-        name: String,
-        precision: u8,
-        resolver: &mut BlockchainResolver,
-    ) -> ContractId {
-        let spec = DivisibleAssetSpec {
-            naming: AssetNaming {
-                ticker: Ticker::try_from(ticker).expect("valid ticker"),
-                name: Name::try_from(name).expect("valid name"),
-                details: None,
-            },
-            precision: Precision::try_from(precision).expect("valid precision"),
-        };
-        let terms = RicardianContract::default();
-        let contract_data = ContractData { terms, media: None };
-        let created_at = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let created = Timestamp::from(i64::try_from(created_at).unwrap());
-        let seal = ExplicitSeal::<RgbTxid>::from_str(&format!("opret1st:{outpoint}")).unwrap();
-        let seal = GenesisSeal::from(seal);
-
-        let builder = ContractBuilder::with(rgb20(), nia_schema(), nia_rgb20())
-            .expect("valid contract builder")
-            .set_chain(self.chain())
-            .add_global_state("spec", spec)
-            .expect("invalid spec")
-            .add_global_state("data", contract_data)
-            .expect("invalid data")
-            .add_global_state("issuedSupply", Amount::from(amount))
-            .expect("invalid issuedSupply")
-            .add_global_state("created", created)
-            .expect("invalid created")
-            .add_fungible_state("assetOwner", seal, amount)
-            .expect("invalid global state data");
-        let contract = builder.issue_contract().expect("failure issuing contract");
-        let contract_id = contract.contract_id();
-        let validated_contract = contract
-            .validate(resolver)
-            .expect("internal error: failed validating self-issued contract");
-        self.import_contract(validated_contract, resolver)
-            .expect("failure importing issued contract");
-        contract_id
-    }
-
+impl RgbUtilities for RgbRuntime {
     fn send_rgb(
         &mut self,
         contract_id: ContractId,
@@ -222,6 +98,7 @@ impl RgbUtilities for Runtime {
             .collect::<Vec<_>>();
         let mut asset_transition_builder = asset_transition_builder;
         for (opout, _state) in self
+            .runtime
             .state_for_outpoints(contract_id, prev_outputs.iter().copied())
             .expect("ok")
         {
@@ -234,7 +111,7 @@ impl RgbUtilities for Runtime {
             .expect("should complete transition");
         let mut contract_inputs = HashMap::<ContractId, Vec<RgbOutpoint>>::new();
         for outpoint in prev_outputs {
-            for id in self.contracts_by_outpoints([outpoint]).expect("ok") {
+            for id in self.runtime.contracts_by_outpoints([outpoint]).expect("ok") {
                 contract_inputs.entry(id).or_default().push(outpoint);
             }
         }
@@ -271,9 +148,12 @@ impl RgbUtilities for Runtime {
             .dbc_conclude(CloseMethod::OpretFirst)
             .expect("should conclude");
         let witness_txid = psbt.unsigned_tx.txid();
-        self.consume_anchor(anchor).expect("should consume anchor");
+        self.runtime
+            .consume_anchor(anchor)
+            .expect("should consume anchor");
         for (id, bundle) in bundles {
-            self.consume_bundle(id, bundle, witness_txid.to_byte_array().into())
+            self.runtime
+                .consume_bundle(id, bundle, witness_txid.to_byte_array().into())
                 .expect("should consume bundle");
         }
         let beneficiaries: Vec<BuilderSeal<SingleBlindSeal>> = beneficiaries
@@ -286,6 +166,7 @@ impl RgbUtilities for Runtime {
             })
             .collect();
         let transfer = self
+            .runtime
             .transfer(contract_id, beneficiaries)
             .expect("valid transfer");
 

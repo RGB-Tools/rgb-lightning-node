@@ -1,5 +1,4 @@
 use amplify::s;
-use bdk::{database::SqliteDatabase, Wallet};
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
@@ -8,6 +7,7 @@ use lightning::{
     util::ser::{Writeable, Writer},
 };
 use reqwest::Client as RestClient;
+use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
 use std::{
     collections::HashMap,
     fmt::Write,
@@ -39,8 +39,9 @@ pub(crate) struct AppState {
     pub(crate) proxy_client: Arc<RestClient>,
     pub(crate) proxy_endpoint: String,
     pub(crate) proxy_url: String,
-    pub(crate) wallet: Arc<Mutex<Wallet<SqliteDatabase>>>,
     pub(crate) cancel_token: CancellationToken,
+    pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
+    pub(crate) rgb_online: Online,
 }
 
 impl AppState {
@@ -52,8 +53,8 @@ impl AppState {
         self.outbound_payments.lock().unwrap()
     }
 
-    pub(crate) fn get_wallet(&self) -> MutexGuard<Wallet<SqliteDatabase>> {
-        self.wallet.lock().unwrap()
+    pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {
+        self.rgb_wallet.lock().unwrap()
     }
 }
 
