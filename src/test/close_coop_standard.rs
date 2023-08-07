@@ -1,13 +1,13 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/close_force/";
-const NODE1_PEER_PORT: u16 = 9861;
-const NODE2_PEER_PORT: u16 = 9862;
-const NODE3_PEER_PORT: u16 = 9863;
+const TEST_DIR_BASE: &str = "tmp/close_coop/";
+const NODE1_PEER_PORT: u16 = 9801;
+const NODE2_PEER_PORT: u16 = 9802;
+const NODE3_PEER_PORT: u16 = 9803;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
-async fn close_force() {
+async fn close_coop_standard() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
@@ -33,7 +33,7 @@ async fn close_force() {
     keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
 
     stop_mining();
-    close_channel(node1_addr, &channel.channel_id, &node2_pubkey, true).await;
+    close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;

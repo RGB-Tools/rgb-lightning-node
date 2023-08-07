@@ -527,13 +527,13 @@ pub fn initialize() {
     });
 }
 
-mod close_coop;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
+mod close_coop_standard;
 mod close_coop_zero_balance;
-mod close_force;
 mod close_force_nobtc_acceptor;
 mod close_force_other_side;
+mod close_force_standard;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
