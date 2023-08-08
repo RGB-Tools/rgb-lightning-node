@@ -171,8 +171,10 @@ The node currently exposes the following APIs:
 - `/signmessage` (POST)
 
 To get more details about the available APIs see the [OpenAPI specification].
-You can browse a local copy exposing it with a web server.  As a quick example,
-from the project root you can run:
+A Swagger UI for the `master` branch is generated from the specification and
+available at https://rgb-tools.github.io/rgb-lightning-node.
+Otherwise you can can browse a local copy exposing it with a web server.  As a
+quick example, from the project root you can run:
 ```bash
 python3 -m http.server
 ```
