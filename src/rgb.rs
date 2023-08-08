@@ -129,7 +129,7 @@ pub(crate) fn update_transition_beneficiary(
     ));
     beneficiaries.push(seal);
     asset_transition_builder = asset_transition_builder
-        .add_raw_state_static(assignment_id, seal, TypedState::Amount(amt_rgb))
+        .add_raw_state(assignment_id, seal, TypedState::Amount(amt_rgb))
         .expect("ok");
     (seal_vout, asset_transition_builder)
 }
@@ -268,7 +268,7 @@ impl RgbUtilities for Runtime {
             .expect("cannot set opret host");
         psbt.rgb_bundle_to_lnpbp4().expect("ok");
         let anchor = psbt
-            .dbc_conclude_static(CloseMethod::OpretFirst)
+            .dbc_conclude(CloseMethod::OpretFirst)
             .expect("should conclude");
         let witness_txid = psbt.unsigned_tx.txid();
         self.consume_anchor(anchor).expect("should consume anchor");

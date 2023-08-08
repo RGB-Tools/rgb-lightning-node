@@ -231,7 +231,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 ));
                 beneficiaries.push(funding_seal);
                 asset_transition_builder = asset_transition_builder
-                    .add_raw_state_static(
+                    .add_raw_state(
                         assignment_id,
                         funding_seal,
                         TypedState::Amount(channel_rgb_amount),
@@ -240,14 +240,13 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
 
                 let change_vout = 2;
                 if rgb_change_amount > 0 {
-                    let change_seal = BuilderSeal::Revealed(GraphSeal::with_vout(
+                    let change_seal = BuilderSeal::Revealed(GraphSeal::new_vout(
                         CloseMethod::OpretFirst,
                         change_vout,
-                        STATIC_BLINDING,
                     ));
                     beneficiaries.push(change_seal);
                     asset_transition_builder = asset_transition_builder
-                        .add_raw_state_static(
+                        .add_raw_state(
                             assignment_id,
                             change_seal,
                             TypedState::Amount(rgb_change_amount),
