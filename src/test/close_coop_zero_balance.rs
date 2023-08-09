@@ -12,8 +12,8 @@ async fn close_coop_zero_balance() {
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
-    let node1_addr = start_node(test_dir_node1, NODE1_PEER_PORT);
-    let node2_addr = start_node(test_dir_node2, NODE2_PEER_PORT);
+    let node1_addr = start_node(test_dir_node1, NODE1_PEER_PORT, false);
+    let node2_addr = start_node(test_dir_node2, NODE2_PEER_PORT, false);
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
@@ -27,7 +27,6 @@ async fn close_coop_zero_balance() {
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 0);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
-
     wait_for_balance(node1_addr, &asset_id, 1000).await;
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 0);
 

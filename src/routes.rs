@@ -237,7 +237,7 @@ pub(crate) struct ListTransfersResponse {
     pub(crate) transfers: Vec<Transfer>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct ListUnspentsResponse {
     pub(crate) unspents: Vec<Unspent>,
 }

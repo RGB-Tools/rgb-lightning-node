@@ -10,12 +10,14 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, Channel, CloseChannelRequest,
-    EmptyResponse, HTLCStatus, IssueAssetRequest, IssueAssetResponse, KeysendRequest,
-    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListChannelsResponse,
-    ListPaymentsResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment,
-    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
-    SendPaymentResponse,
+    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, Channel,
+    CloseChannelRequest, ConnectPeerRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
+    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse, KeysendRequest, KeysendResponse,
+    LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse, ListChannelsResponse,
+    ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse, NodeInfoResponse,
+    OpenChannelRequest, OpenChannelResponse, Payment, Peer, RgbInvoiceResponse, SendAssetRequest,
+    SendAssetResponse, SendPaymentRequest, SendPaymentResponse, Unspent,
 };
 
 use super::*;
@@ -56,6 +58,13 @@ fn _bitcoin_cli() -> [String; 7] {
     ]
 }
 
+async fn _check_response_is_ok(res: reqwest::Response) -> reqwest::Response {
+    if res.status() != reqwest::StatusCode::OK {
+        panic!("reqwest response is not OK: {:?}", res.text().await);
+    }
+    res
+}
+
 fn fund_wallet(address: String) {
     let status = Command::new("docker")
         .stdin(Stdio::null())
@@ -89,10 +98,10 @@ fn get_txout(txid: &str) -> String {
     .unwrap()
 }
 
-fn start_node(node_test_dir: String, node_peer_port: u16) -> SocketAddr {
+fn start_node(node_test_dir: String, node_peer_port: u16, keep_node_dir: bool) -> SocketAddr {
     let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
     let node_address = listener.local_addr().unwrap();
-    if Path::new(&node_test_dir).is_dir() {
+    if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
         std::fs::remove_dir_all(node_test_dir.clone()).unwrap();
     }
     std::fs::create_dir_all(node_test_dir.clone()).unwrap();
@@ -117,16 +126,35 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
     let payload = AssetBalanceRequest {
         asset_id: asset_id.to_string(),
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/assetbalance", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<AssetBalanceResponse>()
         .await
         .unwrap()
         .spendable
+}
+
+async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &str) {
+    let payload = ConnectPeerRequest {
+        peer_pubkey_and_addr: format!("{peer_pubkey}@{peer_addr}"),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/connectpeer", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: &str, force: bool) {
@@ -136,12 +164,14 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
         peer_pubkey: peer_pubkey.to_string(),
         force,
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/closechannel", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<EmptyResponse>()
         .await
         .unwrap();
@@ -164,12 +194,48 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
     }
 }
 
+async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNInvoiceResponse {
+    let payload = DecodeLNInvoiceRequest {
+        invoice: invoice.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/decodelninvoice", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<DecodeLNInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
+    let payload = DisconnectPeerRequest {
+        peer_pubkey: peer_pubkey.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/disconnectpeer", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+}
+
 async fn fund_and_create_utxos(node_address: SocketAddr) {
-    let address = reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/address", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    let address = _check_response_is_ok(res)
+        .await
         .json::<AddressResponse>()
         .await
         .unwrap()
@@ -179,16 +245,36 @@ async fn fund_and_create_utxos(node_address: SocketAddr) {
 
     mine(false);
 
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/createutxos", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<EmptyResponse>()
         .await
         .unwrap();
 
     mine(false);
+}
+
+async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatus {
+    let payload = InvoiceStatusRequest {
+        invoice: invoice.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/invoicestatus", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<InvoiceStatusResponse>()
+        .await
+        .unwrap()
+        .status
 }
 
 async fn issue_asset(node_address: SocketAddr) -> String {
@@ -198,16 +284,32 @@ async fn issue_asset(node_address: SocketAddr) -> String {
         name: s!("Tether"),
         precision: 0,
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/issueasset", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<IssueAssetResponse>()
         .await
         .unwrap()
         .asset_id
+}
+
+async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/listpeers", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<ListPeersResponse>()
+        .await
+        .unwrap()
+        .peers
 }
 
 async fn ln_invoice(
@@ -222,12 +324,14 @@ async fn ln_invoice(
         asset_id: Some(asset_id.to_string()),
         asset_amount: Some(asset_amount),
     };
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/lninvoice", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<LNInvoiceResponse>()
         .await
         .unwrap()
@@ -245,12 +349,14 @@ async fn keysend(
         asset_id: asset_id.to_string(),
         asset_amount,
     };
-    let keysend = reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/keysend", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    let keysend = _check_response_is_ok(res)
+        .await
         .json::<KeysendResponse>()
         .await
         .unwrap();
@@ -274,11 +380,13 @@ async fn keysend(
 }
 
 async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .get(format!("http://{}/nodeinfo", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<NodeInfoResponse>()
         .await
         .unwrap()
@@ -295,7 +403,7 @@ async fn open_channel(
     let payload = OpenChannelRequest {
         peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
         capacity_sat: 30010,
-        push_msat: 1394000,
+        push_msat: 2130000,
         asset_amount,
         asset_id: asset_id.to_string(),
         public: true,
@@ -306,11 +414,11 @@ async fn open_channel(
         .send()
         .await
         .unwrap();
-    if res.status() != reqwest::StatusCode::OK {
-        let res = res.text().await.unwrap();
-        panic!("RES: {res:?}")
-    }
-    res.json::<OpenChannelResponse>().await.unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<OpenChannelResponse>()
+        .await
+        .unwrap();
 
     let t_0 = OffsetDateTime::now_utc();
     let mut channel_id = None;
@@ -352,12 +460,28 @@ async fn open_channel(
     }
 }
 
+async fn list_assets(node_address: SocketAddr) -> Vec<Asset> {
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/listassets", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<ListAssetsResponse>()
+        .await
+        .unwrap()
+        .assets
+}
+
 async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .get(format!("http://{}/listchannels", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<ListChannelsResponse>()
         .await
         .unwrap()
@@ -365,23 +489,41 @@ async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {
 }
 
 async fn list_payments(node_address: SocketAddr) -> Vec<Payment> {
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .get(format!("http://{}/listpayments", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<ListPaymentsResponse>()
         .await
         .unwrap()
         .payments
 }
 
+async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/listunspents", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<ListUnspentsResponse>()
+        .await
+        .unwrap()
+        .unspents
+}
+
 async fn rgb_invoice(node_address: SocketAddr) -> String {
-    reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
         .json::<RgbInvoiceResponse>()
         .await
         .unwrap()
@@ -394,11 +536,11 @@ async fn refresh_transfers(node_address: SocketAddr) {
         .send()
         .await
         .unwrap();
-    if res.status() != reqwest::StatusCode::OK {
-        let res = res.text().await.unwrap();
-        panic!("RES: {res:?}")
-    }
-    res.json::<EmptyResponse>().await.unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blinded_utxo: String) {
@@ -414,21 +556,23 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         .send()
         .await
         .unwrap();
-    if res.status() != reqwest::StatusCode::OK {
-        let res = res.text().await.unwrap();
-        panic!("RES: {res:?}")
-    }
-    res.json::<SendAssetResponse>().await.unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<SendAssetResponse>()
+        .await
+        .unwrap();
 }
 
 async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
     let payload = SendPaymentRequest { invoice };
-    let send_payment = reqwest::Client::new()
+    let res = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap()
+        .unwrap();
+    let send_payment = _check_response_is_ok(res)
+        .await
         .json::<SendPaymentResponse>()
         .await
         .unwrap();
@@ -460,6 +604,60 @@ async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_bal
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
             panic!("balance is not becoming the expected one");
+        }
+    }
+}
+
+async fn shutdown(node_sockets: &[SocketAddr], ldk_sockets: &[SocketAddr]) {
+    // shutdown nodes
+    for node_address in node_sockets {
+        let res = reqwest::Client::new()
+            .post(format!("http://{}/shutdown", node_address))
+            .send()
+            .await
+            .unwrap();
+        _check_response_is_ok(res).await;
+    }
+    // check node sockets have been released
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut all_sockets_available = true;
+        let mut last_checked = node_sockets[0];
+        for node_socket in node_sockets {
+            last_checked = *node_socket;
+            if TcpListener::bind(*node_socket).is_err() {
+                all_sockets_available = false;
+            }
+        }
+        if all_sockets_available {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("node sockets not becoming available (last checked: {last_checked})")
+        }
+    }
+    // connect to LDK peer ports so they can stop listening
+    for ldk_socket in ldk_sockets {
+        let _ = std::net::TcpStream::connect(ldk_socket);
+    }
+    // check LDK sockets have been released
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut all_sockets_available = true;
+        let mut last_checked = ldk_sockets[0];
+        for ldk_socket in ldk_sockets {
+            last_checked = *ldk_socket;
+            if TcpListener::bind(*ldk_socket).is_err() {
+                all_sockets_available = false;
+            }
+        }
+        if all_sockets_available {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("LDK sockets not becoming available (last checked: {last_checked})")
         }
     }
 }
@@ -558,7 +756,7 @@ fn wait_electrs_sync() {
     let blockcount = blockcount_str
         .trim()
         .parse::<u32>()
-        .expect("could not parte blockcount");
+        .expect("could not parse blockcount");
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
         let mut all_synced = true;
@@ -600,4 +798,5 @@ mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
 mod payment;
+mod restart;
 mod send_receive;
