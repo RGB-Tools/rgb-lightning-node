@@ -1,12 +1,13 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/close_coop/";
+const TEST_DIR_BASE: &str = "tmp/close_coop_standard/";
 const NODE1_PEER_PORT: u16 = 9801;
 const NODE2_PEER_PORT: u16 = 9802;
 const NODE3_PEER_PORT: u16 = 9803;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn close_coop_standard() {
     initialize();
 

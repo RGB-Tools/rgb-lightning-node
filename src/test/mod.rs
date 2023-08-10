@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
+use tracing_test::traced_test;
 
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, Channel, CloseChannelRequest,

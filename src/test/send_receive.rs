@@ -4,8 +4,9 @@ const TEST_DIR_BASE: &str = "tmp/send_receive/";
 const NODE1_PEER_PORT: u16 = 9811;
 const NODE2_PEER_PORT: u16 = 9812;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn send_receive() {
     initialize();
 

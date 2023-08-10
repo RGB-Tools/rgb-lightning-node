@@ -5,8 +5,9 @@ const NODE1_PEER_PORT: u16 = 9911;
 const NODE2_PEER_PORT: u16 = 9912;
 const NODE3_PEER_PORT: u16 = 9913;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn open_after_double_send() {
     initialize();
 

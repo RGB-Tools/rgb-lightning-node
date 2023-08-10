@@ -21,6 +21,8 @@ use ldk::LdkBackgroundServices;
 use std::net::SocketAddr;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::{self, TraceLayer};
+use tracing_subscriber::{filter, prelude::*};
 
 use crate::args::LdkUserInfo;
 use crate::error::AppError;
@@ -35,11 +37,27 @@ use crate::routes::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
-
     let args = args::parse_startup_args()?;
+
+    // stdout logger
+    let stdout_log = tracing_subscriber::fmt::layer();
+
+    // file logger
+    let log_dir = format!("{}/logs", args.storage_dir_path);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "rln.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let file_log = tracing_subscriber::fmt::layer()
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_writer(non_blocking);
+
+    tracing_subscriber::registry()
+        .with(stdout_log.with_filter(filter::LevelFilter::INFO))
+        .with(file_log.with_filter(filter::LevelFilter::DEBUG))
+        .init();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], args.daemon_listening_port));
 
@@ -84,6 +102,11 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServi
         .route("/sendpayment", post(send_payment))
         .route("/shutdown", post(shutdown))
         .route("/signmessage", post(sign_message))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
+                .on_response(trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
+        )
         .layer(CorsLayer::permissive())
         .with_state(shared_state);
 

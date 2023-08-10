@@ -328,7 +328,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                 .is_err()
             {
                 tracing::error!(
-						"ERROR: Channel went away before we could fund it. The peer disconnected or refused the channel.");
+                        "ERROR: Channel went away before we could fund it. The peer disconnected or refused the channel.");
             }
         }
         Event::PaymentClaimable {
@@ -404,7 +404,7 @@ async fn handle_ldk_events(event: Event, state: Arc<AppState>) {
                     payment.status = HTLCStatus::Succeeded;
                     tracing::info!(
                         "EVENT: successfully sent payment of {:?} millisatoshis{} from \
-								 payment hash {:?} with preimage {:?}",
+                                payment hash {:?} with preimage {:?}",
                         payment.amt_msat,
                         if let Some(fee) = fee_paid_msat {
                             format!(" (fee {} msat)", fee)

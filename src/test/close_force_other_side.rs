@@ -5,8 +5,9 @@ const NODE1_PEER_PORT: u16 = 9881;
 const NODE2_PEER_PORT: u16 = 9882;
 const NODE3_PEER_PORT: u16 = 9883;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn close_force_other_side() {
     initialize();
 

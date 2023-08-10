@@ -5,8 +5,9 @@ const NODE1_PEER_PORT: u16 = 9821;
 const NODE2_PEER_PORT: u16 = 9822;
 const NODE3_PEER_PORT: u16 = 9823;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn payment() {
     initialize();
 
