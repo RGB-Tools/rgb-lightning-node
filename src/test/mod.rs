@@ -99,10 +99,11 @@ fn start_node(node_test_dir: String, node_peer_port: u16) -> SocketAddr {
         ..Default::default()
     };
     tokio::spawn(async move {
-        let (router, _ldk_background_services) = app(args).await.unwrap();
+        let (router, ldk_background_services, cancel_token) = app(args).await.unwrap();
         axum::Server::from_tcp(listener)
             .unwrap()
             .serve(router.into_make_service())
+            .with_graceful_shutdown(shutdown_signal(ldk_background_services, cancel_token))
             .await
             .unwrap();
     });

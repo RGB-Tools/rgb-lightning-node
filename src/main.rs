@@ -20,6 +20,7 @@ use axum::{
 use ldk::LdkBackgroundServices;
 use std::net::SocketAddr;
 use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::{self, TraceLayer};
 use tracing_subscriber::{filter, prelude::*};
@@ -61,20 +62,23 @@ async fn main() -> Result<()> {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], args.daemon_listening_port));
 
-    let (router, ldk_background_services) = app(args).await?;
+    let (router, ldk_background_services, cancel_token) = app(args).await?;
 
     tracing::info!("Listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(router.into_make_service())
-        .with_graceful_shutdown(shutdown_signal(ldk_background_services))
+        .with_graceful_shutdown(shutdown_signal(ldk_background_services, cancel_token))
         .await
         .unwrap();
 
     Ok(())
 }
 
-pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServices), AppError> {
+pub(crate) async fn app(
+    args: LdkUserInfo,
+) -> Result<(Router, LdkBackgroundServices, CancellationToken), AppError> {
     let (ldk_background_services, shared_state) = start_ldk(args).await?;
+    let cancel_token = shared_state.cancel_token.clone();
 
     let router = Router::new()
         .route("/address", post(address))
@@ -110,12 +114,15 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, LdkBackgroundServi
         .layer(CorsLayer::permissive())
         .with_state(shared_state);
 
-    Ok((router, ldk_background_services))
+    Ok((router, ldk_background_services, cancel_token))
 }
 
 /// Tokio signal handler that will wait for a user to press CTRL+C.
 /// We use this in our hyper `Server` method `with_graceful_shutdown`.
-async fn shutdown_signal(ldk_background_services: LdkBackgroundServices) {
+async fn shutdown_signal(
+    ldk_background_services: LdkBackgroundServices,
+    cancel_token: CancellationToken,
+) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -136,6 +143,7 @@ async fn shutdown_signal(ldk_background_services: LdkBackgroundServices) {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+        _ = cancel_token.cancelled() => {},
     }
 
     stop_ldk(ldk_background_services).await;

@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     disk::FilesystemLogger,
@@ -39,6 +40,7 @@ pub(crate) struct AppState {
     pub(crate) proxy_endpoint: String,
     pub(crate) proxy_url: String,
     pub(crate) wallet: Arc<Mutex<Wallet<SqliteDatabase>>>,
+    pub(crate) cancel_token: CancellationToken,
 }
 
 impl AppState {

@@ -66,6 +66,7 @@ use std::time::{Duration, SystemTime};
 use strict_encoding::{FieldName, TypeName};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::args::LdkUserInfo;
 use crate::bdk::{broadcast_tx, get_bdk_wallet, get_bdk_wallet_seckey, sync_wallet};
@@ -1238,6 +1239,8 @@ pub(crate) async fn start_ldk(
     let inbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
     let outbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
 
+    let cancel_token = CancellationToken::new();
+
     let app_state = Arc::new(AppState {
         channel_manager: Arc::clone(&channel_manager),
         electrum_url: electrum_url.to_string(),
@@ -1254,6 +1257,7 @@ pub(crate) async fn start_ldk(
         proxy_endpoint: proxy_endpoint.to_string(),
         proxy_url: proxy_url.to_string(),
         wallet,
+        cancel_token,
     });
 
     // Step 18: Handle LDK Events

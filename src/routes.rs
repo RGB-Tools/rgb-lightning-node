@@ -44,7 +44,6 @@ use std::{
     fs,
     ops::Deref,
     path::{Path, PathBuf},
-    process::{id, Command},
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -1518,12 +1517,10 @@ pub(crate) async fn send_payment(
     }))
 }
 
-pub(crate) async fn shutdown() -> Result<Json<EmptyResponse>, APIError> {
-    let mut kill = Command::new("kill")
-        .args(["-s", "INT", &id().to_string()])
-        .spawn()?;
-    kill.wait()?;
-
+pub(crate) async fn shutdown(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    state.cancel_token.cancel();
     Ok(Json(EmptyResponse {}))
 }
 
