@@ -2173,6 +2173,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "electrum-client 0.17.0",
  "futures",
  "hex 0.3.2",
  "hyper",

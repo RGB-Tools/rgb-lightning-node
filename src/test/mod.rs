@@ -1,5 +1,6 @@
 use amplify::s;
 use bitcoin::Network;
+use electrum_client::ElectrumApi;
 use once_cell::sync::Lazy;
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
@@ -18,6 +19,8 @@ use crate::routes::{
 };
 
 use super::*;
+
+const ELECTRUM_URL: &str = "127.0.0.1:50001";
 
 static INIT: Once = Once::new();
 
@@ -500,6 +503,7 @@ fn mine_n_blocks(resume: bool, num_blocks: u16) {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
     }
+    wait_electrs_sync();
 }
 
 fn stop_mining() {
@@ -514,6 +518,40 @@ fn resume_mining() {
         .write()
         .expect("MINER has been initialized")
         .resume_mining()
+}
+
+fn wait_electrs_sync() {
+    let t_0 = OffsetDateTime::now_utc();
+    let output = Command::new("docker")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .arg("compose")
+        .args(_bitcoin_cli())
+        .arg("getblockcount")
+        .output()
+        .expect("failed to call getblockcount");
+    assert!(output.status.success());
+    let blockcount_str =
+        std::str::from_utf8(&output.stdout).expect("could not parse blockcount output");
+    let blockcount = blockcount_str
+        .trim()
+        .parse::<u32>()
+        .expect("could not parte blockcount");
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mut all_synced = true;
+        let electrum =
+            electrum_client::Client::new(ELECTRUM_URL).expect("cannot get electrum client");
+        if electrum.block_header(blockcount as usize).is_err() {
+            all_synced = false;
+        }
+        if all_synced {
+            break;
+        };
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("electrs not syncing with bitcoind");
+        }
+    }
 }
 
 pub fn initialize() {
