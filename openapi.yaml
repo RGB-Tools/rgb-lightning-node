@@ -801,7 +801,13 @@ components:
       properties:
         amt_msat:
           type: integer
+          example: 3000000
+        asset_amount:
+          type: integer
           example: 42
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
         payment_hash:
           type: string
           example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd

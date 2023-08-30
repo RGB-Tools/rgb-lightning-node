@@ -7,6 +7,7 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use lightning::chain::keysinterface::EntropySource;
 use lightning::onion_message::{Destination, OnionMessageContents};
+use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -282,6 +283,8 @@ pub(crate) struct OpenChannelResponse {
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Payment {
     pub(crate) amt_msat: Option<u64>,
+    pub(crate) asset_amount: Option<u64>,
+    pub(crate) asset_id: Option<String>,
     pub(crate) payment_hash: String,
     pub(crate) inbound: bool,
     pub(crate) status: HTLCStatus,
@@ -800,10 +803,23 @@ pub(crate) async fn list_payments(
     let inbound = state.get_inbound_payments();
     let outbound = state.get_outbound_payments();
     let mut payments = vec![];
+    let ldk_data_dir_path = Path::new(&state.ldk_data_dir);
 
     for (payment_hash, payment_info) in inbound.deref() {
+        let rgb_payment_info_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir_path);
+        let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
+            let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
+            (
+                Some(rgb_payment_info.amount),
+                Some(rgb_payment_info.contract_id.to_string()),
+            )
+        } else {
+            (None, None)
+        };
         payments.push(Payment {
             amt_msat: payment_info.amt_msat,
+            asset_amount,
+            asset_id,
             payment_hash: hex_str(&payment_hash.0),
             inbound: true,
             status: payment_info.status,
@@ -811,8 +827,20 @@ pub(crate) async fn list_payments(
     }
 
     for (payment_hash, payment_info) in outbound.deref() {
+        let rgb_payment_info_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir_path);
+        let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
+            let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
+            (
+                Some(rgb_payment_info.amount),
+                Some(rgb_payment_info.contract_id.to_string()),
+            )
+        } else {
+            (None, None)
+        };
         payments.push(Payment {
             amt_msat: payment_info.amt_msat,
+            asset_amount,
+            asset_id,
             payment_hash: hex_str(&payment_hash.0),
             inbound: false,
             status: payment_info.status,
