@@ -98,6 +98,12 @@ pub enum BitcoinNetwork {
     Regtest,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BlockTime {
+    pub(crate) height: u32,
+    pub(crate) timestamp: u64,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Channel {
     pub(crate) channel_id: String,
@@ -229,6 +235,11 @@ pub(crate) struct ListPeersResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct ListTransactionsResponse {
+    pub(crate) transactions: Vec<Transaction>,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersRequest {
     pub(crate) asset_id: String,
 }
@@ -347,6 +358,24 @@ pub(crate) struct SignMessageRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct SignMessageResponse {
     pub(crate) signed_message: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Transaction {
+    pub(crate) transaction_type: TransactionType,
+    pub(crate) txid: String,
+    pub(crate) received: u64,
+    pub(crate) sent: u64,
+    pub(crate) fee: Option<u64>,
+    pub(crate) confirmation_time: Option<BlockTime>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) enum TransactionType {
+    RgbSend,
+    Drain,
+    CreateUtxos,
+    User,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -861,6 +890,36 @@ pub(crate) async fn list_peers(
     }
 
     Ok(Json(ListPeersResponse { peers }))
+}
+
+pub(crate) async fn list_transactions(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ListTransactionsResponse>, APIError> {
+    let mut transactions = vec![];
+    for tx in state
+        .get_rgb_wallet()
+        .list_transactions(Some(state.rgb_online.clone()))
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?
+    {
+        transactions.push(Transaction {
+            transaction_type: match tx.transaction_type {
+                rgb_lib::TransactionType::RgbSend => TransactionType::RgbSend,
+                rgb_lib::TransactionType::Drain => TransactionType::Drain,
+                rgb_lib::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
+                rgb_lib::TransactionType::User => TransactionType::User,
+            },
+            txid: tx.txid,
+            received: tx.received,
+            sent: tx.sent,
+            fee: tx.fee,
+            confirmation_time: tx.confirmation_time.map(|ct| BlockTime {
+                height: ct.height,
+                timestamp: ct.timestamp,
+            }),
+        })
+    }
+
+    Ok(Json(ListTransactionsResponse { transactions }))
 }
 
 pub(crate) async fn list_transfers(

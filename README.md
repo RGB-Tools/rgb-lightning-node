@@ -158,6 +158,7 @@ The node currently exposes the following APIs:
 - `/listchannels` (GET)
 - `/listpayments` (GET)
 - `/listpeers` (GET)
+- `/listtransactions` (GET)
 - `/listtransfers` (POST)
 - `/listunspents` (GET)
 - `/lninvoice` (POST)

@@ -250,6 +250,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPeersResponse'
+  /listtransactions:
+    get:
+      tags:
+        - On-chain
+      summary: List transactions
+      description: List the node's on-chain transactions
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTransactionsResponse'
   /listtransfers:
     post:
       tags:
@@ -502,6 +515,15 @@ components:
         - Testnet
         - Signet
         - Regtest
+    BlockTime:
+      type: object
+      properties:
+        height:
+          type: integer
+          example: 805434
+        timestamp:
+          type: integer
+          example: 1691160659
     Channel:
       type: object
       properties:
@@ -710,6 +732,13 @@ components:
           type: array
           items:
               $ref: '#/components/schemas/Peer'
+    ListTransactionsResponse:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+              $ref: '#/components/schemas/Transaction'
     ListTransfersRequest:
       type: object
       properties:
@@ -903,6 +932,32 @@ components:
         signed_message:
           type: string
           example: signed message
+    Transaction:
+      type: object
+      properties:
+        transaction_type:
+          $ref: '#/components/schemas/TransactionType'
+        txid:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
+        received:
+          type: integer
+          example: 650
+        sent:
+          type: integer
+          example: 1050
+        fee:
+          type: integer
+          example: 100
+        confirmation_time:
+          $ref: '#/components/schemas/BlockTime'
+    TransactionType:
+      type: string
+      enum:
+        - RgbSend
+        - Drain
+        - CreateUtxos
+        - User
     Transfer:
       type: object
       properties:
