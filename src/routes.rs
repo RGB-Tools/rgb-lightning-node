@@ -104,6 +104,19 @@ pub(crate) struct BlockTime {
     pub(crate) timestamp: u64,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BtcBalance {
+    pub(crate) settled: u64,
+    pub(crate) future: u64,
+    pub(crate) spendable: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BtcBalanceResponse {
+    pub(crate) vanilla: BtcBalance,
+    pub(crate) colored: BtcBalance,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Channel {
     pub(crate) channel_id: String,
@@ -479,6 +492,29 @@ pub(crate) async fn asset_balance(
         offchain_outbound,
         offchain_inbound,
     }))
+}
+
+pub(crate) async fn btc_balance(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<BtcBalanceResponse>, APIError> {
+    let btc_balance = state
+        .get_rgb_wallet()
+        .get_btc_balance(state.rgb_online.clone())
+        .map_err(|_| APIError::Unexpected)?;
+
+    let vanilla = BtcBalance {
+        settled: btc_balance.vanilla.settled,
+        future: btc_balance.vanilla.future,
+        spendable: btc_balance.vanilla.spendable,
+    };
+
+    let colored = BtcBalance {
+        settled: btc_balance.colored.settled,
+        future: btc_balance.colored.future,
+        spendable: btc_balance.colored.spendable,
+    };
+
+    Ok(Json(BtcBalanceResponse { vanilla, colored }))
 }
 
 pub(crate) async fn close_channel(

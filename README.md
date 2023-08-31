@@ -146,6 +146,7 @@ curl -X POST -H "Content-type: application/json" \
 The node currently exposes the following APIs:
 - `/address` (POST)
 - `/assetbalance` (POST)
+- `/btcbalance` (GET)
 - `/closechannel` (POST)
 - `/connectpeer` (POST)
 - `/createutxos` (POST)

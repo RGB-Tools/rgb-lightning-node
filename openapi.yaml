@@ -59,6 +59,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssetBalanceResponse'
+  /btcbalance:
+    get:
+      tags:
+        - On-chain
+      summary: Get the BTC balance
+      description: Get the node's bitcoin balance for the vanilla and colored wallets
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BtcBalanceResponse'
   /closechannel:
     post:
       tags:
@@ -524,6 +537,25 @@ components:
         timestamp:
           type: integer
           example: 1691160659
+    BtcBalance:
+      type: object
+      properties:
+        settled:
+          type: integer
+          example: 777000
+        future:
+          type: integer
+          example: 777000
+        spendable:
+          type: integer
+          example: 777000
+    BtcBalanceResponse:
+      type: object
+      properties:
+        vanilla:
+          $ref: '#/components/schemas/BtcBalance'
+        colored:
+          $ref: '#/components/schemas/BtcBalance'
     Channel:
       type: object
       properties:
