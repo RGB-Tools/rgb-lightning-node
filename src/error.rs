@@ -56,6 +56,9 @@ pub enum APIError {
     #[error("Invalid channel ID")]
     InvalidChannelID,
 
+    #[error("Invalid fee rate: {0}")]
+    InvalidFeeRate(String),
+
     #[error("Invalid invoice: {0}")]
     InvalidInvoice(String),
 
@@ -92,6 +95,9 @@ pub enum APIError {
     #[error("No uncolored UTXOs are available (hint: call createutxos)")]
     NoAvailableUtxos,
 
+    #[error("Output below the dust limit")]
+    OutputBelowDustLimit,
+
     #[error("Proxy error: {0}")]
     Proxy(#[from] reqwest::Error),
 
@@ -126,6 +132,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBlindedUTXO(_)
             | APIError::InvalidChannelID
+            | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidName(_)
             | APIError::InvalidNodeIds(_)
@@ -134,7 +141,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
             | APIError::InvalidTicker(_)
-            | APIError::InvalidTlvType(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            | APIError::InvalidTlvType(_)
+            | APIError::OutputBelowDustLimit => (StatusCode::BAD_REQUEST, self.to_string()),
             APIError::BlindedUTXOAlreadyUsed
             | APIError::InsufficientAssets(_)
             | APIError::InsufficientFunds(_)

@@ -168,6 +168,7 @@ The node currently exposes the following APIs:
 - `/refreshtransfers` (POST)
 - `/rgbinvoice` (POST)
 - `/sendasset` (POST)
+- `/sendbtc` (POST)
 - `/sendonionmessage` (POST)
 - `/sendpayment` (POST)
 - `/shutdown` (POST)

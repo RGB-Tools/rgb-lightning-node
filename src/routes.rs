@@ -345,6 +345,18 @@ pub(crate) struct SendAssetResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct SendBtcRequest {
+    pub(crate) amount: u64,
+    pub(crate) address: String,
+    pub(crate) fee_rate: f32,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SendBtcResponse {
+    pub(crate) txid: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct SendOnionMessageRequest {
     pub(crate) node_ids: Vec<String>,
     pub(crate) tlv_type: u64,
@@ -1274,6 +1286,22 @@ pub(crate) async fn send_asset(
     .unwrap()?;
 
     Ok(Json(SendAssetResponse { txid }))
+}
+
+pub(crate) async fn send_btc(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<SendBtcRequest>, APIError>,
+) -> Result<Json<SendBtcResponse>, APIError> {
+    let amount = payload.amount;
+    let address = payload.address;
+    let fee_rate = payload.fee_rate;
+
+    let txid = state
+        .get_rgb_wallet()
+        .send_btc(state.rgb_online.clone(), address, amount, fee_rate)
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
+
+    Ok(Json(SendBtcResponse { txid }))
 }
 
 pub(crate) async fn send_onion_message(

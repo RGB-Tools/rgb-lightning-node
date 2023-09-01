@@ -32,7 +32,7 @@ use crate::routes::{
     address, asset_balance, btc_balance, close_channel, connect_peer, create_utxos,
     decode_ln_invoice, disconnect_peer, invoice_status, issue_asset, keysend, list_assets,
     list_channels, list_payments, list_peers, list_transactions, list_transfers, list_unspents,
-    ln_invoice, node_info, open_channel, refresh_transfers, rgb_invoice, send_asset,
+    ln_invoice, node_info, open_channel, refresh_transfers, rgb_invoice, send_asset, send_btc,
     send_onion_message, send_payment, shutdown, sign_message,
 };
 
@@ -105,6 +105,7 @@ pub(crate) async fn app(
         .route("/refreshtransfers", post(refresh_transfers))
         .route("/rgbinvoice", post(rgb_invoice))
         .route("/sendasset", post(send_asset))
+        .route("/sendbtc", post(send_btc))
         .route("/sendonionmessage", post(send_onion_message))
         .route("/sendpayment", post(send_payment))
         .route("/shutdown", post(shutdown))

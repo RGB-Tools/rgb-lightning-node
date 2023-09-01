@@ -400,6 +400,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SendAssetResponse'
+  /sendbtc:
+    post:
+      tags:
+        - On-chain
+      summary: Send BTC
+      description: Send bitcoins on-chain
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendBtcRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendBtcResponse'
   /sendonionmessage:
     post:
       tags:
@@ -917,6 +935,24 @@ components:
           type: boolean
           example: false
     SendAssetResponse:
+      type: object
+      properties:
+        txid:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
+    SendBtcRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          example: 16900
+        address:
+          type: string
+          example: bcrt1qwxht5tut39dws8tjcf649tp908r8fr2j75c94k
+        fee_rate:
+          type: number
+          example: 4.2
+    SendBtcResponse:
       type: object
       properties:
         txid:
