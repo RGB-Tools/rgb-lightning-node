@@ -10,9 +10,14 @@ use serde_json::json;
 /// The error variants returned by APIs
 #[derive(Debug, thiserror::Error)]
 pub enum APIError {
-    /// Provided blinded UTXO has already been used for another transfer
+    #[error("Node has already been initialized")]
+    AlreadyInitialized,
+
     #[error("Blinded UTXO already used")]
     BlindedUTXOAlreadyUsed,
+
+    #[error("Cannot call other APIs while node is changing state")]
+    ChangingState,
 
     #[error("Failed closing channel: {0}")]
     FailedClosingChannel(String),
@@ -22,6 +27,9 @@ pub enum APIError {
 
     #[error("Failed to issue asset: {0}")]
     FailedIssuingAsset(String),
+
+    #[error("Unable to create keys seed file {0}: {1}")]
+    FailedKeysCreation(String, String),
 
     #[error("Failed to sign message: {0}")]
     FailedMessageSigning(String),
@@ -38,6 +46,9 @@ pub enum APIError {
     #[error("Failed to send onion message: {0}")]
     FailedSendingOnionMessage(String),
 
+    #[error("Failed to start LDK: {0}")]
+    FailedStartingLDK(String),
+
     #[error("Not enough assets, available: {0}")]
     InsufficientAssets(u64),
 
@@ -49,6 +60,9 @@ pub enum APIError {
 
     #[error("Invalid asset ID: {0}")]
     InvalidAssetID(String),
+
+    #[error("Invalid backup path")]
+    InvalidBackupPath,
 
     #[error("Invalid blinded UTXO: {0}")]
     InvalidBlindedUTXO(String),
@@ -71,6 +85,9 @@ pub enum APIError {
     #[error("Invalid onion data: {0}")]
     InvalidOnionData(String),
 
+    #[error("Invalid password: {0}")]
+    InvalidPassword(String),
+
     #[error("Invalid peer info: {0}")]
     InvalidPeerInfo(String),
 
@@ -92,8 +109,14 @@ pub enum APIError {
     #[error(transparent)]
     JsonExtractorRejection(#[from] JsonRejection),
 
+    #[error("Node is locked (hint: call unlock)")]
+    LockedNode,
+
     #[error("No uncolored UTXOs are available (hint: call createutxos)")]
     NoAvailableUtxos,
+
+    #[error("Wallet has not been initialized (hint: call init)")]
+    NotInitialized,
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
@@ -109,6 +132,15 @@ pub enum APIError {
 
     #[error("Unknown LN invoice")]
     UnknownLNInvoice,
+
+    #[error("Node is unlocked (hint: call lock)")]
+    UnlockedNode,
+
+    #[error("The provided backup has an unsupported version: {version}")]
+    UnsupportedBackupVersion { version: String },
+
+    #[error("The provided password is incorrect")]
+    WrongPassword,
 }
 
 impl IntoResponse for APIError {
@@ -120,16 +152,19 @@ impl IntoResponse for APIError {
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
+            | APIError::FailedKeysCreation(_, _)
             | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
             | APIError::FailedPeerConnection
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
+            | APIError::FailedStartingLDK(_)
             | APIError::IO(_)
             | APIError::Proxy(_)
             | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
+            | APIError::InvalidBackupPath
             | APIError::InvalidBlindedUTXO(_)
             | APIError::InvalidChannelID
             | APIError::InvalidFeeRate(_)
@@ -137,18 +172,28 @@ impl IntoResponse for APIError {
             | APIError::InvalidName(_)
             | APIError::InvalidNodeIds(_)
             | APIError::InvalidOnionData(_)
+            | APIError::InvalidPassword(_)
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
-            | APIError::OutputBelowDustLimit => (StatusCode::BAD_REQUEST, self.to_string()),
-            APIError::BlindedUTXOAlreadyUsed
+            | APIError::OutputBelowDustLimit
+            | APIError::UnsupportedBackupVersion { .. } => {
+                (StatusCode::BAD_REQUEST, self.to_string())
+            }
+            APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
+            APIError::AlreadyInitialized
+            | APIError::BlindedUTXOAlreadyUsed
+            | APIError::ChangingState
             | APIError::InsufficientAssets(_)
             | APIError::InsufficientFunds(_)
+            | APIError::LockedNode
             | APIError::NoAvailableUtxos
+            | APIError::NotInitialized
             | APIError::UnknownContractId
-            | APIError::UnknownLNInvoice => (StatusCode::FORBIDDEN, self.to_string()),
+            | APIError::UnknownLNInvoice
+            | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),
         };
 
         let body = Json(json!({
@@ -165,9 +210,6 @@ impl IntoResponse for APIError {
 pub enum AppError {
     #[error("Failed to connect to bitcoind client: {0}")]
     FailedBitcoindConnection(String),
-
-    #[error("Unable to create keys seed file {0}: {1}")]
-    FailedKeysCreation(String, String),
 
     #[error("Invalid announced listen addresses: {0}")]
     InvalidAnnouncedListenAddresses(String),

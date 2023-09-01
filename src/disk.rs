@@ -14,14 +14,14 @@ use std::sync::Arc;
 
 use crate::error::APIError;
 use crate::ldk::NetworkGraph;
-use crate::utils::parse_peer_info;
+use crate::utils::{parse_peer_info, LOGS_DIR};
 
 pub(crate) struct FilesystemLogger {
     data_dir: String,
 }
 impl FilesystemLogger {
     pub(crate) fn new(data_dir: String) -> Self {
-        let logs_path = format!("{}/logs", data_dir);
+        let logs_path = format!("{}/{}", data_dir, LOGS_DIR);
         fs::create_dir_all(logs_path.clone()).unwrap();
         Self {
             data_dir: logs_path,

@@ -146,12 +146,15 @@ curl -X POST -H "Content-type: application/json" \
 The node currently exposes the following APIs:
 - `/address` (POST)
 - `/assetbalance` (POST)
+- `/backup` (POST)
 - `/btcbalance` (GET)
+- `/changepassword` (POST)
 - `/closechannel` (POST)
 - `/connectpeer` (POST)
 - `/createutxos` (POST)
 - `/decodelninvoice` (POST)
 - `/disconnectpeer` (POST)
+- `/init` (POST)
 - `/invoicestatus` (POST)
 - `/issueasset` (POST)
 - `/keysend` (POST)
@@ -162,10 +165,12 @@ The node currently exposes the following APIs:
 - `/listtransactions` (GET)
 - `/listtransfers` (POST)
 - `/listunspents` (GET)
+- `/lock` (POST)
 - `/lninvoice` (POST)
 - `/nodeinfo` (GET)
 - `/openchannel` (POST)
 - `/refreshtransfers` (POST)
+- `/restore` (POST)
 - `/rgbinvoice` (POST)
 - `/sendasset` (POST)
 - `/sendbtc` (POST)
@@ -173,6 +178,7 @@ The node currently exposes the following APIs:
 - `/sendpayment` (POST)
 - `/shutdown` (POST)
 - `/signmessage` (POST)
+- `/unlock` (POST)
 
 To get more details about the available APIs see the [OpenAPI specification].
 A Swagger UI for the `master` branch is generated from the specification and

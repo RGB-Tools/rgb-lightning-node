@@ -10,14 +10,15 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, Channel,
+    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest, Channel,
     CloseChannelRequest, ConnectPeerRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
-    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InvoiceStatus, InvoiceStatusRequest,
-    InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse, KeysendRequest, KeysendResponse,
-    LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse, ListChannelsResponse,
-    ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse, NodeInfoResponse,
-    OpenChannelRequest, OpenChannelResponse, Payment, Peer, RgbInvoiceResponse, SendAssetRequest,
-    SendAssetResponse, SendPaymentRequest, SendPaymentResponse, Unspent,
+    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse,
+    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
+    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    SendPaymentResponse, UnlockRequest, Unspent,
 };
 
 use super::*;
@@ -98,28 +99,71 @@ fn get_txout(txid: &str) -> String {
     .unwrap()
 }
 
-fn start_node(node_test_dir: String, node_peer_port: u16, keep_node_dir: bool) -> SocketAddr {
+fn get_ldk_sockets(peer_ports: &[u16]) -> Vec<SocketAddr> {
+    peer_ports
+        .iter()
+        .map(|p| {
+            SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+                *p,
+            )
+        })
+        .collect::<Vec<SocketAddr>>()
+}
+
+async fn start_daemon(node_test_dir: &str, node_peer_port: u16) -> SocketAddr {
     let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
     let node_address = listener.local_addr().unwrap();
-    if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
-        std::fs::remove_dir_all(node_test_dir.clone()).unwrap();
-    }
     std::fs::create_dir_all(node_test_dir.clone()).unwrap();
     let args = LdkUserInfo {
-        storage_dir_path: node_test_dir,
+        storage_dir_path: node_test_dir.to_string(),
         ldk_peer_listening_port: node_peer_port,
         ..Default::default()
     };
     tokio::spawn(async move {
-        let (router, ldk_background_services, cancel_token) = app(args).await.unwrap();
+        let (router, app_state) = app(args).await.unwrap();
         axum::Server::from_tcp(listener)
             .unwrap()
             .serve(router.into_make_service())
-            .with_graceful_shutdown(shutdown_signal(ldk_background_services, cancel_token))
+            .with_graceful_shutdown(shutdown_signal(app_state))
             .await
             .unwrap();
     });
     node_address
+}
+
+async fn start_node(
+    node_test_dir: String,
+    node_peer_port: u16,
+    keep_node_dir: bool,
+) -> (SocketAddr, String) {
+    if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
+        std::fs::remove_dir_all(node_test_dir.clone()).unwrap();
+    }
+    let node_address = start_daemon(&node_test_dir, node_peer_port).await;
+
+    let password = format!("{node_test_dir}.{node_peer_port}");
+
+    if !keep_node_dir {
+        let payload = InitRequest {
+            password: password.clone(),
+        };
+        let res = reqwest::Client::new()
+            .post(format!("http://{}/init", node_address))
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+        _check_response_is_ok(res)
+            .await
+            .json::<InitResponse>()
+            .await
+            .unwrap();
+    }
+
+    unlock(node_address, password.clone()).await;
+
+    (node_address, password)
 }
 
 async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
@@ -138,6 +182,24 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
         .await
         .unwrap()
         .spendable
+}
+
+async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
+    let payload = BackupRequest {
+        backup_path: backup_path.to_string(),
+        password: password.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/backup", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &str) {
@@ -516,6 +578,19 @@ async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
         .unspents
 }
 
+async fn lock(node_address: SocketAddr) {
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/lock", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+}
+
 async fn rgb_invoice(node_address: SocketAddr) -> String {
     let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))
@@ -533,6 +608,24 @@ async fn rgb_invoice(node_address: SocketAddr) -> String {
 async fn refresh_transfers(node_address: SocketAddr) {
     let res = reqwest::Client::new()
         .post(format!("http://{}/refreshtransfers", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+}
+
+async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
+    let payload = RestoreRequest {
+        backup_path: backup_path.to_string(),
+        password: password.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/restore", node_address))
+        .json(&payload)
         .send()
         .await
         .unwrap();
@@ -593,6 +686,21 @@ async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
             panic!("cannot find successful payment")
         }
     }
+}
+
+async fn unlock(node_address: SocketAddr, password: String) {
+    let payload = UnlockRequest { password };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/unlock", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_balance: u64) {
@@ -787,6 +895,7 @@ pub fn initialize() {
     });
 }
 
+mod backup_and_restore;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
 mod close_coop_standard;

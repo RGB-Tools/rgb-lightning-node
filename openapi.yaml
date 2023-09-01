@@ -59,6 +59,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssetBalanceResponse'
+  /backup:
+    post:
+      tags:
+        - Other
+      summary: Backup the node
+      description: Create a backup of the node's data
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /btcbalance:
     get:
       tags:
@@ -72,6 +90,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BtcBalanceResponse'
+  /changepassword:
+    post:
+      tags:
+        - Other
+      summary: Change the password
+      description: Change the node's password
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /closechannel:
     post:
       tags:
@@ -157,6 +193,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /init:
+    post:
+      tags:
+        - Other
+      summary: Init the node
+      description: Initialize a new node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitResponse'
   /invoicestatus:
     post:
       tags:
@@ -307,6 +361,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListUnspentsResponse'
+  /lock:
+    post:
+      tags:
+        - Other
+      summary: Lock the node
+      description: Lock an unlocked node
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /lninvoice:
     post:
       tags:
@@ -362,6 +429,24 @@ paths:
         - RGB
       summary: Refresh transfers
       description: Refresh RGB pending transfers
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /restore:
+    post:
+      tags:
+        - Other
+      summary: Restore the node
+      description: Restore a node from a backup file
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
       responses:
         '200':
           description: Successful operation
@@ -485,6 +570,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SignMessageResponse'
+  /unlock:
+    post:
+      tags:
+        - Other
+      summary: Unlock the node
+      description: Unlock a locked node
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnlockRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
 components:
   schemas:
     AddressResponse:
@@ -538,6 +641,15 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    BackupRequest:
+      type: object
+      properties:
+        backup_path:
+          type: string
+          example: /path/where/to/save/the/backup/file
+        password:
+          type: string
+          example: nodepassword
     BitcoinNetwork:
       type: string
       example: Regtest
@@ -574,6 +686,15 @@ components:
           $ref: '#/components/schemas/BtcBalance'
         colored:
           $ref: '#/components/schemas/BtcBalance'
+    ChangePasswordRequest:
+      type: object
+      properties:
+        old_password:
+          type: string
+          example: nodepassword
+        new_password:
+          type: string
+          example: nodenewpassword
     Channel:
       type: object
       properties:
@@ -689,6 +810,18 @@ components:
         - Pending
         - Succeeded
         - Failed
+    InitRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          example: nodepassword
+    InitResponse:
+      type: object
+      properties:
+        mnemonic:
+          type: string
+          example: skill lamp please gown put season degree collect decline account monitor insane
     InvoiceStatus:
       type: string
       enum:
@@ -901,6 +1034,15 @@ components:
         pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+    RestoreRequest:
+      type: object
+      properties:
+        backup_path:
+          type: string
+          example: /path/to/the/backup/file
+        password:
+          type: string
+          example: nodepassword
     RgbAllocation:
       type: object
       properties:
@@ -1094,6 +1236,12 @@ components:
       type: string
       enum:
         - JsonRpc
+    UnlockRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          example: nodepassword
     Unspent:
       type: object
       properties:

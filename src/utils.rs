@@ -1,50 +1,101 @@
 use amplify::s;
+use bdk::keys::bip39::Mnemonic;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
+use lightning::ln::msgs::NetAddress;
+use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
 use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
 use lightning::{
     onion_message::CustomOnionMessageContents,
     util::ser::{Writeable, Writer},
 };
+use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
+use rgb_lib::BitcoinNetwork;
 use std::{
     collections::HashMap,
     fmt::Write,
+    fs,
     net::{SocketAddr, ToSocketAddrs},
+    path::Path,
+    str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    args::LdkUserInfo,
+    bitcoind::BitcoindClient,
     disk::FilesystemLogger,
-    error::APIError,
-    ldk::{ChannelManager, NetworkGraph, OnionMessenger, PaymentInfo, PeerManager},
+    error::{APIError, AppError},
+    ldk::{
+        ChannelManager, LdkBackgroundServices, NetworkGraph, OnionMessenger, PaymentInfo,
+        PeerManager,
+    },
 };
 
-#[derive(Clone)]
+pub(crate) const LOGS_DIR: &str = "logs";
+const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
+const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
+const PROXY_ENDPOINT_REGTEST: &str = "rpc://127.0.0.1:3000/json-rpc";
+const PROXY_URL_REGTEST: &str = "http://127.0.0.1:3000/json-rpc";
+const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/json-rpc";
+const PROXY_URL_TESTNET: &str = "https://proxy.iriswallet.com/json-rpc";
+const PROXY_TIMEOUT: u8 = 90;
+const PASSWORD_MIN_LENGTH: u8 = 8;
+
 pub(crate) struct AppState {
-    pub(crate) channel_manager: Arc<ChannelManager>,
-    pub(crate) electrum_url: String,
-    pub(crate) inbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
-    pub(crate) keys_manager: Arc<KeysManager>,
+    pub(crate) static_state: Arc<StaticState>,
+    pub(crate) cancel_token: CancellationToken,
+    pub(crate) unlocked_app_state: Arc<Mutex<Option<Arc<UnlockedAppState>>>>,
+    pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
+    pub(crate) changing_state: Mutex<bool>,
+}
+
+impl AppState {
+    pub(crate) fn get_changing_state(&self) -> MutexGuard<bool> {
+        self.changing_state.lock().unwrap()
+    }
+
+    pub(crate) fn get_ldk_background_services(&self) -> MutexGuard<Option<LdkBackgroundServices>> {
+        self.ldk_background_services.lock().unwrap()
+    }
+
+    pub(crate) fn get_unlocked_app_state(&self) -> MutexGuard<Option<Arc<UnlockedAppState>>> {
+        self.unlocked_app_state.lock().unwrap()
+    }
+}
+
+pub(crate) struct StaticState {
+    pub(crate) ldk_peer_listening_port: u16,
+    pub(crate) ldk_announced_listen_addr: Vec<NetAddress>,
+    pub(crate) ldk_announced_node_name: [u8; 32],
+    pub(crate) network: Network,
+    pub(crate) storage_dir_path: String,
     pub(crate) ldk_data_dir: String,
     pub(crate) logger: Arc<FilesystemLogger>,
-    pub(crate) network: Network,
+    pub(crate) electrum_url: String,
+    pub(crate) proxy_endpoint: String,
+    pub(crate) proxy_url: String,
+    pub(crate) proxy_client: Arc<RestClient>,
+    pub(crate) bitcoind_client: Arc<BitcoindClient>,
+}
+
+pub(crate) struct UnlockedAppState {
+    pub(crate) channel_manager: Arc<ChannelManager>,
+    pub(crate) inbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
+    pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,
     pub(crate) onion_messenger: Arc<OnionMessenger>,
     pub(crate) outbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
     pub(crate) peer_manager: Arc<PeerManager>,
-    pub(crate) proxy_client: Arc<RestClient>,
-    pub(crate) proxy_endpoint: String,
-    pub(crate) proxy_url: String,
-    pub(crate) cancel_token: CancellationToken,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
 }
 
-impl AppState {
+impl UnlockedAppState {
     pub(crate) fn get_inbound_payments(&self) -> MutexGuard<HashMap<PaymentHash, PaymentInfo>> {
         self.inbound_payments.lock().unwrap()
     }
@@ -72,6 +123,84 @@ impl CustomOnionMessageContents for UserOnionMessageContents {
 impl Writeable for UserOnionMessageContents {
     fn write<W: Writer>(&self, w: &mut W) -> Result<(), std::io::Error> {
         w.write_all(&self.data)
+    }
+}
+
+pub(crate) fn check_already_initialized(mnemonic_path: &str) -> Result<(), APIError> {
+    if Path::new(&mnemonic_path).exists() {
+        return Err(APIError::AlreadyInitialized);
+    }
+    Ok(())
+}
+
+pub(crate) fn check_locked(
+    state: &Arc<AppState>,
+) -> Result<MutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
+    let unlocked_app_state = state.unlocked_app_state.lock().unwrap();
+    if unlocked_app_state.is_some() {
+        Err(APIError::UnlockedNode)
+    } else if *state.get_changing_state() {
+        Err(APIError::ChangingState)
+    } else {
+        Ok(unlocked_app_state)
+    }
+}
+
+pub(crate) fn check_unlocked(
+    state: &Arc<AppState>,
+) -> Result<MutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
+    let unlocked_app_state = state.unlocked_app_state.lock().unwrap();
+    if unlocked_app_state.is_none() {
+        Err(APIError::LockedNode)
+    } else if *state.get_changing_state() {
+        Err(APIError::ChangingState)
+    } else {
+        Ok(unlocked_app_state)
+    }
+}
+
+pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> {
+    if password.len() < PASSWORD_MIN_LENGTH as usize {
+        return Err(APIError::InvalidPassword(format!(
+            "must have at least {PASSWORD_MIN_LENGTH} chars"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn check_password_validity(
+    password: &str,
+    storage_dir_path: &str,
+) -> Result<Mnemonic, APIError> {
+    let mnemonic_path = get_mnemonic_path(storage_dir_path);
+    if let Ok(encrypted_mnemonic) = fs::read_to_string(mnemonic_path) {
+        let mcrypt = new_magic_crypt!(password, 256);
+        let mnemonic_str = mcrypt
+            .decrypt_base64_to_string(encrypted_mnemonic)
+            .map_err(|_| APIError::WrongPassword)?;
+        Ok(Mnemonic::from_str(&mnemonic_str).expect("valid mnemonic"))
+    } else {
+        Err(APIError::NotInitialized)
+    }
+}
+
+pub(crate) fn get_mnemonic_path(storage_dir_path: &str) -> String {
+    format!("{}/mnemonic", storage_dir_path)
+}
+
+pub(crate) fn encrypt_and_save_mnemonic(
+    password: String,
+    mnemonic: String,
+    mnemonic_path: String,
+) -> Result<(), APIError> {
+    let mcrypt = new_magic_crypt!(password, 256);
+    let encrypted_mnemonic = mcrypt.encrypt_str_to_base64(mnemonic);
+    match fs::write(mnemonic_path.clone(), encrypted_mnemonic) {
+        Ok(()) => {
+            tracing::info!("Created a new wallet");
+            Ok(())
+        }
+        Err(e) => Err(APIError::FailedKeysCreation(mnemonic_path, e.to_string())),
     }
 }
 
@@ -190,4 +319,100 @@ pub(crate) fn parse_peer_info(
     }
 
     Ok((pubkey.unwrap(), peer_addr.unwrap().unwrap()))
+}
+
+pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, AppError> {
+    // Initialize the Logger (creates ldk_data_dir and its logs directory)
+    let ldk_data_dir = format!("{}/.ldk", args.storage_dir_path);
+    let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
+
+    // Initialize our bitcoind client.
+    let bitcoind_client = match BitcoindClient::new(
+        args.bitcoind_rpc_host.clone(),
+        args.bitcoind_rpc_port,
+        args.bitcoind_rpc_username.clone(),
+        args.bitcoind_rpc_password.clone(),
+        tokio::runtime::Handle::current(),
+        Arc::clone(&logger),
+    )
+    .await
+    {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            return Err(AppError::FailedBitcoindConnection(e.to_string()));
+        }
+    };
+
+    // Check that the bitcoind we've connected to is running the network we expect
+    let network = args.network;
+    let bitcoind_chain = bitcoind_client.get_blockchain_info().await.chain;
+    if bitcoind_chain
+        != match network {
+            bitcoin::Network::Bitcoin => "main",
+            bitcoin::Network::Testnet => "test",
+            bitcoin::Network::Regtest => "regtest",
+            bitcoin::Network::Signet => "signet",
+        }
+    {
+        return Err(AppError::InvalidBitcoinNetwork(network, bitcoind_chain));
+    }
+
+    // RGB setup
+    let (electrum_url, proxy_url, proxy_endpoint) = match network {
+        bitcoin::Network::Testnet => (
+            ELECTRUM_URL_TESTNET,
+            PROXY_URL_TESTNET,
+            PROXY_ENDPOINT_TESTNET,
+        ),
+        bitcoin::Network::Regtest => (
+            ELECTRUM_URL_REGTEST,
+            PROXY_URL_REGTEST,
+            PROXY_ENDPOINT_REGTEST,
+        ),
+        _ => {
+            return Err(AppError::UnsupportedBitcoinNetwork);
+        }
+    };
+    fs::write(
+        format!("{}/{ELECTRUM_URL_FNAME}", args.storage_dir_path),
+        electrum_url,
+    )
+    .expect("able to write");
+    let bitcoin_network: BitcoinNetwork = network.into();
+    fs::write(
+        format!("{}/{BITCOIN_NETWORK_FNAME}", args.storage_dir_path),
+        bitcoin_network.to_string(),
+    )
+    .expect("able to write");
+    let rest_client = RestClient::builder()
+        .timeout(Duration::from_secs(PROXY_TIMEOUT as u64))
+        .connection_verbose(true)
+        .build()
+        .expect("valid proxy");
+    let proxy_client = Arc::new(rest_client);
+
+    let cancel_token = CancellationToken::new();
+
+    let static_state = Arc::new(StaticState {
+        ldk_peer_listening_port: args.ldk_peer_listening_port,
+        ldk_announced_listen_addr: args.ldk_announced_listen_addr,
+        ldk_announced_node_name: args.ldk_announced_node_name,
+        network,
+        storage_dir_path: args.storage_dir_path,
+        ldk_data_dir,
+        logger,
+        electrum_url: electrum_url.to_string(),
+        proxy_endpoint: proxy_endpoint.to_string(),
+        proxy_url: proxy_url.to_string(),
+        proxy_client,
+        bitcoind_client,
+    });
+
+    Ok(Arc::new(AppState {
+        static_state,
+        cancel_token,
+        unlocked_app_state: Arc::new(Mutex::new(None)),
+        ldk_background_services: Arc::new(Mutex::new(None)),
+        changing_state: Mutex::new(false),
+    }))
 }
