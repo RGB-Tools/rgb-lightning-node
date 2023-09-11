@@ -31,9 +31,9 @@ use crate::routes::{
     address, asset_balance, backup, btc_balance, change_password, close_channel, connect_peer,
     create_utxos, decode_ln_invoice, disconnect_peer, init, invoice_status, issue_asset, keysend,
     list_assets, list_channels, list_payments, list_peers, list_transactions, list_transfers,
-    list_unspents, ln_invoice, lock, node_info, open_channel, refresh_transfers, restore,
-    rgb_invoice, send_asset, send_btc, send_onion_message, send_payment, shutdown, sign_message,
-    unlock,
+    list_unspents, ln_invoice, lock, network_info, node_info, open_channel, refresh_transfers,
+    restore, rgb_invoice, send_asset, send_btc, send_onion_message, send_payment, shutdown,
+    sign_message, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -102,6 +102,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/listunspents", get(list_unspents))
         .route("/lninvoice", post(ln_invoice))
         .route("/lock", post(lock))
+        .route("/networkinfo", get(network_info))
         .route("/nodeinfo", get(node_info))
         .route("/openchannel", post(open_channel))
         .route("/refreshtransfers", post(refresh_transfers))

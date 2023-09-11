@@ -108,6 +108,17 @@ pub enum BitcoinNetwork {
     Regtest,
 }
 
+impl From<Network> for BitcoinNetwork {
+    fn from(x: Network) -> BitcoinNetwork {
+        match x {
+            Network::Bitcoin => BitcoinNetwork::Mainnet,
+            Network::Testnet => BitcoinNetwork::Testnet,
+            Network::Regtest => BitcoinNetwork::Regtest,
+            Network::Signet => BitcoinNetwork::Signet,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct BlockTime {
     pub(crate) height: u32,
@@ -304,6 +315,12 @@ pub(crate) struct LNInvoiceRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct LNInvoiceResponse {
     pub(crate) invoice: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct NetworkInfoResponse {
+    pub(crate) network: BitcoinNetwork,
+    pub(crate) height: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -720,12 +737,7 @@ pub(crate) async fn decode_ln_invoice(
         payment_hash: hex_str(&invoice.payment_hash().into_inner()),
         payment_secret: hex_str(&invoice.payment_secret().0),
         payee_pubkey: invoice.payee_pub_key().map(|p| p.to_string()),
-        network: match invoice.network() {
-            Network::Bitcoin => BitcoinNetwork::Mainnet,
-            Network::Testnet => BitcoinNetwork::Testnet,
-            Network::Regtest => BitcoinNetwork::Regtest,
-            Network::Signet => BitcoinNetwork::Signet,
-        },
+        network: invoice.network().into(),
     }))
 }
 
@@ -1274,6 +1286,19 @@ pub(crate) async fn ln_invoice(
 
     Ok(Json(LNInvoiceResponse {
         invoice: invoice.to_string(),
+    }))
+}
+
+pub(crate) async fn network_info(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<NetworkInfoResponse>, APIError> {
+    let unlocked_state = check_unlocked(&state)?.clone().unwrap();
+
+    let best_block = unlocked_state.channel_manager.current_best_block();
+
+    Ok(Json(NetworkInfoResponse {
+        network: state.static_state.network.into(),
+        height: best_block.height(),
     }))
 }
 

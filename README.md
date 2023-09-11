@@ -167,6 +167,7 @@ The node currently exposes the following APIs:
 - `/listunspents` (GET)
 - `/lock` (POST)
 - `/lninvoice` (POST)
+- `/networkinfo` (GET)
 - `/nodeinfo` (GET)
 - `/openchannel` (POST)
 - `/refreshtransfers` (POST)
