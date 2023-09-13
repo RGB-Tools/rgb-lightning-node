@@ -1730,13 +1730,18 @@ pub(crate) async fn unlock(
             drop(unlocked_state);
         }
         Err(e) => {
-            *state.get_changing_state() = false;
             return Err(e);
         }
     }
 
-    let mnemonic =
-        check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
+    let mnemonic = check_password_validity(&payload.password, &state.static_state.storage_dir_path);
+    let mnemonic = match mnemonic {
+        Ok(mnemonic) => mnemonic,
+        Err(e) => {
+            *state.get_changing_state() = false;
+            return Err(e);
+        }
+    };
 
     let (new_ldk_background_services, new_unlocked_app_state) =
         start_ldk(state.clone(), mnemonic).await?;
