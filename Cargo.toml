@@ -54,11 +54,12 @@ zip = { version = "0.6.6", default-features = false, features = ["time", "zstd"]
 # RGB-related deps
 amplify = "=4.0.1"
 bp-core = "=0.10.9"
-rgb-lib = "0.2.0-alpha.3"
+rgb-lib = "=0.2.0-alpha.5"
 rgb-std = "=0.10.8"
 rgb-wallet = "=0.10.8"
 rgb_core = { package = "rgb-core", version = "=0.10.7" }
 strict_encoding = "=2.5.0"
+strict_types = "=1.6.1"
 
 [dev-dependencies]
 dircmp = "0.2.0"

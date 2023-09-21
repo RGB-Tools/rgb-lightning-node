@@ -25,7 +25,6 @@ pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> 
     match error {
         rgb_lib::Error::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
         rgb_lib::Error::AssetNotFound { .. } => APIError::UnknownContractId,
-        rgb_lib::Error::BlindedUTXOAlreadyUsed => APIError::BlindedUTXOAlreadyUsed,
         rgb_lib::Error::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
         rgb_lib::Error::InsufficientBitcoins { needed, available } => {
             APIError::InsufficientFunds(needed - available)
@@ -38,6 +37,7 @@ pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> 
         rgb_lib::Error::InvalidPrecision { details } => APIError::InvalidPrecision(details.clone()),
         rgb_lib::Error::InvalidTicker { details } => APIError::InvalidTicker(details.clone()),
         rgb_lib::Error::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
+        rgb_lib::Error::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
         rgb_lib::Error::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
         _ => default,
     }

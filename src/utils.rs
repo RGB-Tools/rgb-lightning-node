@@ -41,8 +41,8 @@ const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 const PROXY_ENDPOINT_REGTEST: &str = "rpc://127.0.0.1:3000/json-rpc";
 const PROXY_URL_REGTEST: &str = "http://127.0.0.1:3000/json-rpc";
-const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/json-rpc";
-const PROXY_URL_TESTNET: &str = "https://proxy.iriswallet.com/json-rpc";
+const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";
+const PROXY_URL_TESTNET: &str = "https://proxy.iriswallet.com/0.2/json-rpc";
 const PROXY_TIMEOUT: u8 = 90;
 const PASSWORD_MIN_LENGTH: u8 = 8;
 

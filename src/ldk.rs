@@ -44,7 +44,7 @@ use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::FilesystemPersister;
 use rand::{thread_rng, Rng, RngCore};
 use rgb_lib::wallet::{DatabaseType, Recipient, RecipientData, Wallet, WalletData};
-use rgb_lib::BitcoinNetwork;
+use rgb_lib::{AssetSchema, BitcoinNetwork};
 use rgbstd::containers::{Bindle, Transfer as RgbTransfer};
 use rgbstd::persistence::Inventory;
 use rgbstd::Txid as RgbTxid;
@@ -767,10 +767,15 @@ async fn handle_ldk_events(
                 let consignment = Bindle::<RgbTransfer>::load(consignment_path)
                     .expect("successful consignment load");
                 let contract_id = consignment.contract_id();
-                match unlocked_state
-                    .get_rgb_wallet()
-                    .save_new_asset(contract_id.to_string())
-                {
+                let schema_id = consignment.schema_id().to_string();
+                let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
+                let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
+
+                match unlocked_state.get_rgb_wallet().save_new_asset(
+                    &mut runtime,
+                    &asset_schema,
+                    contract_id,
+                ) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {}", e),

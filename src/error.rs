@@ -16,9 +16,6 @@ pub enum APIError {
     #[error("Node has already been initialized")]
     AlreadyInitialized,
 
-    #[error("Blinded UTXO already used")]
-    BlindedUTXOAlreadyUsed,
-
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
@@ -127,6 +124,9 @@ pub enum APIError {
     #[error("Proxy error: {0}")]
     Proxy(#[from] reqwest::Error),
 
+    #[error("Recipient ID already used")]
+    RecipientIDAlreadyUsed,
+
     #[error("Unexpected error")]
     Unexpected,
 
@@ -188,13 +188,13 @@ impl IntoResponse for APIError {
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
-            | APIError::BlindedUTXOAlreadyUsed
             | APIError::ChangingState
             | APIError::InsufficientAssets(_)
             | APIError::InsufficientFunds(_)
             | APIError::LockedNode
             | APIError::NoAvailableUtxos
             | APIError::NotInitialized
+            | APIError::RecipientIDAlreadyUsed
             | APIError::UnknownContractId
             | APIError::UnknownLNInvoice
             | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),
