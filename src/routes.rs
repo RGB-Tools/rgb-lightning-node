@@ -1734,17 +1734,23 @@ pub(crate) async fn unlock(
         }
     }
 
-    let mnemonic = check_password_validity(&payload.password, &state.static_state.storage_dir_path);
-    let mnemonic = match mnemonic {
-        Ok(mnemonic) => mnemonic,
-        Err(e) => {
-            *state.get_changing_state() = false;
-            return Err(e);
-        }
-    };
+    let mnemonic =
+        match check_password_validity(&payload.password, &state.static_state.storage_dir_path) {
+            Ok(mnemonic) => mnemonic,
+            Err(e) => {
+                *state.get_changing_state() = false;
+                return Err(e);
+            }
+        };
 
     let (new_ldk_background_services, new_unlocked_app_state) =
-        start_ldk(state.clone(), mnemonic).await?;
+        match start_ldk(state.clone(), mnemonic).await {
+            Ok((nlbs, nuap)) => (nlbs, nuap),
+            Err(e) => {
+                *state.get_changing_state() = false;
+                return Err(e);
+            }
+        };
 
     let mut unlocked_app_state = state.get_unlocked_app_state();
     *unlocked_app_state = Some(new_unlocked_app_state);
