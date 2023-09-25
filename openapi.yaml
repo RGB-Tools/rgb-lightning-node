@@ -473,6 +473,11 @@ paths:
         - RGB
       summary: Get an RGB invoice
       description: Get an RGB invoice to receive assets on-chain
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RgbInvoiceRequest'
       responses:
         '200':
           description: Successful operation
@@ -1076,6 +1081,12 @@ components:
         settled:
           type: boolean
           example: false
+    RgbInvoiceRequest:
+      type: object
+      properties:
+        min_confirmations:
+          type: integer
+          example: 1
     RgbInvoiceResponse:
       type: object
       properties:
@@ -1097,6 +1108,9 @@ components:
         donation:
           type: boolean
           example: false
+        min_confirmations:
+          type: integer
+          example: 1
     SendAssetResponse:
       type: object
       properties:

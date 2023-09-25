@@ -376,6 +376,11 @@ pub(crate) struct RgbAllocation {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct RgbInvoiceRequest {
+    pub(crate) min_confirmations: u8,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RgbInvoiceResponse {
     pub(crate) blinded_utxo: String,
 }
@@ -386,6 +391,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) amount: u64,
     pub(crate) blinded_utxo: String,
     pub(crate) donation: bool,
+    pub(crate) min_confirmations: u8,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1469,8 +1475,11 @@ pub(crate) async fn restore(
 
 pub(crate) async fn rgb_invoice(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<RgbInvoiceRequest>, APIError>,
 ) -> Result<Json<RgbInvoiceResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
+
+    let min_confirmations = payload.min_confirmations;
 
     let receive_data = unlocked_state
         .get_rgb_wallet()
@@ -1479,7 +1488,7 @@ pub(crate) async fn rgb_invoice(
             None,
             None,
             vec![state.static_state.proxy_endpoint.clone()],
-            1,
+            min_confirmations,
         )
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
     let blinded_utxo = receive_data.recipient_id;
@@ -1497,6 +1506,7 @@ pub(crate) async fn send_asset(
     let amount = payload.amount;
     let blinded_utxo = payload.blinded_utxo;
     let donation = payload.donation;
+    let min_confirmations = payload.min_confirmations;
 
     let secret_seal = SecretSeal::from_str(&blinded_utxo)
         .map_err(|e| APIError::InvalidBlindedUTXO(e.to_string()))?;
@@ -1516,7 +1526,7 @@ pub(crate) async fn send_asset(
                 recipient_map,
                 donation,
                 FEE_RATE,
-                1,
+                min_confirmations,
             )
             .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))
     })

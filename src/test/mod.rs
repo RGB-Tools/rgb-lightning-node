@@ -17,7 +17,7 @@ use crate::routes::{
     KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse,
     ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse,
     NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
-    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
     SendPaymentResponse, UnlockRequest, Unspent,
 };
 
@@ -592,8 +592,12 @@ async fn lock(node_address: SocketAddr) {
 }
 
 async fn rgb_invoice(node_address: SocketAddr) -> String {
+    let payload = RgbInvoiceRequest {
+        min_confirmations: 1,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))
+        .json(&payload)
         .send()
         .await
         .unwrap();
@@ -642,6 +646,7 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         amount,
         blinded_utxo,
         donation: true,
+        min_confirmations: 1,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/sendasset", node_address))
