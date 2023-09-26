@@ -150,6 +150,11 @@ paths:
         - RGB
       summary: Create UTXOs
       description: Create a fixed number of UTXOs to be used for RGB operations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUtxosRequest'
       responses:
         '200':
           description: Successful operation
@@ -779,6 +784,12 @@ components:
         peer_pubkey_and_addr:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d@localhost:9736
+    CreateUtxosRequest:
+      type: object
+      properties:
+        up_to:
+          type: boolean
+          example: false
     DecodeLNInvoiceRequest:
       type: object
       properties:

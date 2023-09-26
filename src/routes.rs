@@ -176,6 +176,11 @@ pub(crate) struct ConnectPeerRequest {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct CreateUtxosRequest {
+    pub(crate) up_to: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct DecodeLNInvoiceRequest {
     pub(crate) invoice: String,
 }
@@ -699,14 +704,17 @@ pub(crate) async fn connect_peer(
 
 pub(crate) async fn create_utxos(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<CreateUtxosRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
+
+    let up_to = payload.up_to;
 
     unlocked_state
         .get_rgb_wallet()
         .create_utxos(
             unlocked_state.rgb_online.clone(),
-            false,
+            up_to,
             Some(UTXO_NUM),
             Some(UTXO_SIZE_SAT),
             FEE_RATE,

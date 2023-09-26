@@ -11,14 +11,14 @@ use tracing_test::traced_test;
 
 use crate::routes::{
     AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest, Channel,
-    CloseChannelRequest, ConnectPeerRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
-    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
-    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse,
-    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse,
-    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse,
-    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
-    SendPaymentResponse, UnlockRequest, Unspent,
+    CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
+    DecodeLNInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
+    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest,
+    IssueAssetResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
+    ListUnspentsResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
+    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
+    SendPaymentRequest, SendPaymentResponse, UnlockRequest, Unspent,
 };
 
 use super::*;
@@ -307,8 +307,10 @@ async fn fund_and_create_utxos(node_address: SocketAddr) {
 
     mine(false);
 
+    let payload = CreateUtxosRequest { up_to: false };
     let res = reqwest::Client::new()
         .post(format!("http://{}/createutxos", node_address))
+        .json(&payload)
         .send()
         .await
         .unwrap();
