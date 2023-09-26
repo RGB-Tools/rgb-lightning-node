@@ -243,7 +243,7 @@ pub(crate) struct InvoiceStatusResponse {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct IssueAssetRequest {
-    pub(crate) amount: u64,
+    pub(crate) amounts: Vec<u64>,
     pub(crate) ticker: String,
     pub(crate) name: String,
     pub(crate) precision: u8,
@@ -875,7 +875,7 @@ pub(crate) async fn issue_asset(
 ) -> Result<Json<IssueAssetResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let amount = payload.amount;
+    let amounts = payload.amounts;
     let ticker = payload.ticker;
     let name = payload.name;
     let precision = payload.precision;
@@ -887,7 +887,7 @@ pub(crate) async fn issue_asset(
             ticker,
             name,
             precision,
-            vec![amount],
+            amounts,
         )
         .map_err(|e| match_rgb_lib_error(&e, APIError::FailedIssuingAsset(e.to_string())))?;
 

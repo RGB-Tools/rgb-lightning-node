@@ -343,7 +343,7 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
 
 async fn issue_asset(node_address: SocketAddr) -> String {
     let payload = IssueAssetRequest {
-        amount: 1000,
+        amounts: vec![1000],
         ticker: s!("USDT"),
         name: s!("Tether"),
         precision: 0,

@@ -872,9 +872,11 @@ components:
     IssueAssetRequest:
       type: object
       properties:
-        amount:
-          type: integer
-          example: 777
+        amounts:
+          type: array
+          items:
+            type: integer
+            example: 1000
         ticker:
           type: string
           example: USDT
