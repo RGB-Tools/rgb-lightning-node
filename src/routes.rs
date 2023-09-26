@@ -541,10 +541,8 @@ pub(crate) async fn asset_balance(
 ) -> Result<Json<AssetBalanceResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let asset_id = payload.asset_id;
-
-    let contract_id =
-        ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?;
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
 
     let balance = unlocked_state
         .get_rgb_wallet()
@@ -581,15 +579,13 @@ pub(crate) async fn backup(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let _unlocked_state = check_locked(&state)?;
 
-    let backup_path = payload.backup_path;
-    let password = payload.password;
-
-    let _mnemonic = check_password_validity(&password, &state.static_state.storage_dir_path)?;
+    let _mnemonic =
+        check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
 
     do_backup(
         PathBuf::from(&state.static_state.storage_dir_path),
-        &backup_path,
-        &password,
+        &payload.backup_path,
+        &payload.password,
     )?;
 
     Ok(Json(EmptyResponse {}))
@@ -646,18 +642,14 @@ pub(crate) async fn close_channel(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let channel_id_str = payload.channel_id;
-    let peer_pubkey_str = payload.peer_pubkey;
-    let force = payload.force;
-
-    let channel_id_vec = hex_str_to_vec(&channel_id_str);
+    let channel_id_vec = hex_str_to_vec(&payload.channel_id);
     if channel_id_vec.is_none() || channel_id_vec.as_ref().unwrap().len() != 32 {
         return Err(APIError::InvalidChannelID);
     }
     let mut channel_id = [0; 32];
     channel_id.copy_from_slice(&channel_id_vec.unwrap());
 
-    let peer_pubkey_vec = match hex_str_to_vec(&peer_pubkey_str) {
+    let peer_pubkey_vec = match hex_str_to_vec(&payload.peer_pubkey) {
         Some(peer_pubkey_vec) => peer_pubkey_vec,
         None => return Err(APIError::InvalidPubkey),
     };
@@ -666,7 +658,7 @@ pub(crate) async fn close_channel(
         Err(_) => return Err(APIError::InvalidPubkey),
     };
 
-    if force {
+    if payload.force {
         match unlocked_state
             .channel_manager
             .force_close_broadcasting_latest_txn(&channel_id, &peer_pubkey)
@@ -693,9 +685,7 @@ pub(crate) async fn connect_peer(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let peer_pubkey_and_addr = payload.peer_pubkey_and_addr;
-
-    let (peer_pubkey, peer_addr) = parse_peer_info(peer_pubkey_and_addr.to_string())?;
+    let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
 
     connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone()).await?;
 
@@ -708,13 +698,11 @@ pub(crate) async fn create_utxos(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let up_to = payload.up_to;
-
     unlocked_state
         .get_rgb_wallet()
         .create_utxos(
             unlocked_state.rgb_online.clone(),
-            up_to,
+            payload.up_to,
             Some(UTXO_NUM),
             Some(UTXO_SIZE_SAT),
             FEE_RATE,
@@ -731,9 +719,7 @@ pub(crate) async fn decode_ln_invoice(
 ) -> Result<Json<DecodeLNInvoiceResponse>, APIError> {
     let _unlocked_app_state = state.get_unlocked_app_state();
 
-    let invoice_str = payload.invoice;
-
-    let invoice = match Invoice::from_str(&invoice_str) {
+    let invoice = match Invoice::from_str(&payload.invoice) {
         Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
         Ok(v) => v,
     };
@@ -788,9 +774,7 @@ pub(crate) async fn disconnect_peer(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let peer_pubkey_str = payload.peer_pubkey;
-
-    let peer_pubkey = match bitcoin::secp256k1::PublicKey::from_str(&peer_pubkey_str) {
+    let peer_pubkey = match bitcoin::secp256k1::PublicKey::from_str(&payload.peer_pubkey) {
         Ok(pubkey) => pubkey,
         Err(_e) => return Err(APIError::InvalidPubkey),
     };
@@ -846,9 +830,7 @@ pub(crate) async fn invoice_status(
 ) -> Result<Json<InvoiceStatusResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let invoice_str = payload.invoice;
-
-    let invoice = match Invoice::from_str(&invoice_str) {
+    let invoice = match Invoice::from_str(&payload.invoice) {
         Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
         Ok(v) => v,
     };
@@ -875,19 +857,14 @@ pub(crate) async fn issue_asset(
 ) -> Result<Json<IssueAssetResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let amounts = payload.amounts;
-    let ticker = payload.ticker;
-    let name = payload.name;
-    let precision = payload.precision;
-
     let asset = unlocked_state
         .get_rgb_wallet()
         .issue_asset_nia(
             unlocked_state.rgb_online.clone(),
-            ticker,
-            name,
-            precision,
-            amounts,
+            payload.ticker,
+            payload.name,
+            payload.precision,
+            payload.amounts,
         )
         .map_err(|e| match_rgb_lib_error(&e, APIError::FailedIssuingAsset(e.to_string())))?;
 
@@ -902,8 +879,6 @@ pub(crate) async fn keysend(
 ) -> Result<Json<KeysendResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let asset_id = payload.asset_id;
-
     let dest_pubkey = match hex_str_to_compressed_pubkey(&payload.dest_pubkey) {
         Some(pk) => pk,
         None => return Err(APIError::InvalidPubkey),
@@ -916,8 +891,8 @@ pub(crate) async fn keysend(
         )));
     }
 
-    let contract_id =
-        ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?;
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
 
     let payment_preimage = PaymentPreimage(unlocked_state.keys_manager.get_secure_random_bytes());
     let payment_hash = PaymentHash(Sha256::hash(&payment_preimage.0[..]).into_inner());
@@ -1163,12 +1138,10 @@ pub(crate) async fn list_transfers(
 ) -> Result<Json<ListTransfersResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let asset_id = payload.asset_id;
-
     let rgb_wallet = unlocked_state.get_rgb_wallet();
     let mut transfers = vec![];
     for transfer in rgb_wallet
-        .list_transfers(asset_id)
+        .list_transfers(payload.asset_id)
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?
     {
         transfers.push(Transfer {
@@ -1248,17 +1221,13 @@ pub(crate) async fn ln_invoice(
 ) -> Result<Json<LNInvoiceResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let amt_msat = payload.amt_msat;
-    let expiry_sec = payload.expiry_sec;
-    let asset_amount = payload.asset_amount;
-
     let contract_id = if let Some(asset_id) = payload.asset_id {
         Some(ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?)
     } else {
         None
     };
 
-    if amt_msat.is_some() && amt_msat.unwrap() < INVOICE_MIN_MSAT {
+    if payload.amt_msat.is_some() && payload.amt_msat.unwrap() < INVOICE_MIN_MSAT {
         return Err(APIError::InvalidAmount(format!(
             "amt_msat cannot be less than {INVOICE_MIN_MSAT}"
         )));
@@ -1276,12 +1245,12 @@ pub(crate) async fn ln_invoice(
         unlocked_state.keys_manager.clone(),
         state.static_state.logger.clone(),
         currency,
-        amt_msat,
+        payload.amt_msat,
         "ldk-tutorial-node".to_string(),
-        expiry_sec,
+        payload.expiry_sec,
         None,
         contract_id,
-        asset_amount,
+        payload.asset_amount,
     ) {
         Ok(inv) => inv,
         Err(e) => return Err(APIError::FailedInvoiceCreation(e.to_string())),
@@ -1294,7 +1263,7 @@ pub(crate) async fn ln_invoice(
             preimage: None,
             secret: Some(*invoice.payment_secret()),
             status: HTLCStatus::Pending,
-            amt_msat,
+            amt_msat: payload.amt_msat,
         },
     );
 
@@ -1338,36 +1307,29 @@ pub(crate) async fn open_channel(
 ) -> Result<Json<OpenChannelResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let peer_pubkey_and_addr = payload.peer_pubkey_and_addr;
-    let chan_amt_sat = payload.capacity_sat;
-    let push_amt_msat = payload.push_msat;
-    let chan_amt_rgb = payload.asset_amount;
-    let asset_id = payload.asset_id;
-    let announced_channel = payload.public;
+    let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
 
-    let (peer_pubkey, peer_addr) = parse_peer_info(peer_pubkey_and_addr.to_string())?;
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
 
-    let contract_id =
-        ContractId::from_str(&asset_id).map_err(|_| APIError::InvalidAssetID(asset_id))?;
-
-    if chan_amt_sat < OPENCHANNEL_MIN_SAT {
+    if payload.capacity_sat < OPENCHANNEL_MIN_SAT {
         return Err(APIError::InvalidAmount(format!(
             "Channel amount must be equal or higher than {OPENCHANNEL_MIN_SAT}"
         )));
     }
-    if chan_amt_sat > OPENCHANNEL_MAX_SAT {
+    if payload.capacity_sat > OPENCHANNEL_MAX_SAT {
         return Err(APIError::InvalidAmount(format!(
             "Channel amount must be equal or less than {OPENCHANNEL_MAX_SAT}"
         )));
     }
 
-    if push_amt_msat < DUST_LIMIT_MSAT {
+    if payload.push_msat < DUST_LIMIT_MSAT {
         return Err(APIError::InvalidAmount(format!(
             "Push amount must be equal or higher than the dust limit ({DUST_LIMIT_MSAT})"
         )));
     }
 
-    if chan_amt_rgb < OPENCHANNEL_MIN_RGB_AMT {
+    if payload.asset_amount < OPENCHANNEL_MIN_RGB_AMT {
         return Err(APIError::InvalidAmount(format!(
             "Channel RGB amount must be equal or higher than {OPENCHANNEL_MIN_RGB_AMT}"
         )));
@@ -1382,7 +1344,7 @@ pub(crate) async fn open_channel(
 
     let spendable_rgb_amount = balance.spendable;
 
-    if chan_amt_rgb > spendable_rgb_amount {
+    if payload.asset_amount > spendable_rgb_amount {
         return Err(APIError::InsufficientAssets(spendable_rgb_amount));
     }
 
@@ -1393,7 +1355,7 @@ pub(crate) async fn open_channel(
             ..Default::default()
         },
         channel_handshake_config: ChannelHandshakeConfig {
-            announced_channel,
+            announced_channel: payload.public,
             our_htlc_minimum_msat: HTLC_MIN_MSAT,
             minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
             ..Default::default()
@@ -1406,8 +1368,8 @@ pub(crate) async fn open_channel(
         .channel_manager
         .create_channel(
             peer_pubkey,
-            chan_amt_sat,
-            push_amt_msat,
+            payload.capacity_sat,
+            payload.push_msat,
             0,
             Some(config),
             consignment_endpoint,
@@ -1419,7 +1381,7 @@ pub(crate) async fn open_channel(
         "{}/channel_peer_data",
         state.static_state.ldk_data_dir.clone()
     );
-    let _ = disk::persist_channel_peer(Path::new(&peer_data_path), &peer_pubkey_and_addr);
+    let _ = disk::persist_channel_peer(Path::new(&peer_data_path), &payload.peer_pubkey_and_addr);
 
     let temporary_channel_id = hex::encode(temporary_channel_id);
     let channel_rgb_info_path = format!(
@@ -1429,7 +1391,7 @@ pub(crate) async fn open_channel(
     );
     let rgb_info = RgbInfo {
         contract_id,
-        local_rgb_amount: chan_amt_rgb,
+        local_rgb_amount: payload.asset_amount,
         remote_rgb_amount: 0,
     };
     write_rgb_channel_info(&PathBuf::from(&channel_rgb_info_path), &rgb_info);
@@ -1464,19 +1426,17 @@ pub(crate) async fn restore(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let _unlocked_state = check_locked(&state)?;
 
-    let backup_path = payload.backup_path;
-    let password = payload.password;
-
     let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
     check_already_initialized(&mnemonic_path)?;
 
     restore_backup(
-        &backup_path,
-        &password,
+        &payload.backup_path,
+        &payload.password,
         &state.static_state.storage_dir_path,
     )?;
 
-    let _mnemonic = check_password_validity(&password, &state.static_state.storage_dir_path)?;
+    let _mnemonic =
+        check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
 
     Ok(Json(EmptyResponse {}))
 }
@@ -1487,8 +1447,6 @@ pub(crate) async fn rgb_invoice(
 ) -> Result<Json<RgbInvoiceResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let min_confirmations = payload.min_confirmations;
-
     let receive_data = unlocked_state
         .get_rgb_wallet()
         .blind_receive(
@@ -1496,7 +1454,7 @@ pub(crate) async fn rgb_invoice(
             None,
             None,
             vec![state.static_state.proxy_endpoint.clone()],
-            min_confirmations,
+            payload.min_confirmations,
         )
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
     let blinded_utxo = receive_data.recipient_id;
@@ -1510,18 +1468,12 @@ pub(crate) async fn send_asset(
 ) -> Result<Json<SendAssetResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let asset_id = payload.asset_id;
-    let amount = payload.amount;
-    let blinded_utxo = payload.blinded_utxo;
-    let donation = payload.donation;
-    let min_confirmations = payload.min_confirmations;
-
-    let secret_seal = SecretSeal::from_str(&blinded_utxo)
+    let secret_seal = SecretSeal::from_str(&payload.blinded_utxo)
         .map_err(|e| APIError::InvalidBlindedUTXO(e.to_string()))?;
     let recipient_map = map! {
-        asset_id => vec![Recipient {
+        payload.asset_id => vec![Recipient {
             recipient_data: RecipientData::BlindedUTXO(secret_seal),
-            amount,
+            amount: payload.amount,
             transport_endpoints: vec![state.static_state.proxy_endpoint.clone()]
         }]
     };
@@ -1532,9 +1484,9 @@ pub(crate) async fn send_asset(
             .send(
                 unlocked_state.rgb_online.clone(),
                 recipient_map,
-                donation,
+                payload.donation,
                 FEE_RATE,
-                min_confirmations,
+                payload.min_confirmations,
             )
             .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))
     })
@@ -1550,13 +1502,14 @@ pub(crate) async fn send_btc(
 ) -> Result<Json<SendBtcResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let amount = payload.amount;
-    let address = payload.address;
-    let fee_rate = payload.fee_rate;
-
     let txid = unlocked_state
         .get_rgb_wallet()
-        .send_btc(unlocked_state.rgb_online.clone(), address, amount, fee_rate)
+        .send_btc(
+            unlocked_state.rgb_online.clone(),
+            payload.address,
+            payload.amount,
+            payload.fee_rate,
+        )
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     Ok(Json(SendBtcResponse { txid }))
@@ -1568,17 +1521,14 @@ pub(crate) async fn send_onion_message(
 ) -> Result<Json<EmptyResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let node_ids = payload.node_ids;
-    let tlv_type = payload.tlv_type;
-
-    if node_ids.is_empty() {
+    if payload.node_ids.is_empty() {
         return Err(APIError::InvalidNodeIds(s!(
             "sendonionmessage requires at least one node id for the path"
         )));
     }
 
     let mut node_pks = Vec::new();
-    for pk_str in node_ids {
+    for pk_str in payload.node_ids {
         let node_pubkey_vec = match hex_str_to_vec(&pk_str) {
             Some(peer_pubkey_vec) => peer_pubkey_vec,
             None => {
@@ -1600,7 +1550,7 @@ pub(crate) async fn send_onion_message(
         node_pks.push(node_pubkey);
     }
 
-    if tlv_type < 64 {
+    if payload.tlv_type < 64 {
         return Err(APIError::InvalidTlvType(s!(
             "need an integral message type above 64"
         )));
@@ -1615,7 +1565,10 @@ pub(crate) async fn send_onion_message(
         .send_onion_message(
             &node_pks,
             Destination::Node(destination_pk),
-            OnionMessageContents::Custom(UserOnionMessageContents { tlv_type, data }),
+            OnionMessageContents::Custom(UserOnionMessageContents {
+                tlv_type: payload.tlv_type,
+                data,
+            }),
             None,
         )
         .map_err(|e| APIError::FailedSendingOnionMessage(format!("{:?}", e)))?;
@@ -1631,9 +1584,7 @@ pub(crate) async fn send_payment(
 ) -> Result<Json<SendPaymentResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let invoice_str = payload.invoice;
-
-    let invoice = match Invoice::from_str(&invoice_str) {
+    let invoice = match Invoice::from_str(&payload.invoice) {
         Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
         Ok(v) => v,
     };
@@ -1728,9 +1679,8 @@ pub(crate) async fn sign_message(
 ) -> Result<Json<SignMessageResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let message = payload.message;
     let signed_message = lightning::util::message_signing::sign(
-        &message.as_bytes()[message.len()..],
+        &payload.message.as_bytes()[payload.message.len()..],
         &unlocked_state.keys_manager.get_node_secret_key(),
     )
     .map_err(|e| APIError::FailedMessageSigning(e.to_string()))?;
