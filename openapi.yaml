@@ -1103,9 +1103,15 @@ components:
     RgbInvoiceResponse:
       type: object
       properties:
-        blinded_utxo:
+        recipient_id:
           type: string
           example: utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+        invoice:
+          type: string
+          example: rgb:~/~/utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n?expiry=1695811760&endpoints=rpc://127.0.0.1:3000/json-rpc
+        expiration_timestamp:
+          type: integer
+          example: 1695811760
     SendAssetRequest:
       type: object
       properties:

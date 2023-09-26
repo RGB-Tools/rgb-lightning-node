@@ -387,7 +387,9 @@ pub(crate) struct RgbInvoiceRequest {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RgbInvoiceResponse {
-    pub(crate) blinded_utxo: String,
+    pub(crate) recipient_id: String,
+    pub(crate) invoice: String,
+    pub(crate) expiration_timestamp: Option<i64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1457,9 +1459,12 @@ pub(crate) async fn rgb_invoice(
             payload.min_confirmations,
         )
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
-    let blinded_utxo = receive_data.recipient_id;
 
-    Ok(Json(RgbInvoiceResponse { blinded_utxo }))
+    Ok(Json(RgbInvoiceResponse {
+        recipient_id: receive_data.recipient_id,
+        invoice: receive_data.invoice,
+        expiration_timestamp: receive_data.expiration_timestamp,
+    }))
 }
 
 pub(crate) async fn send_asset(

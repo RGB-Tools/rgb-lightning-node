@@ -608,7 +608,7 @@ async fn rgb_invoice(node_address: SocketAddr) -> String {
         .json::<RgbInvoiceResponse>()
         .await
         .unwrap()
-        .blinded_utxo
+        .recipient_id
 }
 
 async fn refresh_transfers(node_address: SocketAddr) {
