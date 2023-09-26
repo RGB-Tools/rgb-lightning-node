@@ -23,6 +23,7 @@ use crate::error::APIError;
 pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> APIError {
     tracing::error!("ERR from rgb-lib: {error:?}");
     match error {
+        rgb_lib::Error::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
         rgb_lib::Error::AssetNotFound { .. } => APIError::UnknownContractId,
         rgb_lib::Error::BlindedUTXOAlreadyUsed => APIError::BlindedUTXOAlreadyUsed,
         rgb_lib::Error::InsufficientAllocationSlots => APIError::NoAvailableUtxos,

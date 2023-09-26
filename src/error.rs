@@ -10,6 +10,9 @@ use serde_json::json;
 /// The error variants returned by APIs
 #[derive(Debug, thiserror::Error)]
 pub enum APIError {
+    #[error("Allocacations already available")]
+    AllocationsAlreadyAvailable,
+
     #[error("Node has already been initialized")]
     AlreadyInitialized,
 
@@ -183,7 +186,8 @@ impl IntoResponse for APIError {
                 (StatusCode::BAD_REQUEST, self.to_string())
             }
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
-            APIError::AlreadyInitialized
+            APIError::AllocationsAlreadyAvailable
+            | APIError::AlreadyInitialized
             | APIError::BlindedUTXOAlreadyUsed
             | APIError::ChangingState
             | APIError::InsufficientAssets(_)
