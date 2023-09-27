@@ -790,6 +790,9 @@ components:
         up_to:
           type: boolean
           example: false
+        num:
+          type: integer
+          example: 4
     DecodeLNInvoiceRequest:
       type: object
       properties:
