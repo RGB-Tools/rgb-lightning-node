@@ -2,6 +2,7 @@ use amplify::s;
 use bdk::keys::bip39::Mnemonic;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
+use futures::Future;
 use lightning::ln::msgs::NetAddress;
 use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
 use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
@@ -287,6 +288,19 @@ pub(crate) fn hex_str_to_vec(hex: &str) -> Option<Vec<u8>> {
     }
 
     Some(out)
+}
+
+pub(crate) async fn no_cancel<Fut>(fut: Fut) -> Fut::Output
+where
+    Fut: 'static + Future + Send,
+    Fut::Output: Send,
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let result = fut.await;
+        let _ = tx.send(result);
+    });
+    rx.await.unwrap()
 }
 
 pub(crate) fn parse_peer_info(
