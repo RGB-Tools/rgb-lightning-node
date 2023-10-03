@@ -550,7 +550,7 @@ pub(crate) async fn asset_balance(
     let balance = unlocked_state
         .get_rgb_wallet()
         .get_asset_balance(contract_id.to_string())
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
     let mut offchain_outbound = 0;
@@ -602,7 +602,7 @@ pub(crate) async fn btc_balance(
     let btc_balance = unlocked_state
         .get_rgb_wallet()
         .get_btc_balance(unlocked_state.rgb_online.clone())
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     let vanilla = BtcBalance {
         settled: btc_balance.vanilla.settled,
@@ -959,7 +959,7 @@ pub(crate) async fn list_assets(
     let rgb_assets = unlocked_state
         .get_rgb_wallet()
         .list_assets(vec![])
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     let mut assets = vec![];
     for asset in rgb_assets.nia.unwrap() {
@@ -1141,9 +1141,9 @@ pub(crate) async fn list_transfers(
 ) -> Result<Json<ListTransfersResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let rgb_wallet = unlocked_state.get_rgb_wallet();
     let mut transfers = vec![];
-    for transfer in rgb_wallet
+    for transfer in unlocked_state
+        .get_rgb_wallet()
         .list_transfers(payload.asset_id)
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?
     {
@@ -1192,9 +1192,9 @@ pub(crate) async fn list_unspents(
 ) -> Result<Json<ListUnspentsResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let rgb_wallet = unlocked_state.get_rgb_wallet();
     let mut unspents = vec![];
-    for unspent in rgb_wallet
+    for unspent in unlocked_state
+        .get_rgb_wallet()
         .list_unspents(Some(unlocked_state.rgb_online.clone()), false)
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?
     {
@@ -1343,7 +1343,7 @@ pub(crate) async fn open_channel(
     let balance = unlocked_state
         .get_rgb_wallet()
         .get_asset_balance(contract_id.to_string())
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     let spendable_rgb_amount = balance.spendable;
 
@@ -1413,7 +1413,7 @@ pub(crate) async fn refresh_transfers(
         unlocked_state
             .get_rgb_wallet()
             .refresh(unlocked_state.rgb_online.clone(), None, vec![])
-            .map_err(|_| APIError::Unexpected)
+            .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))
     })
     .await
     .unwrap()?;
