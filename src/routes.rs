@@ -744,33 +744,6 @@ pub(crate) async fn decode_ln_invoice(
     }))
 }
 
-pub(crate) async fn lock(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<EmptyResponse>, APIError> {
-    match check_unlocked(&state) {
-        Ok(unlocked_state) => {
-            *state.get_changing_state() = true;
-            drop(unlocked_state);
-        }
-        Err(e) => {
-            *state.get_changing_state() = false;
-            return Err(e);
-        }
-    }
-
-    stop_ldk(state.clone()).await;
-
-    let mut unlocked_app_state = state.get_unlocked_app_state();
-    *unlocked_app_state = None;
-
-    let mut ldk_background_services = state.get_ldk_background_services();
-    *ldk_background_services = None;
-
-    *state.get_changing_state() = false;
-
-    Ok(Json(EmptyResponse {}))
-}
-
 pub(crate) async fn disconnect_peer(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<DisconnectPeerRequest>, APIError>,
@@ -1273,6 +1246,33 @@ pub(crate) async fn ln_invoice(
     Ok(Json(LNInvoiceResponse {
         invoice: invoice.to_string(),
     }))
+}
+
+pub(crate) async fn lock(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    match check_unlocked(&state) {
+        Ok(unlocked_state) => {
+            *state.get_changing_state() = true;
+            drop(unlocked_state);
+        }
+        Err(e) => {
+            *state.get_changing_state() = false;
+            return Err(e);
+        }
+    }
+
+    stop_ldk(state.clone()).await;
+
+    let mut unlocked_app_state = state.get_unlocked_app_state();
+    *unlocked_app_state = None;
+
+    let mut ldk_background_services = state.get_ldk_background_services();
+    *ldk_background_services = None;
+
+    *state.get_changing_state() = false;
+
+    Ok(Json(EmptyResponse {}))
 }
 
 pub(crate) async fn network_info(
