@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
         .with(file_log.with_filter(filter::LevelFilter::DEBUG))
         .init();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.daemon_listening_port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.daemon_listening_port));
 
     let (router, app_state) = app(args).await?;
 
