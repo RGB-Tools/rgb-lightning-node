@@ -103,6 +103,9 @@ pub enum APIError {
     #[error("Invalid tlv type: {0}")]
     InvalidTlvType(String),
 
+    #[error("Invalid transport endpoints: {0}")]
+    InvalidTransportEndpoints(String),
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
 
@@ -181,6 +184,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidPubkey
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
+            | APIError::InvalidTransportEndpoints(_)
             | APIError::OutputBelowDustLimit
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string())

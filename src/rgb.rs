@@ -29,6 +29,7 @@ pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> 
         rgb_lib::Error::InsufficientBitcoins { needed, available } => {
             APIError::InsufficientFunds(needed - available)
         }
+        rgb_lib::Error::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
         rgb_lib::Error::InvalidBlindedUTXO { details } => {
             APIError::InvalidBlindedUTXO(details.clone())
         }
@@ -36,7 +37,9 @@ pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> 
         rgb_lib::Error::InvalidName { details } => APIError::InvalidName(details.clone()),
         rgb_lib::Error::InvalidPrecision { details } => APIError::InvalidPrecision(details.clone()),
         rgb_lib::Error::InvalidTicker { details } => APIError::InvalidTicker(details.clone()),
-        rgb_lib::Error::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
+        rgb_lib::Error::InvalidTransportEndpoints { details } => {
+            APIError::InvalidTransportEndpoints(details.clone())
+        }
         rgb_lib::Error::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
         rgb_lib::Error::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
         _ => default,
