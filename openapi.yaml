@@ -1133,6 +1133,11 @@ components:
         min_confirmations:
           type: integer
           example: 1
+        transport_endpoints:
+          type: array
+          items:
+            type: string
+            example: rpcs://proxy.iriswallet.com/0.2/json-rpc
     SendAssetResponse:
       type: object
       properties:

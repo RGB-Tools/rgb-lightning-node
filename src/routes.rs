@@ -400,6 +400,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) blinded_utxo: String,
     pub(crate) donation: bool,
     pub(crate) min_confirmations: u8,
+    pub(crate) transport_endpoints: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1535,7 +1536,7 @@ pub(crate) async fn send_asset(
             payload.asset_id => vec![Recipient {
                 recipient_data: RecipientData::BlindedUTXO(secret_seal),
                 amount: payload.amount,
-                transport_endpoints: vec![state.static_state.proxy_endpoint.clone()]
+                transport_endpoints: payload.transport_endpoints,
             }]
         };
 

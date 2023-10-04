@@ -21,6 +21,7 @@ use crate::routes::{
     RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
     SendPaymentRequest, SendPaymentResponse, UnlockRequest, Unspent,
 };
+use crate::utils::PROXY_ENDPOINT_REGTEST;
 
 use super::*;
 
@@ -659,6 +660,7 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         blinded_utxo,
         donation: true,
         min_confirmations: 1,
+        transport_endpoints: vec![PROXY_ENDPOINT_REGTEST.to_string()],
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/sendasset", node_address))
