@@ -46,7 +46,7 @@ pub fn do_backup(wallet_dir: PathBuf, backup_path: &str, password: &str) -> Resu
     tracing::info!("starting backup...");
     let backup_file = PathBuf::from(&backup_path);
     if backup_file.exists() {
-        return Err(APIError::InvalidBackupPath)?;
+        Err(APIError::InvalidBackupPath)?;
     }
     let tmp_base_path = _get_parent_path(&backup_file)?;
     let files = _get_backup_paths(&tmp_base_path)?;
