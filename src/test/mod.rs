@@ -2,6 +2,7 @@ use amplify::s;
 use bitcoin::Network;
 use electrum_client::ElectrumApi;
 use once_cell::sync::Lazy;
+use serde::Deserialize;
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -45,6 +46,12 @@ impl Default for LdkUserInfo {
             ldk_peer_listening_port: 9735,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    error: String,
+    code: u16,
 }
 
 fn _bitcoin_cli() -> [String; 7] {

@@ -46,6 +46,23 @@ async fn backup_and_restore() {
     }
     backup(node1_addr, &node1_backup_path, &node1_password).await;
 
+    // check InvalidBackupPath error
+    let payload = BackupRequest {
+        backup_path: node1_backup_path.clone(),
+        password: node1_password.clone(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/backup", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), reqwest::StatusCode::BAD_REQUEST);
+    let text = res.text().await.unwrap();
+    let response: ErrorResponse = serde_json::from_str(&text).unwrap();
+    assert_eq!(response.error, "Invalid backup path");
+    assert_eq!(response.code, 400);
+
     shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
 
     let old_test_dir_node1 = format!("{test_dir_node1}_old");
