@@ -29,11 +29,11 @@ use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
     address, asset_balance, backup, btc_balance, change_password, close_channel, connect_peer,
-    create_utxos, decode_ln_invoice, disconnect_peer, init, invoice_status, issue_asset, keysend,
-    list_assets, list_channels, list_payments, list_peers, list_transactions, list_transfers,
-    list_unspents, ln_invoice, lock, network_info, node_info, open_channel, refresh_transfers,
-    restore, rgb_invoice, send_asset, send_btc, send_onion_message, send_payment, shutdown,
-    sign_message, unlock,
+    create_utxos, decode_ln_invoice, decode_rgb_invoice, disconnect_peer, init, invoice_status,
+    issue_asset, keysend, list_assets, list_channels, list_payments, list_peers, list_transactions,
+    list_transfers, list_unspents, ln_invoice, lock, network_info, node_info, open_channel,
+    refresh_transfers, restore, rgb_invoice, send_asset, send_btc, send_onion_message,
+    send_payment, shutdown, sign_message, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -88,6 +88,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/connectpeer", post(connect_peer))
         .route("/createutxos", post(create_utxos))
         .route("/decodelninvoice", post(decode_ln_invoice))
+        .route("/decodergbinvoice", post(decode_rgb_invoice))
         .route("/disconnectpeer", post(disconnect_peer))
         .route("/init", post(init))
         .route("/invoicestatus", post(invoice_status))

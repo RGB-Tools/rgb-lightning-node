@@ -180,6 +180,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DecodeLNInvoiceResponse'
+  /decodergbinvoice:
+    post:
+      tags:
+        - RGB
+      summary: Decode an RGB invoice
+      description: Decode the provided RGB invoice string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecodeRGBInvoiceRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecodeRGBInvoiceResponse'
   /disconnectpeer:
     post:
       tags:
@@ -664,6 +682,11 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    AssetIface:
+      type: string
+      enum:
+        - RGB20
+        - RGB25
     BackupRequest:
       type: object
       properties:
@@ -828,6 +851,36 @@ components:
           example: 0343851df9e0e8aff0c10b3498ce723ff4c9b4a855e6c8819adcafbbb3e24ea2af
         network:
           $ref: '#/components/schemas/BitcoinNetwork'
+    DecodeRGBInvoiceRequest:
+      type: object
+      properties:
+        invoice:
+          type: string
+          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/RGB20/69+utxob:2PoDFyk-8aegNHZE4-inHHn4nWz-rNtAX3MWv-sTiVPQYrF-ed2bXM?expiry=1698325849&endpoints=rpcs://proxy.iriswallet.com/0.2/json-rpc
+    DecodeRGBInvoiceResponse:
+      type: object
+      properties:
+        recipient_id:
+          type: string
+          example: utxob:2PoDFyk-8aegNHZE4-inHHn4nWz-rNtAX3MWv-sTiVPQYrF-ed2bXM
+        asset_iface:
+          $ref: '#/components/schemas/AssetIface'
+        asset_id:
+          type: string
+          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+        amount:
+          type: integer
+          example: 69
+        network:
+          $ref: '#/components/schemas/BitcoinNetwork'
+        expiration_timestamp:
+          type: integer
+          example: 1698325849
+        transport_endpoints:
+          type: array
+          items:
+            type: string
+            example: rpcs://proxy.iriswallet.com/0.2/json-rpc
     DisconnectPeerRequest:
       type: object
       properties:

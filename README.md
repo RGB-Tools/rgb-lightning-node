@@ -153,6 +153,7 @@ The node currently exposes the following APIs:
 - `/connectpeer` (POST)
 - `/createutxos` (POST)
 - `/decodelninvoice` (POST)
+- `/decodergbinvoice` (POST)
 - `/disconnectpeer` (POST)
 - `/init` (POST)
 - `/invoicestatus` (POST)

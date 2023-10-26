@@ -25,8 +25,8 @@ use lightning::{
 use lightning_invoice::payment::pay_invoice;
 use lightning_invoice::Invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
-use rgb_lib::generate_keys;
-use rgb_lib::wallet::{Recipient, RecipientData};
+use rgb_lib::wallet::{Invoice as RgbLibInvoice, Recipient, RecipientData};
+use rgb_lib::{generate_keys, BitcoinNetwork as RgbLibNetwork};
 use rgbstd::contract::{ContractId, SecretSeal};
 use rgbwallet::RgbTransport;
 use serde::{Deserialize, Serialize};
@@ -95,13 +95,19 @@ pub(crate) struct AssetBalanceResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) enum AssetIface {
+    RGB20,
+    RGB25,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct BackupRequest {
     pub(crate) backup_path: String,
     pub(crate) password: String,
 }
 
 #[derive(Deserialize, Serialize)]
-pub enum BitcoinNetwork {
+pub(crate) enum BitcoinNetwork {
     Mainnet,
     Testnet,
     Signet,
@@ -115,6 +121,17 @@ impl From<Network> for BitcoinNetwork {
             Network::Testnet => BitcoinNetwork::Testnet,
             Network::Regtest => BitcoinNetwork::Regtest,
             Network::Signet => BitcoinNetwork::Signet,
+        }
+    }
+}
+
+impl From<RgbLibNetwork> for BitcoinNetwork {
+    fn from(x: RgbLibNetwork) -> BitcoinNetwork {
+        match x {
+            RgbLibNetwork::Mainnet => BitcoinNetwork::Mainnet,
+            RgbLibNetwork::Testnet => BitcoinNetwork::Testnet,
+            RgbLibNetwork::Regtest => BitcoinNetwork::Regtest,
+            RgbLibNetwork::Signet => BitcoinNetwork::Signet,
         }
     }
 }
@@ -197,6 +214,22 @@ pub(crate) struct DecodeLNInvoiceResponse {
     pub(crate) payment_secret: String,
     pub(crate) payee_pubkey: Option<String>,
     pub(crate) network: BitcoinNetwork,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeRGBInvoiceRequest {
+    pub(crate) invoice: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeRGBInvoiceResponse {
+    pub(crate) recipient_id: String,
+    pub(crate) asset_iface: Option<AssetIface>,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) amount: Option<u64>,
+    pub(crate) network: Option<BitcoinNetwork>,
+    pub(crate) expiration_timestamp: Option<i64>,
+    pub(crate) transport_endpoints: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -759,6 +792,31 @@ pub(crate) async fn decode_ln_invoice(
         payment_secret: hex_str(&invoice.payment_secret().0),
         payee_pubkey: invoice.payee_pub_key().map(|p| p.to_string()),
         network: invoice.network().into(),
+    }))
+}
+
+pub(crate) async fn decode_rgb_invoice(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<DecodeRGBInvoiceRequest>, APIError>,
+) -> Result<Json<DecodeRGBInvoiceResponse>, APIError> {
+    let _unlocked_app_state = state.get_unlocked_app_state();
+
+    let invoice_data = match RgbLibInvoice::new(payload.invoice) {
+        Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
+        Ok(v) => v.invoice_data(),
+    };
+
+    Ok(Json(DecodeRGBInvoiceResponse {
+        recipient_id: invoice_data.recipient_id,
+        asset_iface: invoice_data.asset_iface.map(|i| match i {
+            rgb_lib::wallet::AssetIface::RGB20 => AssetIface::RGB20,
+            rgb_lib::wallet::AssetIface::RGB25 => AssetIface::RGB25,
+        }),
+        asset_id: invoice_data.asset_id,
+        amount: invoice_data.amount,
+        network: invoice_data.network.map(|n| n.into()),
+        expiration_timestamp: invoice_data.expiration_timestamp,
+        transport_endpoints: invoice_data.transport_endpoints,
     }))
 }
 
