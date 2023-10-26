@@ -1103,6 +1103,9 @@ components:
         min_confirmations:
           type: integer
           example: 1
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
     RgbInvoiceResponse:
       type: object
       properties:

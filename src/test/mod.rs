@@ -607,6 +607,7 @@ async fn lock(node_address: SocketAddr) {
 async fn rgb_invoice(node_address: SocketAddr) -> String {
     let payload = RgbInvoiceRequest {
         min_confirmations: 1,
+        asset_id: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))

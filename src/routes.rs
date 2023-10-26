@@ -384,6 +384,7 @@ pub(crate) struct RgbAllocation {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RgbInvoiceRequest {
     pub(crate) min_confirmations: u8,
+    pub(crate) asset_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1506,7 +1507,7 @@ pub(crate) async fn rgb_invoice(
         let receive_data = unlocked_state
             .get_rgb_wallet()
             .blind_receive(
-                None,
+                payload.asset_id,
                 None,
                 None,
                 vec![state.static_state.proxy_endpoint.clone()],
