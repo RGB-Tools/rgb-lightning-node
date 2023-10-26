@@ -57,15 +57,15 @@ async fn payment() {
     wait_for_balance(node1_addr, &asset_id, 950).await;
     wait_for_balance(node2_addr, &asset_id, 50).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node1_addr, &asset_id, 925, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 925, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node2_addr, &asset_id, 25, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node2_addr, &asset_id, 25, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

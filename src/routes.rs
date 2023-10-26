@@ -94,7 +94,7 @@ pub(crate) struct AssetBalanceResponse {
     pub(crate) offchain_inbound: u64,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum AssetIface {
     RGB20,
     RGB25,
@@ -106,7 +106,7 @@ pub(crate) struct BackupRequest {
     pub(crate) password: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum BitcoinNetwork {
     Mainnet,
     Testnet,

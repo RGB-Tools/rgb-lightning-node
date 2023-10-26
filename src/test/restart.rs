@@ -152,15 +152,15 @@ async fn restart() {
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 100);
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node1_addr, &asset_id, 700, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 700, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node2_addr, &asset_id, 50, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node2_addr, &asset_id, 50, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

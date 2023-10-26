@@ -30,8 +30,8 @@ async fn close_coop_zero_balance() {
     wait_for_balance(node1_addr, &asset_id, 1000).await;
     assert_eq!(asset_balance(node2_addr, &asset_id).await, 0);
 
-    let blinded_utxo = rgb_invoice(node2_addr).await;
-    send_asset(node1_addr, &asset_id, 700, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 700, recipient_id).await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;

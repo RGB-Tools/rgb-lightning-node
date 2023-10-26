@@ -29,16 +29,16 @@ async fn open_after_double_send() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let blinded_utxo = rgb_invoice(node2_addr).await;
-    send_asset(node1_addr, &asset_id, 100, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 100, recipient_id).await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
 
-    let blinded_utxo = rgb_invoice(node2_addr).await;
-    send_asset(node1_addr, &asset_id, 200, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 200, recipient_id).await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
@@ -56,15 +56,15 @@ async fn open_after_double_send() {
     wait_for_balance(node1_addr, &asset_id, 750).await;
     wait_for_balance(node2_addr, &asset_id, 250).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node1_addr, &asset_id, 725, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 725, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node2_addr, &asset_id, 225, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node2_addr, &asset_id, 225, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

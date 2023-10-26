@@ -56,8 +56,8 @@ async fn close_coop_standard() {
     keysend(node1_addr, &node2_pubkey, &asset_id, 150).await;
     keysend(node2_addr, &node1_pubkey, &asset_id, 50).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node1_addr, &asset_id, 10, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 10, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
@@ -75,15 +75,15 @@ async fn close_coop_standard() {
     let peers = list_peers(node1_addr).await;
     assert!(!peers.iter().any(|p| p.pubkey == node2_pubkey));
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node1_addr, &asset_id, 690, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node1_addr, &asset_id, 690, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let blinded_utxo = rgb_invoice(node3_addr).await;
-    send_asset(node2_addr, &asset_id, 50, blinded_utxo).await;
+    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    send_asset(node2_addr, &asset_id, 50, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

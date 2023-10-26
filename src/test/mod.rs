@@ -13,13 +13,14 @@ use tracing_test::traced_test;
 use crate::routes::{
     AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest, Channel,
     CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
-    DecodeLNInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
-    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest,
-    IssueAssetResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
-    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
-    ListUnspentsResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
-    SendPaymentRequest, SendPaymentResponse, UnlockRequest, Unspent,
+    DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
+    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse,
+    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    SendPaymentResponse, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -277,6 +278,23 @@ async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNI
     _check_response_is_ok(res)
         .await
         .json::<DecodeLNInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn decode_rgb_invoice(node_address: SocketAddr, invoice: &str) -> DecodeRGBInvoiceResponse {
+    let payload = DecodeRGBInvoiceRequest {
+        invoice: invoice.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/decodergbinvoice", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<DecodeRGBInvoiceResponse>()
         .await
         .unwrap()
 }
@@ -604,10 +622,10 @@ async fn lock(node_address: SocketAddr) {
         .unwrap();
 }
 
-async fn rgb_invoice(node_address: SocketAddr) -> String {
+async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbInvoiceResponse {
     let payload = RgbInvoiceRequest {
         min_confirmations: 1,
-        asset_id: None,
+        asset_id,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))
@@ -620,7 +638,6 @@ async fn rgb_invoice(node_address: SocketAddr) -> String {
         .json::<RgbInvoiceResponse>()
         .await
         .unwrap()
-        .recipient_id
 }
 
 async fn refresh_transfers(node_address: SocketAddr) {
