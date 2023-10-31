@@ -964,6 +964,7 @@ pub(crate) async fn keysend(
             &payment_hash,
             contract_id,
             payload.asset_amount,
+            false,
         );
 
         let route_params = RouteParameters {
@@ -1477,7 +1478,7 @@ pub(crate) async fn open_channel(
                 payload.push_msat,
                 0,
                 Some(config),
-                consignment_endpoint,
+                Some(consignment_endpoint),
             )
             .map_err(|e| APIError::FailedOpenChannel(format!("{:?}", e)))?;
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
@@ -1738,6 +1739,7 @@ pub(crate) async fn send_payment(
                 &payment_hash,
                 rgb_contract_id,
                 rgb_amount,
+                false,
             ),
             (None, None) => {}
             (Some(_), None) => {
