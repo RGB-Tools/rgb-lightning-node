@@ -3,19 +3,19 @@ use bdk::keys::bip39::Mnemonic;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use futures::Future;
-use lightning::ln::msgs::NetAddress;
+use lightning::ln::msgs::SocketAddress;
 use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
-use lightning::{chain::keysinterface::KeysManager, ln::PaymentHash};
 use lightning::{
-    onion_message::CustomOnionMessageContents,
+    onion_message::OnionMessageContents,
+    sign::KeysManager,
     util::ser::{Writeable, Writer},
 };
+use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
 use rgb_lib::BitcoinNetwork;
 use std::{
-    collections::HashMap,
     fmt::Write,
     fs,
     net::{SocketAddr, ToSocketAddrs},
@@ -32,8 +32,8 @@ use crate::{
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
-        ChannelManager, LdkBackgroundServices, NetworkGraph, OnionMessenger, PaymentInfo,
-        PeerManager,
+        ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices, NetworkGraph,
+        OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
     },
 };
 
@@ -71,7 +71,7 @@ impl AppState {
 
 pub(crate) struct StaticState {
     pub(crate) ldk_peer_listening_port: u16,
-    pub(crate) ldk_announced_listen_addr: Vec<NetAddress>,
+    pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
     pub(crate) ldk_announced_node_name: [u8; 32],
     pub(crate) network: Network,
     pub(crate) storage_dir_path: String,
@@ -86,22 +86,23 @@ pub(crate) struct StaticState {
 
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
-    pub(crate) inbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
+    pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,
     pub(crate) onion_messenger: Arc<OnionMessenger>,
-    pub(crate) outbound_payments: Arc<Mutex<HashMap<PaymentHash, PaymentInfo>>>,
+    pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
+    pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
 }
 
 impl UnlockedAppState {
-    pub(crate) fn get_inbound_payments(&self) -> MutexGuard<HashMap<PaymentHash, PaymentInfo>> {
+    pub(crate) fn get_inbound_payments(&self) -> MutexGuard<InboundPaymentInfoStorage> {
         self.inbound_payments.lock().unwrap()
     }
 
-    pub(crate) fn get_outbound_payments(&self) -> MutexGuard<HashMap<PaymentHash, PaymentInfo>> {
+    pub(crate) fn get_outbound_payments(&self) -> MutexGuard<OutboundPaymentInfoStorage> {
         self.outbound_payments.lock().unwrap()
     }
 
@@ -115,7 +116,7 @@ pub(crate) struct UserOnionMessageContents {
     pub(crate) data: Vec<u8>,
 }
 
-impl CustomOnionMessageContents for UserOnionMessageContents {
+impl OnionMessageContents for UserOnionMessageContents {
     fn tlv_type(&self) -> u64 {
         self.tlv_type
     }

@@ -2,11 +2,10 @@ use amplify::s;
 use bitcoin::network::constants::Network;
 use clap::{value_parser, Parser};
 use dirs::home_dir;
-use lightning::ln::msgs::NetAddress;
+use lightning::ln::msgs::SocketAddress;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -50,7 +49,7 @@ pub(crate) struct LdkUserInfo {
     pub(crate) storage_dir_path: String,
     pub(crate) daemon_listening_port: u16,
     pub(crate) ldk_peer_listening_port: u16,
-    pub(crate) ldk_announced_listen_addr: Vec<NetAddress>,
+    pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
     pub(crate) ldk_announced_node_name: [u8; 32],
     pub(crate) network: Network,
 }
@@ -114,22 +113,13 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
     let mut ldk_announced_listen_addr = Vec::new();
     if let Some(addreses) = args.announced_listen_addreses {
         for addr in addreses {
-            match IpAddr::from_str(&addr) {
-                Ok(IpAddr::V4(a)) => {
-                    ldk_announced_listen_addr.push(NetAddress::IPv4 {
-                        addr: a.octets(),
-                        port: ldk_peer_listening_port,
-                    });
-                }
-                Ok(IpAddr::V6(a)) => {
-                    ldk_announced_listen_addr.push(NetAddress::IPv6 {
-                        addr: a.octets(),
-                        port: ldk_peer_listening_port,
-                    });
+            match SocketAddress::from_str(&addr) {
+                Ok(sa) => {
+                    ldk_announced_listen_addr.push(sa);
                 }
                 Err(_) => {
                     return Err(AppError::InvalidAnnouncedListenAddresses(s!(
-                        "failed to parse announced-listen-addr into an IP address"
+                        "failed to parse announced-listen-addr into a socket address"
                     )))
                 }
             }

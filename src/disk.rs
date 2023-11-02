@@ -1,9 +1,9 @@
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use chrono::Utc;
-use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters};
+use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringDecayParameters};
 use lightning::util::logger::{Logger, Record};
-use lightning::util::ser::{ReadableArgs, Writer};
+use lightning::util::ser::{Readable, ReadableArgs, Writer};
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -13,8 +13,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::APIError;
-use crate::ldk::NetworkGraph;
+use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage};
 use crate::utils::{parse_peer_info, LOGS_DIR};
+
+pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
+pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 
 pub(crate) struct FilesystemLogger {
     data_dir: String,
@@ -93,14 +96,36 @@ pub(crate) fn read_network(
     NetworkGraph::new(network, logger)
 }
 
+pub(crate) fn read_inbound_payment_info(path: &Path) -> InboundPaymentInfoStorage {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = InboundPaymentInfoStorage::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    InboundPaymentInfoStorage {
+        payments: HashMap::new(),
+    }
+}
+
+pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStorage {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = OutboundPaymentInfoStorage::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    OutboundPaymentInfoStorage {
+        payments: HashMap::new(),
+    }
+}
+
 pub(crate) fn read_scorer(
     path: &Path,
     graph: Arc<NetworkGraph>,
     logger: Arc<FilesystemLogger>,
 ) -> ProbabilisticScorer<Arc<NetworkGraph>, Arc<FilesystemLogger>> {
-    let params = ProbabilisticScoringParameters::default();
+    let params = ProbabilisticScoringDecayParameters::default();
     if let Ok(file) = File::open(path) {
-        let args = (params.clone(), Arc::clone(&graph), Arc::clone(&logger));
+        let args = (params, Arc::clone(&graph), Arc::clone(&logger));
         if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
             return scorer;
         }

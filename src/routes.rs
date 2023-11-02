@@ -1,13 +1,18 @@
 use amplify::{map, s};
 use axum::{extract::State, Json};
 use axum_extra::extract::WithRejection;
+use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
-use lightning::chain::keysinterface::EntropySource;
-use lightning::onion_message::{Destination, OnionMessageContents};
+use lightning::impl_writeable_tlv_based_enum;
+use lightning::ln::ChannelId;
+use lightning::onion_message::{Destination, OnionMessagePath};
 use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
+use lightning::sign::EntropySource;
+use lightning::util::persist::KVStore;
+use lightning::util::ser::Writeable;
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -23,7 +28,7 @@ use lightning::{
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
 };
 use lightning_invoice::payment::pay_invoice;
-use lightning_invoice::Invoice;
+use lightning_invoice::Bolt11Invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use rgb_lib::wallet::{Invoice as RgbLibInvoice, Recipient, RecipientData};
 use rgb_lib::{generate_keys, BitcoinNetwork as RgbLibNetwork};
@@ -31,7 +36,6 @@ use rgbstd::contract::{ContractId, SecretSeal};
 use rgbwallet::RgbTransport;
 use serde::{Deserialize, Serialize};
 use std::{
-    ops::Deref,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -39,6 +43,7 @@ use std::{
 };
 
 use crate::backup::{do_backup, restore_backup};
+use crate::disk::{INBOUND_PAYMENTS_FNAME, OUTBOUND_PAYMENTS_FNAME};
 use crate::ldk::{start_ldk, stop_ldk, MIN_CHANNEL_CONFIRMATIONS};
 use crate::rgb::match_rgb_lib_error;
 use crate::utils::{
@@ -246,6 +251,12 @@ pub(crate) enum HTLCStatus {
     Succeeded,
     Failed,
 }
+
+impl_writeable_tlv_based_enum!(HTLCStatus,
+    (0, Pending) => {},
+    (1, Succeeded) => {},
+    (2, Failed) => {};
+);
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct InitRequest {
@@ -591,7 +602,7 @@ pub(crate) async fn asset_balance(
     let mut offchain_outbound = 0;
     let mut offchain_inbound = 0;
     for chan_info in unlocked_state.channel_manager.list_channels() {
-        let info_file_path = ldk_data_dir_path.join(hex::encode(chan_info.channel_id));
+        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
         if !info_file_path.exists() {
             continue;
         }
@@ -706,7 +717,7 @@ pub(crate) async fn close_channel(
         if payload.force {
             match unlocked_state
                 .channel_manager
-                .force_close_broadcasting_latest_txn(&channel_id, &peer_pubkey)
+                .force_close_broadcasting_latest_txn(&ChannelId(channel_id), &peer_pubkey)
             {
                 Ok(()) => tracing::info!("EVENT: initiating channel force-close"),
                 Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
@@ -714,7 +725,7 @@ pub(crate) async fn close_channel(
         } else {
             match unlocked_state
                 .channel_manager
-                .close_channel(&channel_id, &peer_pubkey)
+                .close_channel(&ChannelId(channel_id), &peer_pubkey)
             {
                 Ok(()) => tracing::info!("EVENT: initiating channel close"),
                 Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
@@ -773,7 +784,7 @@ pub(crate) async fn decode_ln_invoice(
 ) -> Result<Json<DecodeLNInvoiceResponse>, APIError> {
     let _unlocked_app_state = state.get_unlocked_app_state();
 
-    let invoice = match Invoice::from_str(&payload.invoice) {
+    let invoice = match Bolt11Invoice::from_str(&payload.invoice) {
         Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
         Ok(v) => v,
     };
@@ -888,7 +899,7 @@ pub(crate) async fn invoice_status(
 ) -> Result<Json<InvoiceStatusResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let invoice = match Invoice::from_str(&payload.invoice) {
+    let invoice = match Bolt11Invoice::from_str(&payload.invoice) {
         Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
         Ok(v) => v,
     };
@@ -896,7 +907,7 @@ pub(crate) async fn invoice_status(
     let inbound = unlocked_state.get_inbound_payments();
 
     let payment_hash = PaymentHash(invoice.payment_hash().into_inner());
-    let status = match inbound.get(&payment_hash) {
+    let status = match inbound.payments.get(&payment_hash) {
         Some(v) => match v.status {
             HTLCStatus::Pending if invoice.is_expired() => InvoiceStatus::Expired,
             HTLCStatus::Pending => InvoiceStatus::Pending,
@@ -958,7 +969,10 @@ pub(crate) async fn keysend(
 
         let payment_preimage =
             PaymentPreimage(unlocked_state.keys_manager.get_secure_random_bytes());
-        let payment_hash = PaymentHash(Sha256::hash(&payment_preimage.0[..]).into_inner());
+        let payment_hash_inner = Sha256::hash(&payment_preimage.0[..]).into_inner();
+        let payment_id = PaymentId(payment_hash_inner);
+        let payment_hash = PaymentHash(payment_hash_inner);
+
         write_rgb_payment_info_file(
             &PathBuf::from(&state.static_state.ldk_data_dir),
             &payment_hash,
@@ -967,16 +981,30 @@ pub(crate) async fn keysend(
             false,
         );
 
-        let route_params = RouteParameters {
-            payment_params: PaymentParameters::for_keysend(dest_pubkey, 40),
-            final_value_msat: amt_msat,
-        };
+        let route_params = RouteParameters::from_payment_params_and_value(
+            PaymentParameters::for_keysend(dest_pubkey, 40, false),
+            amt_msat,
+        );
+        let mut outbound = unlocked_state.get_outbound_payments();
+        outbound.payments.insert(
+            payment_id,
+            PaymentInfo {
+                preimage: None,
+                secret: None,
+                status: HTLCStatus::Pending,
+                amt_msat: Some(amt_msat),
+            },
+        );
+        unlocked_state
+            .fs_store
+            .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
+            .unwrap();
         let status = match unlocked_state
             .channel_manager
             .send_spontaneous_payment_with_retry(
                 Some(payment_preimage),
                 RecipientOnionFields::spontaneous_empty(),
-                PaymentId(payment_hash.0),
+                payment_id,
                 route_params,
                 Retry::Timeout(Duration::from_secs(10)),
             ) {
@@ -990,20 +1018,14 @@ pub(crate) async fn keysend(
             }
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
+                outbound.payments.get_mut(&payment_id).unwrap().status = HTLCStatus::Failed;
+                unlocked_state
+                    .fs_store
+                    .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
+                    .unwrap();
                 HTLCStatus::Failed
             }
         };
-
-        let mut payments = unlocked_state.get_outbound_payments();
-        payments.insert(
-            payment_hash,
-            PaymentInfo {
-                preimage: None,
-                secret: None,
-                status,
-                amt_msat: Some(amt_msat),
-            },
-        );
 
         Ok(Json(KeysendResponse {
             payment_hash: hex_str(&payment_hash.0),
@@ -1047,7 +1069,7 @@ pub(crate) async fn list_channels(
     let mut channels = vec![];
     for chan_info in unlocked_state.channel_manager.list_channels() {
         let mut channel = Channel {
-            channel_id: hex_str(&chan_info.channel_id[..]),
+            channel_id: chan_info.channel_id.to_hex(),
             peer_pubkey: hex_str(&chan_info.counterparty.node_id.serialize()),
             ready: chan_info.is_channel_ready,
             capacity_sat: chan_info.channel_value_satoshis,
@@ -1082,7 +1104,7 @@ pub(crate) async fn list_channels(
         }
 
         let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
-        let info_file_path = ldk_data_dir_path.join(hex::encode(chan_info.channel_id));
+        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
         if info_file_path.exists() {
             let (rgb_info, _) = get_rgb_channel_info(&chan_info.channel_id, &ldk_data_dir_path);
             channel.asset_id = Some(rgb_info.contract_id.to_string());
@@ -1106,7 +1128,7 @@ pub(crate) async fn list_payments(
     let mut payments = vec![];
     let ldk_data_dir_path = Path::new(&state.static_state.ldk_data_dir);
 
-    for (payment_hash, payment_info) in inbound.deref() {
+    for (payment_hash, payment_info) in &inbound.payments {
         let rgb_payment_info_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir_path);
         let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
             let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
@@ -1127,8 +1149,9 @@ pub(crate) async fn list_payments(
         })
     }
 
-    for (payment_hash, payment_info) in outbound.deref() {
-        let rgb_payment_info_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir_path);
+    for (payment_id, payment_info) in &outbound.payments {
+        let payment_hash = PaymentHash(payment_id.0);
+        let rgb_payment_info_path = get_rgb_payment_info_path(&payment_hash, ldk_data_dir_path);
         let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
             let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
             (
@@ -1300,7 +1323,7 @@ pub(crate) async fn ln_invoice(
             )));
         }
 
-        let mut payments = unlocked_state.get_inbound_payments();
+        let mut inbound = unlocked_state.get_inbound_payments();
         let currency = match state.static_state.network {
             Network::Bitcoin => Currency::Bitcoin,
             Network::Testnet => Currency::BitcoinTestnet,
@@ -1324,7 +1347,7 @@ pub(crate) async fn ln_invoice(
         };
 
         let payment_hash = PaymentHash((*invoice.payment_hash()).into_inner());
-        payments.insert(
+        inbound.payments.insert(
             payment_hash,
             PaymentInfo {
                 preimage: None,
@@ -1333,6 +1356,10 @@ pub(crate) async fn ln_invoice(
                 amt_msat: payload.amt_msat,
             },
         );
+        unlocked_state
+            .fs_store
+            .write("", "", INBOUND_PAYMENTS_FNAME, &inbound.encode())
+            .unwrap();
 
         Ok(Json(LNInvoiceResponse {
             invoice: invoice.to_string(),
@@ -1463,6 +1490,8 @@ pub(crate) async fn open_channel(
                 announced_channel: payload.public,
                 our_htlc_minimum_msat: HTLC_MIN_MSAT,
                 minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
+                // TODO: set to true after implementing BumpTxEventHandler
+                negotiate_anchors_zero_fee_htlc_tx: false,
                 ..Default::default()
             },
             ..Default::default()
@@ -1490,7 +1519,7 @@ pub(crate) async fn open_channel(
         let _ =
             disk::persist_channel_peer(Path::new(&peer_data_path), &payload.peer_pubkey_and_addr);
 
-        let temporary_channel_id = hex::encode(temporary_channel_id);
+        let temporary_channel_id = temporary_channel_id.to_hex();
         let channel_rgb_info_path = format!(
             "{}/{}",
             state.static_state.ldk_data_dir.clone(),
@@ -1655,7 +1684,7 @@ pub(crate) async fn send_onion_message(
             )));
         }
 
-        let mut node_pks = Vec::new();
+        let mut intermediate_nodes = Vec::new();
         for pk_str in payload.node_ids {
             let node_pubkey_vec = match hex_str_to_vec(&pk_str) {
                 Some(peer_pubkey_vec) => peer_pubkey_vec,
@@ -1675,7 +1704,7 @@ pub(crate) async fn send_onion_message(
                     )))
                 }
             };
-            node_pks.push(node_pubkey);
+            intermediate_nodes.push(node_pubkey);
         }
 
         if payload.tlv_type < 64 {
@@ -1687,16 +1716,20 @@ pub(crate) async fn send_onion_message(
         let data = hex_str_to_vec(&payload.data)
             .ok_or(APIError::InvalidOnionData(s!("need a hex data string")))?;
 
-        let destination_pk = node_pks.pop().unwrap();
+        let destination = Destination::Node(intermediate_nodes.pop().unwrap());
+        let message_path = OnionMessagePath {
+            intermediate_nodes,
+            destination,
+        };
+
         unlocked_state
             .onion_messenger
             .send_onion_message(
-                &node_pks,
-                Destination::Node(destination_pk),
-                OnionMessageContents::Custom(UserOnionMessageContents {
+                message_path,
+                UserOnionMessageContents {
                     tlv_type: payload.tlv_type,
                     data,
-                }),
+                },
                 None,
             )
             .map_err(|e| APIError::FailedSendingOnionMessage(format!("{:?}", e)))?;
@@ -1715,7 +1748,7 @@ pub(crate) async fn send_payment(
     no_cancel(async move {
         let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-        let invoice = match Invoice::from_str(&payload.invoice) {
+        let invoice = match Bolt11Invoice::from_str(&payload.invoice) {
             Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
             Ok(v) => v,
         };
@@ -1753,10 +1786,28 @@ pub(crate) async fn send_payment(
                 )))
             }
         }
+
+        let payment_id = PaymentId((*invoice.payment_hash()).into_inner());
+        let payment_secret = *invoice.payment_secret();
+        let mut outbound = unlocked_state.get_outbound_payments();
+        outbound.payments.insert(
+            payment_id,
+            PaymentInfo {
+                preimage: None,
+                secret: Some(payment_secret),
+                status: HTLCStatus::Pending,
+                amt_msat: invoice.amount_milli_satoshis(),
+            },
+        );
+        unlocked_state
+            .fs_store
+            .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
+            .unwrap();
+
         let status = match pay_invoice(
             &invoice,
             Retry::Timeout(Duration::from_secs(10)),
-            &unlocked_state.channel_manager,
+            &*unlocked_state.channel_manager,
         ) {
             Ok(_payment_id) => {
                 let payee_pubkey = invoice.recover_payee_pub_key();
@@ -1770,21 +1821,14 @@ pub(crate) async fn send_payment(
             }
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
+                outbound.payments.get_mut(&payment_id).unwrap().status = HTLCStatus::Failed;
+                unlocked_state
+                    .fs_store
+                    .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
+                    .unwrap();
                 HTLCStatus::Failed
             }
         };
-        let payment_secret = *invoice.payment_secret();
-
-        let mut payments = unlocked_state.get_outbound_payments();
-        payments.insert(
-            payment_hash,
-            PaymentInfo {
-                preimage: None,
-                secret: Some(payment_secret),
-                status,
-                amt_msat: invoice.amount_milli_satoshis(),
-            },
-        );
 
         Ok(Json(SendPaymentResponse {
             payment_hash: hex_str(&payment_hash.0),
@@ -1816,8 +1860,9 @@ pub(crate) async fn sign_message(
 ) -> Result<Json<SignMessageResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
+    let message = payload.message.trim();
     let signed_message = lightning::util::message_signing::sign(
-        &payload.message.as_bytes()[payload.message.len()..],
+        &message.as_bytes()[message.len()..],
         &unlocked_state.keys_manager.get_node_secret_key(),
     )
     .map_err(|e| APIError::FailedMessageSigning(e.to_string()))?;

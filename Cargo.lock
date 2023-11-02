@@ -1889,12 +1889,6 @@ checksum = "d77f7ec81a6d05a3abb01ab6eb7590f6083d08449fe5a1c8b1e620283546ccb7"
 
 [[package]]
 name = "hex"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "805026a5d0141ffc30abb3be3173848ad46a1b1664fe632428479619a3644d77"
-
-[[package]]
-name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
@@ -2208,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.0.115"
+version = "0.0.118"
 dependencies = [
  "amplify",
  "base64 0.13.1",
@@ -2217,7 +2211,7 @@ dependencies = [
  "bp-core",
  "commit_verify",
  "futures",
- "hex 0.4.3",
+ "hex",
  "musig2",
  "reqwest",
  "rgb-contracts",
@@ -2233,28 +2227,29 @@ dependencies = [
 
 [[package]]
 name = "lightning-background-processor"
-version = "0.0.115"
+version = "0.0.118"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
- "lightning-rapid-gossip-sync 0.0.115",
+ "lightning-rapid-gossip-sync 0.0.118",
 ]
 
 [[package]]
 name = "lightning-block-sync"
-version = "0.0.115"
+version = "0.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c60cf241b3c219ee865aad91eab85a879b23c1756a335a5a311790ad6c1c3d2"
+checksum = "4e7710047d038a03fce32ac72b00c6ad79438053d3e8520cc7be97019660a694"
 dependencies = [
  "bitcoin 0.29.2",
  "chunked_transfer",
  "lightning",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
 name = "lightning-invoice"
-version = "0.23.0"
+version = "0.26.0"
 dependencies = [
  "bech32 0.9.1",
  "bitcoin 0.29.2",
@@ -2267,9 +2262,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.0.115"
+version = "0.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4561ec5d4df2dd410a8b80955791fcfb007ef9210395db6e914b9527397b868c"
+checksum = "86ee02c5a817b46a5fd6de4b2e196b58ae0e6eca5f3b8a6f0b0cd67bd9485ecc"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -2278,17 +2273,16 @@ dependencies = [
 
 [[package]]
 name = "lightning-persister"
-version = "0.0.115"
+version = "0.0.118"
 dependencies = [
  "bitcoin 0.29.2",
- "libc",
  "lightning",
- "winapi",
+ "windows-sys",
 ]
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.0.115"
+version = "0.0.118"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -2296,9 +2290,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.0.115"
+version = "0.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd84d74a9b3892db22a60ac11dfc12e76b257b3174db6743e818ecc24834f3be"
+checksum = "ac66654c7593a16277cd9f1b7a078729318cad5cee2fe8948a2df4f756decb73"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -3250,7 +3244,7 @@ dependencies = [
  "commit_verify",
  "electrum-client 0.17.0",
  "futures",
- "hex 0.4.3",
+ "hex",
  "rand",
  "reqwest",
  "rgb-contracts",
@@ -3310,7 +3304,6 @@ dependencies = [
  "dirs",
  "electrum-client 0.17.0",
  "futures",
- "hex 0.3.2",
  "hyper",
  "libc",
  "lightning",
@@ -3319,7 +3312,7 @@ dependencies = [
  "lightning-invoice",
  "lightning-net-tokio",
  "lightning-persister",
- "lightning-rapid-gossip-sync 0.0.115 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightning-rapid-gossip-sync 0.0.118 (registry+https://github.com/rust-lang/crates.io-index)",
  "magic-crypt",
  "mime",
  "miniscript 8.0.1",
@@ -3977,7 +3970,7 @@ checksum = "07ff71d2c147a7b57362cead5e22f772cd52f6ab31cfcd9edcd7f6aeb2a0afbe"
 dependencies = [
  "base64 0.13.1",
  "chrono",
- "hex 0.4.3",
+ "hex",
  "indexmap 1.9.3",
  "serde",
  "serde_json",
@@ -4269,7 +4262,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "hashlink",
- "hex 0.4.3",
+ "hex",
  "indexmap 2.0.0",
  "log",
  "memchr 2.6.3",
@@ -4313,7 +4306,7 @@ dependencies = [
  "dotenvy",
  "either",
  "heck",
- "hex 0.4.3",
+ "hex",
  "once_cell",
  "proc-macro2",
  "quote",
@@ -4351,7 +4344,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "generic-array",
- "hex 0.4.3",
+ "hex",
  "hkdf",
  "hmac",
  "itoa",
@@ -4395,7 +4388,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-util",
- "hex 0.4.3",
+ "hex",
  "hkdf",
  "hmac",
  "home",

@@ -85,7 +85,7 @@ async fn restart() {
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
 
     let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 100, 900).await;
-    let _send_payment = send_payment(node1_addr, invoice).await;
+    let send_payment = send_payment(node1_addr, invoice).await;
 
     println!("5 - restart 1+2");
     shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
@@ -106,9 +106,6 @@ async fn restart() {
             panic!("cannot find re-established channel")
         }
     }
-    // TODO: pending https://github.com/lightningdevkit/ldk-sample/pull/104
-    println!("skipping payment check, needs payment persistence");
-    /*
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -139,7 +136,6 @@ async fn restart() {
             panic!("cannot find payment on node 2")
         }
     }
-    */
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 900).await;
     wait_for_balance(node2_addr, &asset_id, 100).await;
