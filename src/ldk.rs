@@ -46,7 +46,7 @@ use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::fs_store::FilesystemStore;
 use rand::{thread_rng, Rng, RngCore};
 use rgb_lib::wallet::{DatabaseType, Recipient, RecipientData, Wallet as RgbLibWallet, WalletData};
-use rgb_lib::{AssetSchema, BitcoinNetwork};
+use rgb_lib::AssetSchema;
 use rgbstd::containers::{Bindle, Transfer as RgbTransfer};
 use rgbstd::persistence::Inventory;
 use rgbstd::Txid as RgbTxid;
@@ -70,7 +70,7 @@ use crate::disk::{self, INBOUND_PAYMENTS_FNAME, OUTBOUND_PAYMENTS_FNAME};
 use crate::disk::{FilesystemLogger, PENDING_SPENDABLE_OUTPUT_DIR};
 use crate::error::APIError;
 use crate::proxy::post_consignment;
-use crate::rgb::{update_transition_beneficiary, RgbUtilities};
+use crate::rgb::{get_bitcoin_network, update_transition_beneficiary, RgbUtilities};
 use crate::routes::HTLCStatus;
 use crate::utils::{do_connect_peer, hex_str, AppState, StaticState, UnlockedAppState};
 
@@ -912,7 +912,7 @@ async fn _spend_outputs(
     }
 
     if !vanilla_output_descriptors.is_empty() {
-        let address_str = unlocked_state.get_rgb_wallet().get_address();
+        let address_str = unlocked_state.get_rgb_wallet().get_address().unwrap();
         let address = Address::from_str(&address_str).unwrap().assume_checked();
         let script_buf = address.script_pubkey();
         let bdk_script = BdkScript::from(script_buf.into_bytes());
@@ -1098,7 +1098,7 @@ pub(crate) async fn start_ldk(
     let ldk_announced_listen_addr = static_state.ldk_announced_listen_addr.clone();
     let ldk_announced_node_name = static_state.ldk_announced_node_name;
     let electrum_url = static_state.electrum_url.clone();
-    let bitcoin_network: BitcoinNetwork = network.into();
+    let bitcoin_network = get_bitcoin_network(&network);
 
     // Initialize the FeeEstimator
     // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
@@ -1438,6 +1438,7 @@ pub(crate) async fn start_ldk(
             max_allocations_per_utxo: 1,
             pubkey,
             mnemonic: Some(mnemonic.to_string()),
+            vanilla_keychain: None,
         })
         .expect("valid rgb-lib wallet")
     })

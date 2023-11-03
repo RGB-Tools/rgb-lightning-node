@@ -24,8 +24,8 @@ Also note that the following RGB projects (included in this project as git
 sumbodules) have been modified in order to make the creation of static
 consignments (without entropy) possible. Here links to compare the applied
 changes:
-- [client_side_validation](https://github.com/RGB-Tools/client_side_validation/compare/v0.10.5...static_0.10.5)
-- [rgb-wallet](https://github.com/RGB-Tools/rgb-wallet/compare/v0.10.8...static_v0.10.8)
+- [client_side_validation](https://github.com/RGB-Tools/client_side_validation/compare/v0.10.6...static_0.10.6)
+- [rgb-wallet](https://github.com/RGB-Tools/rgb-wallet/compare/v0.10.9...static_v0.10.9)
 
 But most importantly [rust-lightning] has been changed in order to support
 RGB channels,

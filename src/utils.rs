@@ -14,7 +14,6 @@ use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
-use rgb_lib::BitcoinNetwork;
 use std::{
     fmt::Write,
     fs,
@@ -35,6 +34,7 @@ use crate::{
         ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices, NetworkGraph,
         OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
     },
+    rgb::get_bitcoin_network,
 };
 
 pub(crate) const LOGS_DIR: &str = "logs";
@@ -394,7 +394,7 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         electrum_url,
     )
     .expect("able to write");
-    let bitcoin_network: BitcoinNetwork = network.into();
+    let bitcoin_network = get_bitcoin_network(&network);
     fs::write(
         format!("{}/{BITCOIN_NETWORK_FNAME}", args.storage_dir_path),
         bitcoin_network.to_string(),

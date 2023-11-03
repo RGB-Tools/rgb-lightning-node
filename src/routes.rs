@@ -45,7 +45,7 @@ use std::{
 use crate::backup::{do_backup, restore_backup};
 use crate::disk::{INBOUND_PAYMENTS_FNAME, OUTBOUND_PAYMENTS_FNAME};
 use crate::ldk::{start_ldk, stop_ldk, MIN_CHANNEL_CONFIRMATIONS};
-use crate::rgb::match_rgb_lib_error;
+use crate::rgb::{get_bitcoin_network, match_rgb_lib_error};
 use crate::utils::{
     check_already_initialized, check_locked, check_password_strength, check_password_validity,
     check_unlocked, encrypt_and_save_mnemonic, get_mnemonic_path, hex_str,
@@ -579,7 +579,10 @@ pub(crate) async fn address(
 ) -> Result<Json<AddressResponse>, APIError> {
     let unlocked_state = check_unlocked(&state)?.clone().unwrap();
 
-    let address = unlocked_state.get_rgb_wallet().get_address();
+    let address = unlocked_state
+        .get_rgb_wallet()
+        .get_address()
+        .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?;
 
     Ok(Json(AddressResponse { address }))
 }
@@ -882,7 +885,7 @@ pub(crate) async fn init(
         let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
         check_already_initialized(&mnemonic_path)?;
 
-        let keys = generate_keys(state.static_state.network.into());
+        let keys = generate_keys(get_bitcoin_network(&state.static_state.network));
 
         let mnemonic = keys.mnemonic;
 
@@ -1230,7 +1233,7 @@ pub(crate) async fn list_transfers(
     let mut transfers = vec![];
     for transfer in unlocked_state
         .get_rgb_wallet()
-        .list_transfers(payload.asset_id)
+        .list_transfers(Some(payload.asset_id))
         .map_err(|e| match_rgb_lib_error(&e, APIError::Unexpected))?
     {
         transfers.push(Transfer {

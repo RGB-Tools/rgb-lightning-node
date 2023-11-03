@@ -1,5 +1,6 @@
-use amplify::RawArray;
+use amplify::ByteArray;
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
+use bitcoin::Network;
 use bitcoin_30::hashes::Hash;
 use bitcoin_30::psbt::PartiallySignedTransaction as RgbPsbt;
 use bp::seals::txout::blind::{BlindSeal, SingleBlindSeal};
@@ -8,6 +9,7 @@ use bp::Outpoint as RgbOutpoint;
 use lightning::rgb_utils::STATIC_BLINDING;
 use rgb_core::Operation;
 use rgb_lib::utils::RgbRuntime;
+use rgb_lib::BitcoinNetwork;
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
 use rgbstd::contract::{ContractId, GraphSeal};
 use rgbstd::interface::{TransitionBuilder, TypedState};
@@ -74,6 +76,11 @@ pub(crate) fn update_transition_beneficiary(
         .add_raw_state(assignment_id, seal, TypedState::Amount(amt_rgb))
         .expect("ok");
     (seal_vout, asset_transition_builder)
+}
+
+// TODO: remove after updating to bitcoin 0.30
+pub(crate) fn get_bitcoin_network(network: &Network) -> BitcoinNetwork {
+    BitcoinNetwork::from_str(&network.to_string()).unwrap()
 }
 
 pub(crate) trait RgbUtilities {
@@ -166,7 +173,7 @@ impl RgbUtilities for RgbRuntime {
             .into_iter()
             .map(|b| match b {
                 BuilderSeal::Revealed(graph_seal) => BuilderSeal::Revealed(
-                    graph_seal.resolve(RgbTxid::from_raw_array(witness_txid.to_byte_array())),
+                    graph_seal.resolve(RgbTxid::from_byte_array(witness_txid.to_byte_array())),
                 ),
                 BuilderSeal::Concealed(seal) => BuilderSeal::Concealed(seal),
             })
