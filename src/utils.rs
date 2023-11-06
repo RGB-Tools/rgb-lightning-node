@@ -93,6 +93,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
     pub(crate) fs_store: Arc<FilesystemStore>,
+    pub(crate) persister: Arc<FilesystemStore>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
 }

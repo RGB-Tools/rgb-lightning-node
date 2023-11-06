@@ -1,5 +1,6 @@
 [toolchain]
-channel = "stable"
+# TODO: revert to stable after rust 1.74 - see https://github.com/rust-lang/rust/issues/115188
+channel = "1.71"
 components = ["clippy", "rustfmt"]
 targets = []
 profile = "minimal"

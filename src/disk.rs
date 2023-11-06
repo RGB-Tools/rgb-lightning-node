@@ -19,6 +19,8 @@ use crate::utils::{parse_peer_info, LOGS_DIR};
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 
+pub(crate) const PENDING_SPENDABLE_OUTPUT_DIR: &str = "pending_spendable_outputs";
+
 pub(crate) struct FilesystemLogger {
     data_dir: String,
 }

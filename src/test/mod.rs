@@ -805,6 +805,7 @@ async fn shutdown(node_sockets: &[SocketAddr], ldk_sockets: &[SocketAddr]) {
             panic!("LDK sockets not becoming available (last checked: {last_checked})")
         }
     }
+    tokio::time::sleep(std::time::Duration::from_secs(7)).await;
 }
 
 #[derive(Clone, Debug)]
