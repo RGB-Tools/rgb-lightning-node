@@ -13,6 +13,7 @@ use bitcoin_30::{Address, ScriptBuf};
 use bitcoin_bech32::WitnessProgram;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{Filter, Watch};
+use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose};
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
@@ -70,7 +71,9 @@ use crate::disk::{self, INBOUND_PAYMENTS_FNAME, OUTBOUND_PAYMENTS_FNAME};
 use crate::disk::{FilesystemLogger, PENDING_SPENDABLE_OUTPUT_DIR};
 use crate::error::APIError;
 use crate::proxy::post_consignment;
-use crate::rgb::{get_bitcoin_network, update_transition_beneficiary, RgbUtilities};
+use crate::rgb::{
+    get_bitcoin_network, update_transition_beneficiary, RgbLibWalletWrapper, RgbUtilities,
+};
 use crate::routes::HTLCStatus;
 use crate::utils::{do_connect_peer, hex_str, AppState, StaticState, UnlockedAppState};
 
@@ -159,6 +162,13 @@ pub(crate) type NetworkGraph = gossip::NetworkGraph<Arc<FilesystemLogger>>;
 pub(crate) type OnionMessenger =
     SimpleArcOnionMessenger<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
 
+pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
+    Arc<BitcoindClient>,
+    Arc<Wallet<Arc<RgbLibWalletWrapper>, Arc<FilesystemLogger>>>,
+    Arc<KeysManager>,
+    Arc<FilesystemLogger>,
+>;
+
 async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
@@ -224,7 +234,7 @@ async fn handle_ldk_events(
 
             let signed_psbt = unlocked_state
                 .get_rgb_wallet()
-                .sign_psbt(unsigned_psbt)
+                .sign_psbt(unsigned_psbt, None)
                 .unwrap();
 
             let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
@@ -652,9 +662,7 @@ async fn handle_ldk_events(
             // the funding transaction either confirms, or this event is generated.
         }
         Event::HTLCIntercepted { .. } => {}
-        Event::BumpTransaction(_event) => {
-            unreachable!("BumpTxEventHandler needs to be implemented")
-        }
+        Event::BumpTransaction(event) => unlocked_state.bump_tx_event_handler.handle_event(&event),
     }
 }
 
@@ -666,6 +674,21 @@ async fn _spend_outputs(
     let secp_ctx = Secp256k1::new();
     let output_descriptors = &outputs.iter().collect::<Vec<_>>();
     let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
+
+    // We set nLockTime to the current height to discourage fee sniping.
+    // Occasionally randomly pick a nLockTime even further back, so
+    // that transactions that are delayed after signing for whatever reason,
+    // e.g. high-latency mix networks and some CoinJoin implementations, have
+    // better privacy.
+    // Logic copied from core: https://github.com/bitcoin/bitcoin/blob/1d4846a8443be901b8a5deb0e357481af22838d0/src/wallet/spend.cpp#L936
+    let mut cur_height = unlocked_state.channel_manager.current_best_block().height();
+    // 10% of the time
+    if thread_rng().gen_range(0..10) == 0 {
+        // subtract random number between 0 and 100
+        cur_height = cur_height.saturating_sub(thread_rng().gen_range(0..100));
+    }
+    let lock_time: PackedLockTime =
+        LockTime::from_height(cur_height).map_or(PackedLockTime::ZERO, |l| l.into());
 
     let mut vanilla_output_descriptors = vec![];
     let mut need_rgb_refresh = false;
@@ -748,52 +771,13 @@ async fn _spend_outputs(
 
         let (tx, vout, consignment) = match outp {
             SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
-                let signer = unlocked_state.keys_manager.derive_channel_keys(
-                    descriptor.channel_value_satoshis,
-                    &descriptor.channel_keys_id,
-                );
-                let intermediate_wallet =
-                    get_bdk_wallet_seckey(static_state.network, signer.payment_key);
-                sync_wallet(&intermediate_wallet, static_state.electrum_url.clone());
-                let mut builder = intermediate_wallet.build_tx();
-                builder
-                    .add_utxos(&rgb_inputs)
-                    .expect("valid utxos")
-                    .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
-                    .manually_selected_only()
-                    .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
-                    .add_data(&[1])
-                    .drain_to(bdk_script);
-                let psbt = builder.finish().expect("valid psbt finish").0;
-
-                let (vout, asset_transition_builder) = update_transition_beneficiary(
-                    &psbt,
-                    &mut beneficiaries,
-                    asset_transition_builder,
-                    assignment_id,
-                    amt_rgb,
-                );
-                let (mut psbt, consignment) =
-                    runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
-
-                intermediate_wallet
-                    .sign(&mut psbt, SignOptions::default())
-                    .expect("able to sign");
-
-                (psbt.extract_tx(), vout, consignment)
-            }
-            SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
-                let signer = unlocked_state.keys_manager.derive_channel_keys(
-                    descriptor.channel_value_satoshis,
-                    &descriptor.channel_keys_id,
-                );
                 let input = vec![TxIn {
                     previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
                     script_sig: Script::new(),
-                    sequence: Sequence(descriptor.to_self_delay as u32),
+                    sequence: Sequence::from_consensus(1),
                     witness: Witness::new(),
                 }];
-                let witness_weight = DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH;
+                let witness_weight = descriptor.max_witness_length();
                 let input_value = descriptor.output.value;
                 let output = vec![TxOut {
                     value: 0,
@@ -801,7 +785,7 @@ async fn _spend_outputs(
                 }];
                 let mut spend_tx = Transaction {
                     version: 2,
-                    lock_time: PackedLockTime(0),
+                    lock_time,
                     input,
                     output,
                 };
@@ -828,8 +812,70 @@ async fn _spend_outputs(
                 let (psbt, consignment) =
                     runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
 
-                let mut spend_tx = psbt.extract_tx();
                 let input_idx = 0;
+                let mut spend_tx = psbt.extract_tx();
+                let signer = unlocked_state.keys_manager.derive_channel_keys(
+                    descriptor.channel_value_satoshis,
+                    &descriptor.channel_keys_id,
+                );
+                let witness_vec = signer
+                    .sign_counterparty_payment_input(
+                        &spend_tx, input_idx, descriptor, &secp_ctx, true,
+                    )
+                    .expect("possible counterparty payment sign");
+
+                spend_tx.input[input_idx].witness = Witness::from_vec(witness_vec);
+
+                (spend_tx, vout, consignment)
+            }
+            SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
+                let input = vec![TxIn {
+                    previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
+                    script_sig: Script::new(),
+                    sequence: Sequence(descriptor.to_self_delay as u32),
+                    witness: Witness::new(),
+                }];
+                let witness_weight = DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH;
+                let input_value = descriptor.output.value;
+                let output = vec![TxOut {
+                    value: 0,
+                    script_pubkey: Script::new_op_return(&[1]),
+                }];
+                let mut spend_tx = Transaction {
+                    version: 2,
+                    lock_time,
+                    input,
+                    output,
+                };
+                let _expected_max_weight =
+                    lightning::util::transaction_utils::maybe_add_change_output(
+                        &mut spend_tx,
+                        input_value,
+                        witness_weight,
+                        tx_feerate,
+                        bdk_script,
+                    )
+                    .expect("can add change");
+
+                let psbt = PartiallySignedTransaction::from_unsigned_tx(spend_tx.clone())
+                    .expect("valid transaction");
+
+                let (vout, asset_transition_builder) = update_transition_beneficiary(
+                    &psbt,
+                    &mut beneficiaries,
+                    asset_transition_builder,
+                    assignment_id,
+                    amt_rgb,
+                );
+                let (psbt, consignment) =
+                    runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
+
+                let input_idx = 0;
+                let mut spend_tx = psbt.extract_tx();
+                let signer = unlocked_state.keys_manager.derive_channel_keys(
+                    descriptor.channel_value_satoshis,
+                    &descriptor.channel_keys_id,
+                );
                 let witness_vec = signer
                     .sign_dynamic_p2wsh_input(&spend_tx, input_idx, descriptor, &secp_ctx)
                     .expect("possible dynamic sign");
@@ -917,29 +963,12 @@ async fn _spend_outputs(
         let script_buf = address.script_pubkey();
         let bdk_script = BdkScript::from(script_buf.into_bytes());
 
-        // We set nLockTime to the current height to discourage fee sniping.
-        // Occasionally randomly pick a nLockTime even further back, so
-        // that transactions that are delayed after signing for whatever reason,
-        // e.g. high-latency mix networks and some CoinJoin implementations, have
-        // better privacy.
-        // Logic copied from core: https://github.com/bitcoin/bitcoin/blob/1d4846a8443be901b8a5deb0e357481af22838d0/src/wallet/spend.cpp#L936
-        let mut cur_height = unlocked_state.channel_manager.current_best_block().height();
-
-        // 10% of the time
-        if thread_rng().gen_range(0..10) == 0 {
-            // subtract random number between 0 and 100
-            cur_height = cur_height.saturating_sub(thread_rng().gen_range(0..100));
-        }
-
-        let locktime: PackedLockTime =
-            LockTime::from_height(cur_height).map_or(PackedLockTime::ZERO, |l| l.into());
-
         if let Ok(spending_tx) = unlocked_state.keys_manager.spend_spendable_outputs(
             output_descriptors,
             Vec::new(),
             bdk_script,
             tx_feerate,
-            Some(locktime),
+            Some(lock_time),
             &Secp256k1::new(),
         ) {
             // Note that, most likely, we've already sweeped this set of outputs
@@ -1194,10 +1223,9 @@ pub(crate) async fn start_ldk(
     user_config
         .channel_handshake_limits
         .force_announced_channel_preference = false;
-    // TODO: set to true after implementing BumpTxEventHandler
     user_config
         .channel_handshake_config
-        .negotiate_anchors_zero_fee_htlc_tx = false;
+        .negotiate_anchors_zero_fee_htlc_tx = true;
     user_config.manually_accept_inbound_channels = true;
     let mut restarting_node = true;
     let (channel_manager_blockhash, channel_manager) = {
@@ -1456,6 +1484,19 @@ pub(crate) async fn start_ldk(
     )
     .expect("able to write");
 
+    let rgb_wallet = Arc::new(Mutex::new(rgb_wallet));
+    let rgb_wallet_wrapper = Arc::new(RgbLibWalletWrapper::new(
+        Arc::clone(&rgb_wallet),
+        rgb_online.clone(),
+    ));
+
+    let bump_tx_event_handler = Arc::new(BumpTransactionEventHandler::new(
+        Arc::clone(&broadcaster),
+        Arc::new(Wallet::new(rgb_wallet_wrapper, Arc::clone(&logger))),
+        Arc::clone(&keys_manager),
+        Arc::clone(&logger),
+    ));
+
     // Persist ChannelManager and NetworkGraph
     let persister = Arc::new(FilesystemStore::new(ldk_data_dir_path.clone()));
 
@@ -1469,7 +1510,8 @@ pub(crate) async fn start_ldk(
         peer_manager: Arc::clone(&peer_manager),
         fs_store: Arc::clone(&fs_store),
         persister: Arc::clone(&persister),
-        rgb_wallet: Arc::new(Mutex::new(rgb_wallet)),
+        bump_tx_event_handler,
+        rgb_wallet,
         rgb_online,
     });
 

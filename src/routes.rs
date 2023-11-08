@@ -390,6 +390,7 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) asset_amount: u64,
     pub(crate) asset_id: String,
     pub(crate) public: bool,
+    pub(crate) with_anchors: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1469,6 +1470,10 @@ pub(crate) async fn open_channel(
             )));
         }
 
+        if !payload.with_anchors {
+            return Err(APIError::AnchorsRequired);
+        }
+
         connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
             .await?;
 
@@ -1493,8 +1498,7 @@ pub(crate) async fn open_channel(
                 announced_channel: payload.public,
                 our_htlc_minimum_msat: HTLC_MIN_MSAT,
                 minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
-                // TODO: set to true after implementing BumpTxEventHandler
-                negotiate_anchors_zero_fee_htlc_tx: false,
+                negotiate_anchors_zero_fee_htlc_tx: payload.with_anchors,
                 ..Default::default()
             },
             ..Default::default()

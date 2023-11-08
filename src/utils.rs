@@ -31,8 +31,8 @@ use crate::{
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
-        ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices, NetworkGraph,
-        OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
+        BumpTxEventHandler, ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices,
+        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
     },
     rgb::get_bitcoin_network,
 };
@@ -94,6 +94,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) peer_manager: Arc<PeerManager>,
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) persister: Arc<FilesystemStore>,
+    pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
 }

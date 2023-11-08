@@ -1097,6 +1097,9 @@ components:
         public:
           type: boolean
           example: true
+        with_anchors:
+          type: boolean
+          example: true
     OpenChannelResponse:
       type: object
       properties:

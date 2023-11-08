@@ -500,6 +500,7 @@ async fn open_channel(
         asset_amount,
         asset_id: asset_id.to_string(),
         public: true,
+        with_anchors: true,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node_address))

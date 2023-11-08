@@ -1,15 +1,24 @@
 use amplify::ByteArray;
 use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bitcoin::Network;
-use bitcoin_30::hashes::Hash;
+use bitcoin::blockdata::constants::WITNESS_SCALE_FACTOR;
+use bitcoin::hashes::hex::{FromHex, ToHex};
+use bitcoin::hashes::Hash;
+use bitcoin::psbt::Psbt;
+use bitcoin::util::address::{Payload, WitnessVersion};
+use bitcoin::{
+    Address, Network, OutPoint, Script, Transaction, TxOut, WPubkeyHash, XOnlyPublicKey,
+};
+use bitcoin_30::hashes::Hash as Hash30;
 use bitcoin_30::psbt::PartiallySignedTransaction as RgbPsbt;
 use bp::seals::txout::blind::{BlindSeal, SingleBlindSeal};
 use bp::seals::txout::{CloseMethod, TxPtr};
 use bp::Outpoint as RgbOutpoint;
+use lightning::events::bump_transaction::{Utxo, WalletSource};
 use lightning::rgb_utils::STATIC_BLINDING;
 use rgb_core::Operation;
 use rgb_lib::utils::RgbRuntime;
-use rgb_lib::BitcoinNetwork;
+use rgb_lib::wallet::Online;
+use rgb_lib::{BitcoinNetwork, SignOptions, Wallet as RgbLibWallet};
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
 use rgbstd::contract::{ContractId, GraphSeal};
 use rgbstd::interface::{TransitionBuilder, TypedState};
@@ -19,6 +28,7 @@ use rgbwallet::psbt::opret::OutputOpret;
 use rgbwallet::psbt::{PsbtDbc, RgbExt, RgbInExt};
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use crate::error::APIError;
 
@@ -186,5 +196,80 @@ impl RgbUtilities for RgbRuntime {
         let psbt = PartiallySignedTransaction::from_str(&psbt.to_string()).unwrap();
 
         (psbt, transfer)
+    }
+}
+
+pub(crate) struct RgbLibWalletWrapper {
+    pub(crate) wallet: Arc<Mutex<RgbLibWallet>>,
+    pub(crate) online: Online,
+}
+
+impl RgbLibWalletWrapper {
+    pub(crate) fn new(wallet: Arc<Mutex<RgbLibWallet>>, online: Online) -> Self {
+        RgbLibWalletWrapper { wallet, online }
+    }
+}
+
+impl WalletSource for RgbLibWalletWrapper {
+    fn list_confirmed_utxos(&self) -> Result<Vec<Utxo>, ()> {
+        let wallet = self.wallet.lock().unwrap();
+        let network = Network::from_str(
+            &wallet
+                .get_wallet_data()
+                .bitcoin_network
+                .to_string()
+                .to_lowercase(),
+        )
+        .unwrap();
+        Ok(wallet.list_unspents_vanilla(self.online.clone(), 1).unwrap().iter().filter_map(|u| {
+            let script = Script::from_hex(&u.txout.script_pubkey.to_hex()).unwrap();
+            let address = Address::from_script(&script, network).unwrap();
+            let outpoint = OutPoint::from_str(&u.outpoint.to_string()).unwrap();
+            match address.payload {
+                Payload::WitnessProgram { version, ref program } => match version {
+                    WitnessVersion::V0 => WPubkeyHash::from_slice(program)
+                        .map(|wpkh| Utxo::new_v0_p2wpkh(outpoint, u.txout.value, &wpkh))
+                        .ok(),
+                    // TODO: Add `Utxo::new_v1_p2tr` upstream.
+                    WitnessVersion::V1 => XOnlyPublicKey::from_slice(program)
+                        .map(|_| Utxo {
+                            outpoint,
+                            output: TxOut {
+                                value: u.txout.value,
+                                script_pubkey: Script::new_witness_program(version, program),
+                            },
+                            satisfaction_weight: WITNESS_SCALE_FACTOR as u64 +
+                                1 /* witness items */ + 1 /* schnorr sig len */ + 64, /* schnorr sig */
+                        })
+                        .ok(),
+                    _ => None,
+                },
+                _ => None,
+            }
+        })
+        .collect())
+    }
+
+    fn get_change_script(&self) -> Result<Script, ()> {
+        Ok(
+            Address::from_str(&self.wallet.lock().unwrap().get_address().unwrap())
+                .unwrap()
+                .script_pubkey(),
+        )
+    }
+
+    fn sign_tx(&self, tx: Transaction) -> Result<Transaction, ()> {
+        let psbt = RgbPsbt::from_str(&Psbt::from_unsigned_tx(tx).unwrap().to_string()).unwrap();
+        let sign_options = SignOptions {
+            trust_witness_utxo: true,
+            ..Default::default()
+        };
+        let signed = self
+            .wallet
+            .lock()
+            .unwrap()
+            .sign_psbt(psbt.to_string(), Some(sign_options))
+            .unwrap();
+        Ok(Psbt::from_str(&signed).unwrap().extract_tx())
     }
 }

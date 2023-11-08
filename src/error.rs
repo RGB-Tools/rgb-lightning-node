@@ -16,6 +16,9 @@ pub enum APIError {
     #[error("Node has already been initialized")]
     AlreadyInitialized,
 
+    #[error("Anchor outputs are required for RGB channels")]
+    AnchorsRequired,
+
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
@@ -168,7 +171,8 @@ impl IntoResponse for APIError {
             | APIError::IO(_)
             | APIError::Proxy(_)
             | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            APIError::InvalidAmount(_)
+            APIError::AnchorsRequired
+            | APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath
             | APIError::InvalidBlindedUTXO(_)
