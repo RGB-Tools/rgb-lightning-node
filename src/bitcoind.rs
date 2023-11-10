@@ -127,7 +127,7 @@ impl BitcoindClient {
             .await
             .map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::PermissionDenied,
-				"failed to make initial call to bitcoind - please check your RPC user/password and access settings")
+                "failed to make initial call to bitcoind - please check your RPC user/password and access settings")
             })?;
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
         fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
@@ -293,23 +293,23 @@ impl BroadcasterInterface for BitcoindClient {
             let tx_json = serde_json::json!(tx_serialized);
             let logger = Arc::clone(&self.logger);
             self.handle.spawn(async move {
-				// This may error due to RL calling `broadcast_transactions` with the same transaction
-				// multiple times, but the error is safe to ignore.
-				match bitcoind_rpc_client
-					.call_method::<Txid>("sendrawtransaction", &[tx_json])
-					.await
-					{
-						Ok(_) => {}
-						Err(e) => {
-							let err_str = e.get_ref().unwrap().to_string();
-							log_error!(logger,
-									   "Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransaction: {}",
-									   err_str,
-									   tx_serialized);
-							print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\n> ", err_str);
-						}
-					}
-			});
+                // This may error due to RL calling `broadcast_transactions` with the same transaction
+                // multiple times, but the error is safe to ignore.
+                match bitcoind_rpc_client
+                    .call_method::<Txid>("sendrawtransaction", &[tx_json])
+                    .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            let err_str = e.get_ref().unwrap().to_string();
+                            log_error!(logger,
+                                       "Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransaction: {}",
+                                       err_str,
+                                       tx_serialized);
+                            print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\n> ", err_str);
+                        }
+                    }
+            });
         }
     }
 }

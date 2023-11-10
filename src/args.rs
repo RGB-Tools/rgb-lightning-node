@@ -162,11 +162,11 @@ fn print_rpc_auth_help() {
     let data_dir = format!("{}/{}", home_directory, DEFAULT_BITCOIN_DATADIR);
     println!("To provide the bitcoind RPC username and password, you can either:");
     println!(
-		"1. Provide the username and password as the first argument to this program in the format: \
-		<bitcoind-rpc-username>:<bitcoind-rpc-password>@<bitcoind-rpc-host>:<bitcoind-rpc-port>"
-	);
+        "1. Provide the username and password as the first argument to this program in the format: \
+        <bitcoind-rpc-username>:<bitcoind-rpc-password>@<bitcoind-rpc-host>:<bitcoind-rpc-port>"
+    );
     println!("2. Provide <bitcoind-rpc-username>:<bitcoind-rpc-password> in a .cookie file in the default \
-		bitcoind data directory (automatically created by bitcoind on startup): `{}`", data_dir);
+        bitcoind data directory (automatically created by bitcoind on startup): `{}`", data_dir);
     println!(
         "3. Set the {} and {} environment variables",
         BITCOIND_RPC_USER_KEY, BITCOIND_RPC_PASSWORD_KEY
