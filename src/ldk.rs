@@ -59,7 +59,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime};
 use strict_encoding::{FieldName, TypeName};
 use tokio::sync::watch::Sender;
@@ -88,6 +88,7 @@ pub(crate) struct LdkBackgroundServices {
     background_processor: Option<JoinHandle<Result<(), std::io::Error>>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct PaymentInfo {
     pub(crate) preimage: Option<PaymentPreimage>,
     pub(crate) secret: Option<PaymentSecret>,
@@ -117,6 +118,103 @@ pub(crate) struct OutboundPaymentInfoStorage {
 impl_writeable_tlv_based!(OutboundPaymentInfoStorage, {
     (0, payments, required),
 });
+
+impl UnlockedAppState {
+    pub(crate) fn add_inbound_payment(&self, payment_hash: PaymentHash, payment_info: PaymentInfo) {
+        let mut inbound = self.get_inbound_payments();
+        inbound.payments.insert(payment_hash, payment_info);
+        self.save_inbound_payments(inbound);
+    }
+
+    pub(crate) fn add_outbound_payment(&self, payment_id: PaymentId, payment_info: PaymentInfo) {
+        let mut outbound = self.get_outbound_payments();
+        outbound.payments.insert(payment_id, payment_info);
+        self.save_outbound_payments(outbound);
+    }
+
+    fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {
+        let mut outbound = self.get_outbound_payments();
+        for (payment_id, payment_info) in outbound
+            .payments
+            .iter_mut()
+            .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
+        {
+            if !recent_payments_payment_ids.contains(payment_id) {
+                payment_info.status = HTLCStatus::Failed;
+            }
+        }
+        self.save_outbound_payments(outbound);
+    }
+
+    pub(crate) fn inbound_payments(&self) -> HashMap<PaymentHash, PaymentInfo> {
+        self.get_inbound_payments().payments.clone()
+    }
+
+    pub(crate) fn outbound_payments(&self) -> HashMap<PaymentId, PaymentInfo> {
+        self.get_outbound_payments().payments.clone()
+    }
+
+    fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
+        self.fs_store
+            .write("", "", INBOUND_PAYMENTS_FNAME, &inbound.encode())
+            .unwrap();
+    }
+
+    fn save_outbound_payments(&self, outbound: MutexGuard<OutboundPaymentInfoStorage>) {
+        self.fs_store
+            .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
+            .unwrap();
+    }
+
+    fn upsert_inbound_payment(
+        &self,
+        payment_hash: PaymentHash,
+        status: HTLCStatus,
+        preimage: Option<PaymentPreimage>,
+        secret: Option<PaymentSecret>,
+        amt_msat: Option<u64>,
+    ) {
+        let mut inbound = self.get_inbound_payments();
+        match inbound.payments.entry(payment_hash) {
+            Entry::Occupied(mut e) => {
+                let payment = e.get_mut();
+                payment.status = status;
+                payment.preimage = preimage;
+                payment.secret = secret;
+            }
+            Entry::Vacant(e) => {
+                e.insert(PaymentInfo {
+                    preimage,
+                    secret,
+                    status,
+                    amt_msat,
+                });
+            }
+        }
+        self.save_inbound_payments(inbound);
+    }
+
+    pub(crate) fn update_outbound_payment(
+        &self,
+        payment_id: PaymentId,
+        status: HTLCStatus,
+        preimage: Option<PaymentPreimage>,
+    ) -> PaymentInfo {
+        let mut outbound = self.get_outbound_payments();
+        let outbound_payment = outbound.payments.get_mut(&payment_id).unwrap();
+        outbound_payment.status = status;
+        outbound_payment.preimage = preimage;
+        let payment = (*outbound_payment).clone();
+        self.save_outbound_payments(outbound);
+        payment
+    }
+
+    pub(crate) fn update_outbound_payment_status(&self, payment_id: PaymentId, status: HTLCStatus) {
+        let mut outbound = self.get_outbound_payments();
+        outbound.payments.get_mut(&payment_id).unwrap().status = status;
+        self.save_outbound_payments(outbound);
+    }
+}
 
 type ChainMonitor = chainmonitor::ChainMonitor<
     InMemorySigner,
@@ -216,26 +314,15 @@ async fn handle_ldk_events(
             };
 
             let unlocked_state_copy = unlocked_state.clone();
-            let online_copy = unlocked_state.rgb_online.clone();
             let unsigned_psbt = tokio::task::spawn_blocking(move || {
                 unlocked_state_copy
-                    .get_rgb_wallet()
-                    .send_begin(
-                        online_copy,
-                        recipient_map,
-                        true,
-                        FEE_RATE,
-                        MIN_CHANNEL_CONFIRMATIONS,
-                    )
+                    .rgb_send_begin(recipient_map, true, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS)
                     .unwrap()
             })
             .await
             .unwrap();
 
-            let signed_psbt = unlocked_state
-                .get_rgb_wallet()
-                .sign_psbt(unsigned_psbt, None)
-                .unwrap();
+            let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
 
             let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
 
@@ -246,8 +333,7 @@ async fn handle_ldk_events(
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
             let consignment_path = unlocked_state
-                .get_rgb_wallet()
-                .get_wallet_dir()
+                .rgb_get_wallet_dir()
                 .join("transfers")
                 .join(funding_txid.clone())
                 .join(asset_id)
@@ -330,27 +416,13 @@ async fn handle_ldk_events(
                 } => (payment_preimage, Some(payment_secret)),
                 PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
             };
-            let mut inbound = unlocked_state.get_inbound_payments();
-            match inbound.payments.entry(payment_hash) {
-                Entry::Occupied(mut e) => {
-                    let payment = e.get_mut();
-                    payment.status = HTLCStatus::Succeeded;
-                    payment.preimage = payment_preimage;
-                    payment.secret = payment_secret;
-                }
-                Entry::Vacant(e) => {
-                    e.insert(PaymentInfo {
-                        preimage: payment_preimage,
-                        secret: payment_secret,
-                        status: HTLCStatus::Succeeded,
-                        amt_msat: Some(amount_msat),
-                    });
-                }
-            }
-            unlocked_state
-                .fs_store
-                .write("", "", INBOUND_PAYMENTS_FNAME, &inbound.encode())
-                .unwrap();
+            unlocked_state.upsert_inbound_payment(
+                payment_hash,
+                HTLCStatus::Succeeded,
+                payment_preimage,
+                payment_secret,
+                Some(amount_msat),
+            );
         }
         Event::PaymentSent {
             payment_preimage,
@@ -359,29 +431,23 @@ async fn handle_ldk_events(
             payment_id,
             ..
         } => {
-            let mut outbound = unlocked_state.get_outbound_payments();
-            for (id, payment) in outbound.payments.iter_mut() {
-                if *id == payment_id.unwrap() {
-                    payment.preimage = Some(payment_preimage);
-                    payment.status = HTLCStatus::Succeeded;
-                    tracing::info!(
-                        "EVENT: successfully sent payment of {:?} millisatoshis{} from \
-                                payment hash {} with preimage {}",
-                        payment.amt_msat,
-                        if let Some(fee) = fee_paid_msat {
-                            format!(" (fee {} msat)", fee)
-                        } else {
-                            "".to_string()
-                        },
-                        payment_hash,
-                        payment_preimage
-                    );
-                }
-            }
-            unlocked_state
-                .fs_store
-                .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
-                .unwrap();
+            let payment = unlocked_state.update_outbound_payment(
+                payment_id.unwrap(),
+                HTLCStatus::Succeeded,
+                Some(payment_preimage),
+            );
+            tracing::info!(
+                "EVENT: successfully sent payment of {:?} millisatoshis{} from \
+                        payment hash {} with preimage {}",
+                payment.amt_msat,
+                if let Some(fee) = fee_paid_msat {
+                    format!(" (fee {} msat)", fee)
+                } else {
+                    "".to_string()
+                },
+                payment_hash,
+                payment_preimage
+            );
         }
         Event::OpenChannelRequest {
             ref temporary_channel_id,
@@ -433,15 +499,7 @@ async fn handle_ldk_events(
                 }
             );
 
-            let mut outbound = unlocked_state.get_outbound_payments();
-            if outbound.payments.contains_key(&payment_id) {
-                let payment = outbound.payments.get_mut(&payment_id).unwrap();
-                payment.status = HTLCStatus::Failed;
-            }
-            unlocked_state
-                .fs_store
-                .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
-                .unwrap();
+            unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
         }
         Event::InvoiceRequestFailed { payment_id } => {
             tracing::error!(
@@ -449,15 +507,7 @@ async fn handle_ldk_events(
                 payment_id,
             );
 
-            let mut outbound = unlocked_state.get_outbound_payments();
-            if outbound.payments.contains_key(&payment_id) {
-                let payment = outbound.payments.get_mut(&payment_id).unwrap();
-                payment.status = HTLCStatus::Failed;
-            }
-            unlocked_state
-                .fs_store
-                .write("", "", OUTBOUND_PAYMENTS_FNAME, &outbound.encode())
-                .unwrap();
+            unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
         }
         Event::PaymentForwarded {
             prev_channel_id,
@@ -584,13 +634,9 @@ async fn handle_ldk_events(
                 let psbt_str = fs::read_to_string(psbt_path).unwrap();
 
                 let state_copy = unlocked_state.clone();
-                let online_copy = unlocked_state.rgb_online.clone();
                 let psbt_str_copy = psbt_str.clone();
                 let _txid = tokio::task::spawn_blocking(move || {
-                    state_copy
-                        .get_rgb_wallet()
-                        .send_end(online_copy, psbt_str_copy)
-                        .unwrap()
+                    state_copy.rgb_send_end(psbt_str_copy).unwrap()
                 })
                 .await
                 .unwrap();
@@ -605,11 +651,7 @@ async fn handle_ldk_events(
                 let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
                 let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
 
-                match unlocked_state.get_rgb_wallet().save_new_asset(
-                    &mut runtime,
-                    &asset_schema,
-                    contract_id,
-                ) {
+                match unlocked_state.rgb_save_new_asset(&mut runtime, &asset_schema, contract_id) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {}", e),
@@ -629,14 +671,8 @@ async fn handle_ldk_events(
             );
 
             tokio::task::spawn_blocking(move || {
-                unlocked_state
-                    .get_rgb_wallet()
-                    .refresh(unlocked_state.rgb_online.clone(), None, vec![])
-                    .unwrap();
-                unlocked_state
-                    .get_rgb_wallet()
-                    .refresh(unlocked_state.rgb_online.clone(), None, vec![])
-                    .unwrap()
+                unlocked_state.rgb_refresh().unwrap();
+                unlocked_state.rgb_refresh().unwrap()
             })
             .await
             .unwrap();
@@ -723,14 +759,7 @@ async fn _spend_outputs(
         let contract_id = transfer_info.contract_id;
 
         let receive_data = unlocked_state
-            .get_rgb_wallet()
-            .witness_receive(
-                None,
-                None,
-                None,
-                vec![static_state.proxy_endpoint.clone()],
-                0,
-            )
+            .rgb_witness_receive(vec![static_state.proxy_endpoint.clone()])
             .unwrap();
         let script_buf_str = receive_data.recipient_id;
         let script_buf = ScriptBuf::from_hex(&script_buf_str).unwrap();
@@ -958,7 +987,7 @@ async fn _spend_outputs(
     }
 
     if !vanilla_output_descriptors.is_empty() {
-        let address_str = unlocked_state.get_rgb_wallet().get_address().unwrap();
+        let address_str = unlocked_state.rgb_get_address().unwrap();
         let address = Address::from_str(&address_str).unwrap().assume_checked();
         let script_buf = address.script_pubkey();
         let bdk_script = BdkScript::from(script_buf.into_bytes());
@@ -981,14 +1010,8 @@ async fn _spend_outputs(
 
     if need_rgb_refresh {
         tokio::task::spawn_blocking(move || {
-            unlocked_state
-                .get_rgb_wallet()
-                .refresh(unlocked_state.rgb_online.clone(), None, vec![])
-                .unwrap();
-            unlocked_state
-                .get_rgb_wallet()
-                .refresh(unlocked_state.rgb_online.clone(), None, vec![])
-                .unwrap()
+            unlocked_state.rgb_refresh().unwrap();
+            unlocked_state.rgb_refresh().unwrap()
         })
         .await
         .unwrap();
@@ -1421,35 +1444,6 @@ pub(crate) async fn start_ldk(
     let outbound_payments = Arc::new(Mutex::new(disk::read_outbound_payment_info(Path::new(
         &format!("{}/{}", ldk_data_dir, OUTBOUND_PAYMENTS_FNAME),
     ))));
-    let recent_payments_payment_ids = channel_manager
-        .list_recent_payments()
-        .into_iter()
-        .map(|p| match p {
-            RecentPaymentDetails::Pending { payment_id, .. } => payment_id,
-            RecentPaymentDetails::Fulfilled { payment_id, .. } => payment_id,
-            RecentPaymentDetails::Abandoned { payment_id, .. } => payment_id,
-            RecentPaymentDetails::AwaitingInvoice { payment_id } => payment_id,
-        })
-        .collect::<Vec<PaymentId>>();
-    for (payment_id, payment_info) in outbound_payments
-        .lock()
-        .unwrap()
-        .payments
-        .iter_mut()
-        .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
-    {
-        if !recent_payments_payment_ids.contains(payment_id) {
-            payment_info.status = HTLCStatus::Failed;
-        }
-    }
-    fs_store
-        .write(
-            "",
-            "",
-            OUTBOUND_PAYMENTS_FNAME,
-            &outbound_payments.lock().unwrap().encode(),
-        )
-        .unwrap();
 
     let xkey: ExtendedKey = mnemonic
         .clone()
@@ -1514,6 +1508,18 @@ pub(crate) async fn start_ldk(
         rgb_wallet,
         rgb_online,
     });
+
+    let recent_payments_payment_ids = channel_manager
+        .list_recent_payments()
+        .into_iter()
+        .map(|p| match p {
+            RecentPaymentDetails::Pending { payment_id, .. } => payment_id,
+            RecentPaymentDetails::Fulfilled { payment_id, .. } => payment_id,
+            RecentPaymentDetails::Abandoned { payment_id, .. } => payment_id,
+            RecentPaymentDetails::AwaitingInvoice { payment_id } => payment_id,
+        })
+        .collect::<Vec<PaymentId>>();
+    unlocked_state.fail_outbound_pending_payments(recent_payments_payment_ids);
 
     // Handle LDK Events
     let unlocked_state_copy = Arc::clone(&unlocked_state);
@@ -1633,16 +1639,14 @@ pub(crate) async fn start_ldk(
     ))
 }
 
-pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
-    tracing::info!("Stopping LDK");
-
-    let join_handle = {
-        let mut ldk_background_services = app_state.ldk_background_services.lock().unwrap();
+impl AppState {
+    fn stop_ldk(&self) -> Option<JoinHandle<Result<(), std::io::Error>>> {
+        let mut ldk_background_services = self.get_ldk_background_services();
 
         if ldk_background_services.is_none() {
             // node is locked
             tracing::info!("LDK is not running");
-            return;
+            return None;
         }
 
         let ldk_background_services = ldk_background_services.as_mut().unwrap();
@@ -1661,9 +1665,13 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
         } else {
             None
         }
-    };
+    }
+}
 
-    if let Some(join_handle) = join_handle {
+pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
+    tracing::info!("Stopping LDK");
+
+    if let Some(join_handle) = app_state.stop_ldk() {
         join_handle.await.unwrap().unwrap();
     }
 

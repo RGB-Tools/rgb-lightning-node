@@ -127,6 +127,18 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
     Ok((router, app_state))
 }
 
+impl AppState {
+    fn wait_state_change(&self) -> bool {
+        let _unlocked_state = self.get_unlocked_app_state();
+        let mut changing_state = self.get_changing_state();
+        if !*changing_state {
+            *changing_state = true;
+            return true;
+        }
+        false
+    }
+}
+
 /// Tokio signal handler that will wait for a user to press CTRL+C.
 /// We use this in our hyper `Server` method `with_graceful_shutdown`.
 async fn shutdown_signal(app_state: Arc<AppState>) {
@@ -160,10 +172,7 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
     let app_state_copy = app_state.clone();
     loop {
         {
-            let _unlocked_state = app_state_copy.get_unlocked_app_state();
-            let mut changing_state = app_state_copy.get_changing_state();
-            if !*changing_state {
-                *changing_state = true;
+            if app_state_copy.wait_state_change() {
                 break;
             }
         }

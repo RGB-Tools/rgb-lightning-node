@@ -23,6 +23,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
+use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -50,7 +51,7 @@ const PASSWORD_MIN_LENGTH: u8 = 8;
 pub(crate) struct AppState {
     pub(crate) static_state: Arc<StaticState>,
     pub(crate) cancel_token: CancellationToken,
-    pub(crate) unlocked_app_state: Arc<Mutex<Option<Arc<UnlockedAppState>>>>,
+    pub(crate) unlocked_app_state: Arc<TokioMutex<Option<Arc<UnlockedAppState>>>>,
     pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
     pub(crate) changing_state: Mutex<bool>,
 }
@@ -64,8 +65,10 @@ impl AppState {
         self.ldk_background_services.lock().unwrap()
     }
 
-    pub(crate) fn get_unlocked_app_state(&self) -> MutexGuard<Option<Arc<UnlockedAppState>>> {
-        self.unlocked_app_state.lock().unwrap()
+    pub(crate) async fn get_unlocked_app_state(
+        &self,
+    ) -> TokioMutexGuard<Option<Arc<UnlockedAppState>>> {
+        self.unlocked_app_state.lock().await
     }
 }
 
@@ -135,32 +138,6 @@ pub(crate) fn check_already_initialized(mnemonic_path: &str) -> Result<(), APIEr
         return Err(APIError::AlreadyInitialized);
     }
     Ok(())
-}
-
-pub(crate) fn check_locked(
-    state: &Arc<AppState>,
-) -> Result<MutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
-    let unlocked_app_state = state.unlocked_app_state.lock().unwrap();
-    if unlocked_app_state.is_some() {
-        Err(APIError::UnlockedNode)
-    } else if *state.get_changing_state() {
-        Err(APIError::ChangingState)
-    } else {
-        Ok(unlocked_app_state)
-    }
-}
-
-pub(crate) fn check_unlocked(
-    state: &Arc<AppState>,
-) -> Result<MutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
-    let unlocked_app_state = state.unlocked_app_state.lock().unwrap();
-    if unlocked_app_state.is_none() {
-        Err(APIError::LockedNode)
-    } else if *state.get_changing_state() {
-        Err(APIError::ChangingState)
-    } else {
-        Ok(unlocked_app_state)
-    }
 }
 
 pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> {
@@ -428,7 +405,7 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
     Ok(Arc::new(AppState {
         static_state,
         cancel_token,
-        unlocked_app_state: Arc::new(Mutex::new(None)),
+        unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
     }))

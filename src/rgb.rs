@@ -17,46 +17,26 @@ use lightning::events::bump_transaction::{Utxo, WalletSource};
 use lightning::rgb_utils::STATIC_BLINDING;
 use rgb_core::Operation;
 use rgb_lib::utils::RgbRuntime;
-use rgb_lib::wallet::Online;
-use rgb_lib::{BitcoinNetwork, SignOptions, Wallet as RgbLibWallet};
+use rgb_lib::wallet::{
+    AssetNIA, Assets, Balance, BtcBalance, Online, ReceiveData, Recipient,
+    Transaction as RgbLibTransaction, Transfer, Unspent,
+};
+use rgb_lib::{
+    AssetSchema, BitcoinNetwork, Error as RgbLibError, SignOptions, Wallet as RgbLibWallet,
+};
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
 use rgbstd::contract::{ContractId, GraphSeal};
-use rgbstd::interface::{TransitionBuilder, TypedState};
+use rgbstd::interface::{ContractIface, TransitionBuilder, TypedState};
 use rgbstd::persistence::Inventory;
 use rgbstd::Txid as RgbTxid;
 use rgbwallet::psbt::opret::OutputOpret;
 use rgbwallet::psbt::{PsbtDbc, RgbExt, RgbInExt};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use crate::error::APIError;
-
-pub(crate) fn match_rgb_lib_error(error: &rgb_lib::Error, default: APIError) -> APIError {
-    tracing::error!("ERR from rgb-lib: {error:?}");
-    match error {
-        rgb_lib::Error::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
-        rgb_lib::Error::AssetNotFound { .. } => APIError::UnknownContractId,
-        rgb_lib::Error::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
-        rgb_lib::Error::InsufficientBitcoins { needed, available } => {
-            APIError::InsufficientFunds(needed - available)
-        }
-        rgb_lib::Error::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
-        rgb_lib::Error::InvalidBlindedUTXO { details } => {
-            APIError::InvalidBlindedUTXO(details.clone())
-        }
-        rgb_lib::Error::InvalidFeeRate { details } => APIError::InvalidFeeRate(details.clone()),
-        rgb_lib::Error::InvalidName { details } => APIError::InvalidName(details.clone()),
-        rgb_lib::Error::InvalidPrecision { details } => APIError::InvalidPrecision(details.clone()),
-        rgb_lib::Error::InvalidTicker { details } => APIError::InvalidTicker(details.clone()),
-        rgb_lib::Error::InvalidTransportEndpoints { details } => {
-            APIError::InvalidTransportEndpoints(details.clone())
-        }
-        rgb_lib::Error::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
-        rgb_lib::Error::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
-        _ => default,
-    }
-}
+use crate::utils::UnlockedAppState;
 
 pub(crate) fn update_transition_beneficiary(
     psbt: &PartiallySignedTransaction,
@@ -91,6 +71,171 @@ pub(crate) fn update_transition_beneficiary(
 // TODO: remove after updating to bitcoin 0.30
 pub(crate) fn get_bitcoin_network(network: &Network) -> BitcoinNetwork {
     BitcoinNetwork::from_str(&network.to_string()).unwrap()
+}
+
+impl UnlockedAppState {
+    pub(crate) fn rgb_blind_receive(
+        &self,
+        asset_id: Option<String>,
+        transport_endpoints: Vec<String>,
+        min_confirmations: u8,
+    ) -> Result<ReceiveData, RgbLibError> {
+        self.get_rgb_wallet().blind_receive(
+            asset_id,
+            None,
+            None,
+            transport_endpoints,
+            min_confirmations,
+        )
+    }
+
+    pub(crate) fn rgb_create_utxos(
+        &self,
+        up_to: bool,
+        num: u8,
+        size: u32,
+        fee_rate: f32,
+    ) -> Result<u8, RgbLibError> {
+        self.get_rgb_wallet().create_utxos(
+            self.rgb_online.clone(),
+            up_to,
+            Some(num),
+            Some(size),
+            fee_rate,
+        )
+    }
+
+    pub(crate) fn rgb_get_address(&self) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet().get_address()
+    }
+
+    pub(crate) fn rgb_get_asset_balance(
+        &self,
+        contract_id: ContractId,
+    ) -> Result<Balance, RgbLibError> {
+        self.get_rgb_wallet()
+            .get_asset_balance(contract_id.to_string())
+    }
+
+    pub(crate) fn rgb_get_btc_balance(&self) -> Result<BtcBalance, RgbLibError> {
+        self.get_rgb_wallet()
+            .get_btc_balance(self.rgb_online.clone())
+    }
+
+    pub(crate) fn rgb_get_wallet_dir(&self) -> PathBuf {
+        self.get_rgb_wallet().get_wallet_dir()
+    }
+
+    pub(crate) fn rgb_issue_asset_nia(
+        &self,
+        ticker: String,
+        name: String,
+        precision: u8,
+        amounts: Vec<u64>,
+    ) -> Result<AssetNIA, RgbLibError> {
+        self.get_rgb_wallet().issue_asset_nia(
+            self.rgb_online.clone(),
+            ticker,
+            name,
+            precision,
+            amounts,
+        )
+    }
+
+    pub(crate) fn rgb_list_assets(&self) -> Result<Assets, RgbLibError> {
+        self.get_rgb_wallet().list_assets(vec![])
+    }
+
+    pub(crate) fn rgb_list_transactions(&self) -> Result<Vec<RgbLibTransaction>, RgbLibError> {
+        self.get_rgb_wallet()
+            .list_transactions(Some(self.rgb_online.clone()))
+    }
+
+    pub(crate) fn rgb_list_transfers(
+        &self,
+        asset_id: String,
+    ) -> Result<Vec<Transfer>, RgbLibError> {
+        self.get_rgb_wallet().list_transfers(Some(asset_id))
+    }
+
+    pub(crate) fn rgb_list_unspents(&self) -> Result<Vec<Unspent>, RgbLibError> {
+        self.get_rgb_wallet()
+            .list_unspents(Some(self.rgb_online.clone()), false)
+    }
+
+    pub(crate) fn rgb_refresh(&self) -> Result<bool, RgbLibError> {
+        self.get_rgb_wallet()
+            .refresh(self.rgb_online.clone(), None, vec![])
+    }
+
+    pub(crate) fn rgb_save_new_asset(
+        &self,
+        runtime: &mut RgbRuntime,
+        asset_schema: &AssetSchema,
+        contract_id: ContractId,
+    ) -> Result<ContractIface, RgbLibError> {
+        self.get_rgb_wallet()
+            .save_new_asset(runtime, asset_schema, contract_id)
+    }
+
+    pub(crate) fn rgb_send(
+        &self,
+        recipient_map: HashMap<String, Vec<Recipient>>,
+        donation: bool,
+        fee_rate: f32,
+        min_confirmations: u8,
+    ) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet().send(
+            self.rgb_online.clone(),
+            recipient_map,
+            donation,
+            fee_rate,
+            min_confirmations,
+        )
+    }
+
+    pub(crate) fn rgb_send_begin(
+        &self,
+        recipient_map: HashMap<String, Vec<Recipient>>,
+        donation: bool,
+        fee_rate: f32,
+        min_confirmations: u8,
+    ) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet().send_begin(
+            self.rgb_online.clone(),
+            recipient_map,
+            donation,
+            fee_rate,
+            min_confirmations,
+        )
+    }
+
+    pub(crate) fn rgb_send_btc(
+        &self,
+        address: String,
+        amount: u64,
+        fee_rate: f32,
+    ) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_btc(self.rgb_online.clone(), address, amount, fee_rate)
+    }
+
+    pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_end(self.rgb_online.clone(), signed_psbt)
+    }
+
+    pub(crate) fn rgb_sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet().sign_psbt(unsigned_psbt, None)
+    }
+
+    pub(crate) fn rgb_witness_receive(
+        &self,
+        transport_endpoints: Vec<String>,
+    ) -> Result<ReceiveData, RgbLibError> {
+        self.get_rgb_wallet()
+            .witness_receive(None, None, None, transport_endpoints, 0)
+    }
 }
 
 pub(crate) trait RgbUtilities {
