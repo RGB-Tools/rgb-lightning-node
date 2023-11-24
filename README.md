@@ -139,7 +139,7 @@ Once daemons are running, they can be operated via REST JSON APIs.
 For example, using curl:
 ```bash
 curl -X POST -H "Content-type: application/json" \
-    -d '{"ticker": "USDT", "name": "Tether", "amount": 666, "precision": 0}' \
+    -d '{"ticker": "USDT", "name": "Tether", "amounts": [666], "precision": 0}' \
     http://localhost:3001/issueasset
 ```
 
