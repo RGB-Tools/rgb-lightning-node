@@ -220,6 +220,21 @@ impl UnlockedAppState {
             .send_btc(self.rgb_online.clone(), address, amount, fee_rate)
     }
 
+    pub(crate) fn rgb_send_btc_begin(
+        &self,
+        address: String,
+        amount: u64,
+        fee_rate: f32,
+    ) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_btc_begin(self.rgb_online.clone(), address, amount, fee_rate)
+    }
+
+    pub(crate) fn rgb_send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_btc_end(self.rgb_online.clone(), signed_psbt)
+    }
+
     pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
             .send_end(self.rgb_online.clone(), signed_psbt)

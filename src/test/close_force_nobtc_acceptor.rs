@@ -26,10 +26,18 @@ async fn close_force_nobtc_acceptor() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
+    let channel =
+        open_colored_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
     assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
 
-    keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
+    keysend(
+        node1_addr,
+        &node2_pubkey,
+        None,
+        Some(asset_id.clone()),
+        Some(100),
+    )
+    .await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, true).await;
     wait_for_balance(node1_addr, &asset_id, 900).await;

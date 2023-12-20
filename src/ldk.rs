@@ -23,13 +23,13 @@ use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, Simple
 use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::{DefaultMessageRouter, SimpleArcOnionMessenger};
 use lightning::rgb_utils::{
-    get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, STATIC_BLINDING,
+    get_rgb_channel_info, get_rgb_runtime, is_channel_rgb, read_rgb_transfer_info, STATIC_BLINDING,
     WALLET_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
 use lightning::routing::router::DefaultRouter;
-use lightning::routing::scoring::ProbabilisticScoringFeeParameters;
+use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use lightning::sign::{
     DelayedPaymentOutputDescriptor, EntropySource, InMemorySigner, KeysManager,
     SpendableOutputDescriptor,
@@ -211,8 +211,10 @@ impl UnlockedAppState {
 
     pub(crate) fn update_outbound_payment_status(&self, payment_id: PaymentId, status: HTLCStatus) {
         let mut outbound = self.get_outbound_payments();
-        outbound.payments.get_mut(&payment_id).unwrap().status = status;
-        self.save_outbound_payments(outbound);
+        if let Some(payment) = outbound.payments.get_mut(&payment_id) {
+            payment.status = status;
+            self.save_outbound_payments(outbound);
+        }
     }
 }
 
@@ -252,6 +254,16 @@ pub(crate) type PeerManager = SimpleArcPeerManager<
     FilesystemLogger,
 >;
 
+pub(crate) type Scorer = ProbabilisticScorer<Arc<NetworkGraph>, Arc<FilesystemLogger>>;
+
+pub(crate) type Router = DefaultRouter<
+    Arc<NetworkGraph>,
+    Arc<FilesystemLogger>,
+    Arc<RwLock<Scorer>>,
+    ProbabilisticScoringFeeParameters,
+    Scorer,
+>;
+
 pub(crate) type ChannelManager =
     SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
 
@@ -289,70 +301,91 @@ async fn handle_ldk_events(
                     Network::Signet => bitcoin_bech32::constants::Network::Signet,
                 },
             )
-            .expect("Lightning funding tx should always be to a SegWit output")
-            .to_scriptpubkey();
-            let script_buf = ScriptBuf::from_bytes(addr);
+            .expect("Lightning funding tx should always be to a SegWit output");
+            let script_buf = ScriptBuf::from_bytes(addr.to_scriptpubkey());
 
-            let (rgb_info, _) = get_rgb_channel_info(
+            let is_colored = is_channel_rgb(
                 &temporary_channel_id,
                 &PathBuf::from(&static_state.ldk_data_dir),
             );
+            let funding_tx = if is_colored {
+                let (rgb_info, _) = get_rgb_channel_info(
+                    &temporary_channel_id,
+                    &PathBuf::from(&static_state.ldk_data_dir),
+                );
 
-            let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
-            let asset_id = rgb_info.contract_id.to_string();
+                let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
+                let asset_id = rgb_info.contract_id.to_string();
 
-            let recipient_map = map! {
-                asset_id.clone() => vec![Recipient {
-                    recipient_data: RecipientData::WitnessData {
-                        script_buf,
-                        amount_sat: channel_value_satoshis,
-                        blinding: Some(STATIC_BLINDING),
-                    },
-                    amount: channel_rgb_amount,
-                    transport_endpoints: vec![static_state.proxy_endpoint.clone()]
-                }]
+                let recipient_map = map! {
+                    asset_id.clone() => vec![Recipient {
+                        recipient_data: RecipientData::WitnessData {
+                            script_buf,
+                            amount_sat: channel_value_satoshis,
+                            blinding: Some(STATIC_BLINDING),
+                        },
+                        amount: channel_rgb_amount,
+                        transport_endpoints: vec![static_state.proxy_endpoint.clone()]
+                    }]
+                };
+
+                let unlocked_state_copy = unlocked_state.clone();
+                let unsigned_psbt = tokio::task::spawn_blocking(move || {
+                    unlocked_state_copy
+                        .rgb_send_begin(recipient_map, true, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS)
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
+                let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
+                let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
+
+                let funding_tx = psbt.clone().extract_tx();
+                let funding_txid = funding_tx.txid().to_string();
+
+                let psbt_path = format!("{}/psbt_{funding_txid}", static_state.ldk_data_dir);
+                fs::write(psbt_path, psbt.to_string()).unwrap();
+
+                let consignment_path = unlocked_state
+                    .rgb_get_wallet_dir()
+                    .join("transfers")
+                    .join(funding_txid.clone())
+                    .join(asset_id)
+                    .join("consignment_out");
+                let proxy_ref = (*static_state.proxy_client).clone();
+                let proxy_url_copy = static_state.proxy_url.clone();
+                let res = post_consignment(
+                    proxy_ref,
+                    &proxy_url_copy,
+                    funding_txid.clone(),
+                    consignment_path,
+                    funding_txid,
+                    Some(0),
+                )
+                .await;
+                if res.is_err() || res.unwrap().result.is_none() {
+                    tracing::error!("Cannot post consignment");
+                    return;
+                }
+
+                funding_tx
+            } else {
+                let unsigned_psbt = unlocked_state
+                    .rgb_send_btc_begin(addr.to_address(), channel_value_satoshis, FEE_RATE)
+                    .unwrap();
+                let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
+
+                let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
+
+                let funding_tx = psbt.clone().extract_tx();
+                let funding_txid = funding_tx.txid().to_string();
+
+                let psbt_path = format!("{}/psbt_{funding_txid}", static_state.ldk_data_dir);
+                fs::write(psbt_path, psbt.to_string()).unwrap();
+
+                funding_tx
             };
-
-            let unlocked_state_copy = unlocked_state.clone();
-            let unsigned_psbt = tokio::task::spawn_blocking(move || {
-                unlocked_state_copy
-                    .rgb_send_begin(recipient_map, true, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS)
-                    .unwrap()
-            })
-            .await
-            .unwrap();
-
-            let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
-
-            let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
-
-            let funding_tx = psbt.clone().extract_tx();
-            let funding_txid = funding_tx.txid().to_string();
-
-            let psbt_path = format!("{}/psbt_{funding_txid}", static_state.ldk_data_dir);
-            fs::write(psbt_path, psbt.to_string()).unwrap();
-
-            let consignment_path = unlocked_state
-                .rgb_get_wallet_dir()
-                .join("transfers")
-                .join(funding_txid.clone())
-                .join(asset_id)
-                .join("consignment_out");
-            let proxy_ref = (*static_state.proxy_client).clone();
-            let proxy_url_copy = static_state.proxy_url.clone();
-            let res = post_consignment(
-                proxy_ref,
-                &proxy_url_copy,
-                funding_txid.clone(),
-                consignment_path,
-                funding_txid,
-                Some(0),
-            )
-            .await;
-            if res.is_err() || res.unwrap().result.is_none() {
-                tracing::error!("Cannot post consignment");
-                return;
-            }
 
             let channel_manager_copy = unlocked_state.channel_manager.clone();
 
@@ -635,26 +668,37 @@ async fn handle_ldk_events(
 
                 let state_copy = unlocked_state.clone();
                 let psbt_str_copy = psbt_str.clone();
-                let _txid = tokio::task::spawn_blocking(move || {
-                    state_copy.rgb_send_end(psbt_str_copy).unwrap()
-                })
-                .await
-                .unwrap();
+                let _txid =
+                    if is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir)) {
+                        tokio::task::spawn_blocking(move || {
+                            state_copy.rgb_send_end(psbt_str_copy).unwrap()
+                        })
+                    } else {
+                        tokio::task::spawn_blocking(move || {
+                            state_copy.rgb_send_btc_end(psbt_str_copy).unwrap()
+                        })
+                    }
+                    .await
+                    .unwrap();
             } else {
                 // acceptor
                 let consignment_path =
                     format!("{}/consignment_{funding_txid}", static_state.ldk_data_dir);
-                let consignment = Bindle::<RgbTransfer>::load(consignment_path)
-                    .expect("successful consignment load");
-                let contract_id = consignment.contract_id();
-                let schema_id = consignment.schema_id().to_string();
-                let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
-                let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
+                if let Ok(consignment) = Bindle::<RgbTransfer>::load(consignment_path) {
+                    let contract_id = consignment.contract_id();
+                    let schema_id = consignment.schema_id().to_string();
+                    let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
+                    let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
 
-                match unlocked_state.rgb_save_new_asset(&mut runtime, &asset_schema, contract_id) {
-                    Ok(_) => {}
-                    Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
-                    Err(e) => panic!("Failed saving asset: {}", e),
+                    match unlocked_state.rgb_save_new_asset(
+                        &mut runtime,
+                        &asset_schema,
+                        contract_id,
+                    ) {
+                        Ok(_) => {}
+                        Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
+                        Err(e) => panic!("Failed saving asset: {}", e),
+                    }
                 }
             }
         }
@@ -697,7 +741,138 @@ async fn handle_ldk_events(
             // A "real" node should probably "lock" the UTXOs spent in funding transactions until
             // the funding transaction either confirms, or this event is generated.
         }
-        Event::HTLCIntercepted { .. } => {}
+        Event::HTLCIntercepted {
+            is_swap,
+            payment_hash,
+            intercept_id,
+            inbound_amount_msat,
+            expected_outbound_amount_msat,
+            inbound_rgb_amount,
+            expected_outbound_rgb_amount,
+            requested_next_hop_scid,
+            prev_short_channel_id,
+        } => {
+            if !is_swap {
+                unlocked_state
+                    .channel_manager
+                    .fail_intercepted_htlc(intercept_id)
+                    .unwrap();
+            }
+
+            let get_rgb_info = |channel_id| {
+                let is_colored =
+                    is_channel_rgb(channel_id, &PathBuf::from(&static_state.ldk_data_dir));
+                if is_colored {
+                    let (rgb_info, _) = get_rgb_channel_info(
+                        channel_id,
+                        &PathBuf::from(&static_state.ldk_data_dir),
+                    );
+                    Some((
+                        rgb_info.contract_id,
+                        rgb_info.local_rgb_amount,
+                        rgb_info.remote_rgb_amount,
+                    ))
+                } else {
+                    None
+                }
+            };
+
+            let inbound_channel = unlocked_state
+                .channel_manager
+                .list_channels()
+                .into_iter()
+                .find(|details| details.short_channel_id == Some(prev_short_channel_id))
+                .expect("Should always be a valid channel");
+            let outbound_channel = unlocked_state
+                .channel_manager
+                .list_channels()
+                .into_iter()
+                .find(|details| details.short_channel_id == Some(requested_next_hop_scid))
+                .expect("Should always be a valid channel");
+
+            let inbound_rgb_info = get_rgb_info(&inbound_channel.channel_id);
+            let outbound_rgb_info = get_rgb_info(&outbound_channel.channel_id);
+
+            tracing::debug!("EVENT: Requested swap with params inbound_msat={} outbound_msat={} inbound_rgb={:?} outbound_rgb={:?} inbound_contract_id={:?}, outbound_contract_id={:?}", inbound_amount_msat, expected_outbound_amount_msat, inbound_rgb_amount, expected_outbound_rgb_amount, inbound_rgb_info.map(|i| i.0), outbound_rgb_info.map(|i| i.0));
+
+            let mut trades_lock = unlocked_state.taker_trades.lock().unwrap();
+            let (whitelist_contract_id, whitelist_swap_type) = match trades_lock.get(&payment_hash)
+            {
+                None => {
+                    tracing::error!("ERROR: rejecting non-whitelisted swap");
+                    unlocked_state
+                        .channel_manager
+                        .fail_intercepted_htlc(intercept_id)
+                        .unwrap();
+                    return;
+                }
+                Some(x) => x,
+            };
+
+            match whitelist_swap_type {
+                crate::swap::SwapType::BuyAsset {
+                    amount_rgb,
+                    amount_msats,
+                } => {
+                    // We subtract HTLC_MIN_MSAT because a node receiving an RGB payment also receives that amount of sats with it as the payment amount,
+                    // so we exclude it from the calculation of how many sats we are effectively giving out.
+                    let net_msat_diff = (expected_outbound_amount_msat).saturating_sub(
+                        inbound_amount_msat.saturating_sub(crate::routes::HTLC_MIN_MSAT),
+                    );
+
+                    if inbound_rgb_amount != Some(*amount_rgb)
+                        || inbound_rgb_info.map(|x| x.0) != Some(*whitelist_contract_id)
+                        || net_msat_diff != *amount_msats
+                        || outbound_rgb_info.is_some()
+                    {
+                        tracing::error!(
+                            "ERROR: swap doesn't match the whitelisted info, rejecting it"
+                        );
+                        unlocked_state
+                            .channel_manager
+                            .fail_intercepted_htlc(intercept_id)
+                            .unwrap();
+                        return;
+                    }
+                }
+                crate::swap::SwapType::SellAsset {
+                    amount_rgb,
+                    amount_msats,
+                } => {
+                    let net_msat_diff =
+                        inbound_amount_msat.saturating_sub(expected_outbound_amount_msat);
+
+                    if expected_outbound_rgb_amount != Some(*amount_rgb)
+                        || outbound_rgb_info.map(|x| x.0) != Some(*whitelist_contract_id)
+                        || net_msat_diff != *amount_msats
+                        || inbound_rgb_info.is_some()
+                    {
+                        tracing::error!(
+                            "ERROR: swap doesn't match the whitelisted info, rejecting it"
+                        );
+                        unlocked_state
+                            .channel_manager
+                            .fail_intercepted_htlc(intercept_id)
+                            .unwrap();
+                        return;
+                    }
+                }
+            }
+
+            tracing::debug!("Swap is whitelisted, forwarding the htlc...");
+            trades_lock.remove(&payment_hash);
+
+            unlocked_state
+                .channel_manager
+                .forward_intercepted_htlc(
+                    intercept_id,
+                    channelmanager::NextHopForward::ShortChannelId(requested_next_hop_scid),
+                    outbound_channel.counterparty.node_id,
+                    expected_outbound_amount_msat,
+                    expected_outbound_rgb_amount,
+                )
+                .expect("Forward should be valid");
+        }
         Event::BumpTransaction(event) => unlocked_state.bump_tx_event_handler.handle_event(&event),
     }
 }
@@ -1264,7 +1439,7 @@ pub(crate) async fn start_ldk(
                 fee_estimator.clone(),
                 chain_monitor.clone(),
                 broadcaster.clone(),
-                router,
+                router.clone(),
                 logger.clone(),
                 user_config,
                 channel_monitor_mut_references,
@@ -1285,7 +1460,7 @@ pub(crate) async fn start_ldk(
                 fee_estimator.clone(),
                 chain_monitor.clone(),
                 broadcaster.clone(),
-                router,
+                router.clone(),
                 logger.clone(),
                 keys_manager.clone(),
                 keys_manager.clone(),
@@ -1507,6 +1682,9 @@ pub(crate) async fn start_ldk(
         bump_tx_event_handler,
         rgb_wallet,
         rgb_online,
+        maker_trades: Arc::new(Mutex::new(HashMap::new())),
+        taker_trades: Arc::new(Mutex::new(HashMap::new())),
+        router: Arc::clone(&router),
     });
 
     let recent_payments_payment_ids = channel_manager

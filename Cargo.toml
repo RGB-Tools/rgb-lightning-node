@@ -77,3 +77,6 @@ lightning = { path = "./rust-lightning/lightning" }
 lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
 rgb-std = { path = "./rgb-wallet/std" }
 rgb-wallet = { path = "./rgb-wallet" }
+
+[profile.dev]
+lto = "off"

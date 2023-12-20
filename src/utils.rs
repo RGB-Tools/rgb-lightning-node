@@ -4,6 +4,7 @@ use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use futures::Future;
 use lightning::ln::msgs::SocketAddress;
+use lightning::ln::PaymentHash;
 use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
 use lightning::{
     onion_message::OnionMessageContents,
@@ -13,7 +14,9 @@ use lightning::{
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
+use rgb_core::ContractId;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
+use std::collections::HashMap;
 use std::{
     fmt::Write,
     fs,
@@ -26,6 +29,7 @@ use std::{
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use crate::ldk::Router;
 use crate::{
     args::LdkUserInfo,
     bitcoind::BitcoindClient,
@@ -36,6 +40,7 @@ use crate::{
         NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
     },
     rgb::get_bitcoin_network,
+    swap::SwapType,
 };
 
 pub(crate) const LOGS_DIR: &str = "logs";
@@ -87,6 +92,9 @@ pub(crate) struct StaticState {
     pub(crate) bitcoind_client: Arc<BitcoindClient>,
 }
 
+pub(crate) type MakerTrades = HashMap<PaymentHash, (ContractId, SwapType)>;
+pub(crate) type TakerTrades = HashMap<PaymentHash, (ContractId, SwapType)>;
+
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
@@ -98,8 +106,11 @@ pub(crate) struct UnlockedAppState {
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) persister: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
+    pub(crate) maker_trades: Arc<Mutex<MakerTrades>>,
+    pub(crate) taker_trades: Arc<Mutex<TakerTrades>>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
+    pub(crate) router: Arc<Router>,
 }
 
 impl UnlockedAppState {

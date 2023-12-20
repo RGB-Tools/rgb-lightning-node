@@ -22,6 +22,9 @@ pub enum APIError {
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
+    #[error("Expired")]
+    Expired,
+
     #[error("Failed closing channel: {0}")]
     FailedClosingChannel(String),
 
@@ -40,6 +43,9 @@ pub enum APIError {
     #[error("Failed to open channel: {0}")]
     FailedOpenChannel(String),
 
+    #[error("Failed payment: {0}")]
+    FailedPayment(String),
+
     #[error("Failed to connect to peer")]
     FailedPeerConnection,
 
@@ -52,14 +58,17 @@ pub enum APIError {
     #[error("Failed to start LDK: {0}")]
     FailedStartingLDK(String),
 
-    #[error("Not enough assets, available: {0}")]
-    InsufficientAssets(u64),
+    #[error("Not enough assets, available: {0}, needed: {1}")]
+    InsufficientAssets(u64, u64),
 
     #[error("Not enough funds, call getaddress and send {0} satoshis")]
     InsufficientFunds(u64),
 
     #[error("Invalid amount: {0}")]
     InvalidAmount(String),
+
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 
     #[error("Invalid asset ID: {0}")]
     InvalidAssetID(String),
@@ -100,6 +109,9 @@ pub enum APIError {
     #[error("Invalid pubkey")]
     InvalidPubkey,
 
+    #[error("Invalid swap string: {0}")]
+    InvalidSwapString(String),
+
     #[error("Invalid ticker: {0}")]
     InvalidTicker(String),
 
@@ -120,6 +132,9 @@ pub enum APIError {
 
     #[error("No uncolored UTXOs are available (hint: call createutxos)")]
     NoAvailableUtxos,
+
+    #[error("No route found")]
+    NoRoute,
 
     #[error("Wallet has not been initialized (hint: call init)")]
     NotInitialized,
@@ -164,15 +179,19 @@ impl IntoResponse for APIError {
             | APIError::FailedKeysCreation(_, _)
             | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
+            | APIError::FailedPayment(_)
             | APIError::FailedPeerConnection
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
             | APIError::FailedStartingLDK(_)
             | APIError::IO(_)
+            | APIError::NoRoute
             | APIError::Proxy(_)
             | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             APIError::AnchorsRequired
+            | APIError::Expired
             | APIError::InvalidAmount(_)
+            | APIError::InvalidArgument(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath
             | APIError::InvalidBlindedUTXO(_)
@@ -186,6 +205,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
+            | APIError::InvalidSwapString(_)
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoints(_)
@@ -197,7 +217,7 @@ impl IntoResponse for APIError {
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::ChangingState
-            | APIError::InsufficientAssets(_)
+            | APIError::InsufficientAssets(_, _)
             | APIError::InsufficientFunds(_)
             | APIError::LockedNode
             | APIError::NoAvailableUtxos
