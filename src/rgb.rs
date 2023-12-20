@@ -26,7 +26,7 @@ use rgb_lib::{
 };
 use rgbstd::containers::{Bindle, BuilderSeal, Transfer as RgbTransfer};
 use rgbstd::contract::{ContractId, GraphSeal};
-use rgbstd::interface::{ContractIface, TransitionBuilder, TypedState};
+use rgbstd::interface::{TransitionBuilder, TypedState};
 use rgbstd::persistence::Inventory;
 use rgbstd::Txid as RgbTxid;
 use rgbwallet::psbt::opret::OutputOpret;
@@ -173,7 +173,7 @@ impl UnlockedAppState {
         runtime: &mut RgbRuntime,
         asset_schema: &AssetSchema,
         contract_id: ContractId,
-    ) -> Result<ContractIface, RgbLibError> {
+    ) -> Result<(), RgbLibError> {
         self.get_rgb_wallet()
             .save_new_asset(runtime, asset_schema, contract_id)
     }

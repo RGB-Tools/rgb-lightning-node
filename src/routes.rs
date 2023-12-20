@@ -100,6 +100,7 @@ pub(crate) struct AssetBalanceResponse {
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum AssetIface {
     RGB20,
+    RGB21,
     RGB25,
 }
 
@@ -890,6 +891,7 @@ pub(crate) async fn decode_rgb_invoice(
         recipient_id: invoice_data.recipient_id,
         asset_iface: invoice_data.asset_iface.map(|i| match i {
             rgb_lib::wallet::AssetIface::RGB20 => AssetIface::RGB20,
+            rgb_lib::wallet::AssetIface::RGB21 => AssetIface::RGB21,
             rgb_lib::wallet::AssetIface::RGB25 => AssetIface::RGB25,
         }),
         asset_id: invoice_data.asset_id,
