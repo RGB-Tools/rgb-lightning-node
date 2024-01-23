@@ -209,7 +209,7 @@ cargo test
 ```
 
 
-[RGB proxy server]: https://github.com/grunch/rgb-proxy-server
+[RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
 [rgb-lightning-sample]: https://github.com/RGB-Tools/rgb-lightning-sample
