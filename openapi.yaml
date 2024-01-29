@@ -1511,9 +1511,9 @@ components:
         amount:
           type: integer
           example: 42
-        blinded_utxo:
+        recipient_id:
           type: string
-          example: utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+          example: bcrt:utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
         donation:
           type: boolean
           example: false

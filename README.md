@@ -20,15 +20,8 @@ it also on other networks.
 Please be careful, this software is early alpha, we do not take any
 responsibility for loss of funds or any other issue you may encounter.
 
-Also note that the following RGB projects (included in this project as git
-sumbodules) have been modified in order to make the creation of static
-consignments (without entropy) possible. Here links to compare the applied
-changes:
-- [client_side_validation](https://github.com/RGB-Tools/client_side_validation/compare/v0.10.6...static_0.10.6)
-- [rgb-wallet](https://github.com/RGB-Tools/rgb-wallet/compare/v0.10.9...static_v0.10.9)
-
-But most importantly [rust-lightning] has been changed in order to support
-RGB channels,
+Also note that [rust-lightning] has been changed in order to support RGB
+channels,
 [here](https://github.com/RGB-Tools/rust-lightning/compare/v0.0.118...rgb)
 a comparison with `v0.0.118`, the version we applied the changes to.
 

@@ -54,7 +54,7 @@ async fn send_receive() {
     assert!(matches!(decoded.asset_iface, Some(AssetIface::RGB20)));
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
     assert_eq!(decoded.amount, None);
-    assert!(decoded.network.is_none());
+    assert!(matches!(decoded.network, BitcoinNetwork::Regtest));
     assert!(decoded.expiration_timestamp.is_some());
     assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_REGTEST]);
 

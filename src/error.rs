@@ -76,9 +76,6 @@ pub enum APIError {
     #[error("Invalid backup path")]
     InvalidBackupPath,
 
-    #[error("Invalid blinded UTXO: {0}")]
-    InvalidBlindedUTXO(String),
-
     #[error("Invalid channel ID")]
     InvalidChannelID,
 
@@ -111,6 +108,12 @@ pub enum APIError {
 
     #[error("Invalid pubkey")]
     InvalidPubkey,
+
+    #[error("The provided recipient ID is neither a blinded UTXO or a script")]
+    InvalidRecipientID,
+
+    #[error("The provided recipient ID is for a different network than the wallet's one")]
+    InvalidRecipientNetwork,
 
     #[error("Invalid swap: {0}")]
     InvalidSwap(String),
@@ -202,7 +205,6 @@ impl IntoResponse for APIError {
             | APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath
-            | APIError::InvalidBlindedUTXO(_)
             | APIError::InvalidChannelID
             | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
@@ -214,6 +216,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
+            | APIError::InvalidRecipientID
+            | APIError::InvalidRecipientNetwork
             | APIError::InvalidSwap(_)
             | APIError::InvalidSwapString(_, _)
             | APIError::InvalidTicker(_)

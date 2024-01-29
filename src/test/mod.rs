@@ -1040,14 +1040,14 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
         .unwrap()
 }
 
-async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blinded_utxo: String) {
+async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, recipient_id: String) {
     println!(
-        "sending on-chain {amount} of asset {asset_id} from node {node_address} to {blinded_utxo}"
+        "sending on-chain {amount} of asset {asset_id} from node {node_address} to {recipient_id}"
     );
     let payload = SendAssetRequest {
         asset_id: asset_id.to_string(),
         amount,
-        blinded_utxo,
+        recipient_id,
         donation: true,
         min_confirmations: 1,
         transport_endpoints: vec![PROXY_ENDPOINT_REGTEST.to_string()],

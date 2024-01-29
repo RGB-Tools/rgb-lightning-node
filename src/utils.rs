@@ -18,8 +18,8 @@ use lightning::{
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
-use rgb_core::ContractId;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
+use rgb_lib::ContractId;
 use std::{
     fmt::Write,
     fs,

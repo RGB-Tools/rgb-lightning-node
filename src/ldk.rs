@@ -11,6 +11,7 @@ use bitcoin::util::bip32::{ChildNumber, ExtendedPrivKey};
 use bitcoin::{BlockHash, LockTime, PackedLockTime, Script, Sequence, TxIn, TxOut, Witness};
 use bitcoin_30::{Address, ScriptBuf};
 use bitcoin_bech32::WitnessProgram;
+use bp::ScriptPubkey;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{Filter, Watch};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
@@ -46,15 +47,17 @@ use lightning_block_sync::UnboundedCache;
 use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::fs_store::FilesystemStore;
 use rand::{thread_rng, Rng, RngCore};
-use rgb_lib::wallet::{DatabaseType, Recipient, RecipientData, Wallet as RgbLibWallet, WalletData};
+use rgb_lib::utils::get_account_xpub;
+use rgb_lib::wallet::{DatabaseType, Recipient, Wallet as RgbLibWallet, WalletData, WitnessData};
 use rgb_lib::AssetSchema;
-use rgbstd::containers::{Bindle, Transfer as RgbTransfer};
+use rgbstd::containers::{FileContent, Transfer as RgbTransfer};
+use rgbstd::invoice::{AddressPayload, Beneficiary, XChainNet};
 use rgbstd::persistence::Inventory;
-use rgbstd::Txid as RgbTxid;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -412,17 +415,24 @@ async fn handle_ldk_events(
                 let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
 
+                let address_payload = AddressPayload::from_script(
+                    &ScriptPubkey::try_from(script_buf.into_bytes()).unwrap(),
+                )
+                .unwrap();
+                let beneficiary = Beneficiary::WitnessVout(address_payload);
+                let chain_net = get_bitcoin_network(&static_state.network).into();
+                let recipient_id = XChainNet::with(chain_net, beneficiary).to_string();
+
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
-                        recipient_data: RecipientData::WitnessData {
-                            script_buf,
+                        recipient_id,
+                        witness_data: Some(WitnessData {
                             amount_sat: channel_value_satoshis,
                             blinding: Some(STATIC_BLINDING),
-                        },
+                        }),
                         amount: channel_rgb_amount,
                         transport_endpoints: vec![static_state.proxy_endpoint.clone()]
-                    }]
-                };
+                }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
                 let unsigned_psbt = tokio::task::spawn_blocking(move || {
@@ -812,7 +822,7 @@ async fn handle_ldk_events(
                 let psbt_str_copy = psbt_str.clone();
                 let _txid = tokio::task::spawn_blocking(move || {
                     if is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir)) {
-                        state_copy.rgb_send_end(psbt_str_copy).unwrap()
+                        state_copy.rgb_send_end(psbt_str_copy).unwrap().txid
                     } else {
                         state_copy.rgb_send_btc_end(psbt_str_copy).unwrap()
                     }
@@ -827,14 +837,19 @@ async fn handle_ldk_events(
                 if !consignment_path.exists() {
                     return;
                 }
-                let consignment = Bindle::<RgbTransfer>::load(consignment_path)
-                    .expect("successful consignment load");
+                let consignment =
+                    RgbTransfer::load_file(consignment_path).expect("successful consignment load");
                 let contract_id = consignment.contract_id();
                 let schema_id = consignment.schema_id().to_string();
                 let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
                 let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
 
-                match unlocked_state.rgb_save_new_asset(&mut runtime, &asset_schema, contract_id) {
+                match unlocked_state.rgb_save_new_asset(
+                    &mut runtime,
+                    &asset_schema,
+                    contract_id,
+                    None,
+                ) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {}", e),
@@ -1008,7 +1023,7 @@ async fn handle_ldk_events(
 }
 
 async fn _spend_outputs(
-    outputs: Vec<SpendableOutputDescriptor>,
+    outputs: &[SpendableOutputDescriptor],
     unlocked_state: Arc<UnlockedAppState>,
     static_state: Arc<StaticState>,
 ) {
@@ -1045,7 +1060,6 @@ async fn _spend_outputs(
         };
 
         let txid = outpoint.txid;
-        let witness_txid = RgbTxid::from_str(&txid.to_string()).unwrap();
 
         let transfer_info_path = static_state
             .ldk_data_dir
@@ -1068,22 +1082,26 @@ async fn _spend_outputs(
         let receive_data = unlocked_state
             .rgb_witness_receive(vec![static_state.proxy_endpoint.clone()])
             .unwrap();
-        let script_buf_str = receive_data.recipient_id;
-        let script_buf = ScriptBuf::from_hex(&script_buf_str).unwrap();
-        let bdk_script = BdkScript::from(script_buf.clone().into_bytes());
+        let recipient_id = receive_data.recipient_id;
+
+        let xchainnet_beneficiary = XChainNet::<Beneficiary>::from_str(&recipient_id).unwrap();
+        let bdk_script = match xchainnet_beneficiary.into_inner() {
+            Beneficiary::WitnessVout(address_payload) => {
+                let script_pubkey = address_payload.script_pubkey();
+                let script_bytes = script_pubkey.as_script_bytes();
+                let script_bytes_vec = script_bytes.clone().into_vec();
+                let script_buf = ScriptBuf::from_bytes(script_bytes_vec);
+                BdkScript::from(script_buf.clone().into_bytes())
+            }
+            Beneficiary::BlindedSeal(_) => unreachable!("impossible"),
+        };
 
         let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
 
         runtime
-            .runtime
-            .consume_anchor(transfer_info.anchor)
-            .expect("should consume anchor");
-        for (id, bundle) in transfer_info.bundles {
-            runtime
-                .runtime
-                .consume_bundle(id, bundle, witness_txid)
-                .expect("should consume bundle");
-        }
+            .stock
+            .consume(transfer_info.fascia.clone())
+            .expect("should consume fascia");
 
         let rgb_inputs: Vec<OutPoint> = vec![OutPoint {
             txid: outpoint.txid,
@@ -1093,11 +1111,11 @@ async fn _spend_outputs(
         let amt_rgb = transfer_info.rgb_amount;
 
         let asset_transition_builder = runtime
-            .runtime
+            .stock
             .transition_builder(contract_id, TypeName::from("RGB20"), None::<&str>)
             .expect("ok");
         let assignment_id = asset_transition_builder
-            .assignments_type(&FieldName::from("beneficiary"))
+            .assignments_type(&FieldName::from("assetOwner"))
             .expect("valid assignment");
         let mut beneficiaries = vec![];
 
@@ -1113,7 +1131,7 @@ async fn _spend_outputs(
                 let input_value = descriptor.output.value;
                 let output = vec![TxOut {
                     value: 0,
-                    script_pubkey: Script::new_op_return(&[1]),
+                    script_pubkey: Script::new_op_return(&[]),
                 }];
                 let mut spend_tx = Transaction {
                     version: 2,
@@ -1171,7 +1189,7 @@ async fn _spend_outputs(
                 let input_value = descriptor.output.value;
                 let output = vec![TxOut {
                     value: 0,
-                    script_pubkey: Script::new_op_return(&[1]),
+                    script_pubkey: Script::new_op_return(&[]),
                 }];
                 let mut spend_tx = Transaction {
                     version: 2,
@@ -1243,7 +1261,7 @@ async fn _spend_outputs(
                     .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
                     .manually_selected_only()
                     .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
-                    .add_data(&[1])
+                    .add_data(&[])
                     .drain_to(bdk_script);
                 let psbt = builder.finish().expect("valid psbt finish").0;
 
@@ -1272,14 +1290,14 @@ async fn _spend_outputs(
             .ldk_data_dir
             .join(format!("consignment_{closing_txid}"));
         consignment
-            .save(&consignment_path)
+            .save_file(&consignment_path)
             .expect("successful save");
         let proxy_ref = (*static_state.proxy_client).clone();
         let proxy_url_copy = static_state.proxy_url.clone();
         let res = post_consignment(
             proxy_ref,
             &proxy_url_copy,
-            script_buf_str,
+            recipient_id,
             consignment_path,
             closing_txid,
             Some(vout),
@@ -1381,6 +1399,8 @@ async fn sweep(unlocked_state: Arc<UnlockedAppState>, static_state: Arc<StaticSt
         .join("processing_spendable_outputs");
     let spendable_outputs = "spendable_outputs";
     let spendables_dir = static_state.ldk_data_dir.join(spendable_outputs);
+    let processed_outputs = static_state.ldk_data_dir.join("processed_outputs");
+    fs::create_dir_all(&processed_outputs).unwrap();
 
     // shouldn't be needed as lock/shutdown wait for the task to exit
     if let Ok(dir_iter) = fs::read_dir(&pending_spendables_dir) {
@@ -1445,15 +1465,31 @@ async fn sweep(unlocked_state: Arc<UnlockedAppState>, static_state: Arc<StaticSt
                     Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                     Err(e) => panic!("{:?}", e),
                 }
-                outputs.push(Readable::read(&mut file).unwrap());
+                let output: SpendableOutputDescriptor = Readable::read(&mut file).unwrap();
+                let mut output_hash = DefaultHasher::new();
+                output.hash(&mut output_hash);
+                let output_fname = output_hash.finish().to_string();
+                let output_path = Path::new(&processed_outputs).join(output_fname);
+                if !output_path.exists() {
+                    outputs.push(output);
+                }
             }
 
             _spend_outputs(
-                outputs,
+                &outputs,
                 Arc::clone(&unlocked_state),
                 Arc::clone(&static_state),
             )
             .await;
+
+            for output in outputs {
+                let mut output_hash = DefaultHasher::new();
+                output.hash(&mut output_hash);
+                let output_fname = output_hash.finish().to_string();
+                let output_path = Path::new(&processed_outputs).join(output_fname);
+                fs::File::create(output_path).unwrap();
+            }
+
             // TODO: Removing file for now but should be addressed properly in the future.
             fs::remove_file(file_path).unwrap();
         }
@@ -1777,12 +1813,8 @@ pub(crate) async fn start_ldk(
         &ldk_data_dir.join(OUTBOUND_PAYMENTS_FNAME),
     )));
 
-    let xkey: ExtendedKey = mnemonic
-        .clone()
-        .into_extended_key()
-        .expect("a valid key should have been provided");
-    let xpub = xkey.into_xpub(network, &secp);
-    let pubkey = xpub.to_string();
+    let mnemonic_str = mnemonic.to_string();
+    let account_xpub = get_account_xpub(bitcoin_network, &mnemonic_str).unwrap();
     let data_dir = static_state
         .storage_dir_path
         .clone()
@@ -1794,7 +1826,7 @@ pub(crate) async fn start_ldk(
             bitcoin_network,
             database_type: DatabaseType::Sqlite,
             max_allocations_per_utxo: 1,
-            pubkey,
+            pubkey: account_xpub.to_string(),
             mnemonic: Some(mnemonic.to_string()),
             vanilla_keychain: None,
         })
@@ -1807,7 +1839,7 @@ pub(crate) async fn start_ldk(
         .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
-        xpub.fingerprint().to_string(),
+        account_xpub.fingerprint().to_string(),
     )
     .expect("able to write");
 

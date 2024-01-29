@@ -6,6 +6,7 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
+use invoice::RgbTransport;
 use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
 use lightning::onion_message::{Destination, OnionMessagePath};
@@ -36,14 +37,13 @@ use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use rgb_lib::wallet::{
     AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
     AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
-    Media as RgbLibMedia, Recipient, RecipientData, TokenLight as RgbLibTokenLight,
+    Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
 };
 use rgb_lib::{
     generate_keys, AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork,
     Error as RgbLibError,
 };
-use rgbstd::contract::{ContractId, SecretSeal};
-use rgbwallet::RgbTransport;
+use rgbstd::contract::ContractId;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -374,7 +374,7 @@ pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) asset_iface: Option<AssetIface>,
     pub(crate) asset_id: Option<String>,
     pub(crate) amount: Option<u64>,
-    pub(crate) network: Option<BitcoinNetwork>,
+    pub(crate) network: BitcoinNetwork,
     pub(crate) expiration_timestamp: Option<i64>,
     pub(crate) transport_endpoints: Vec<String>,
 }
@@ -671,7 +671,7 @@ pub(crate) struct RgbInvoiceResponse {
 pub(crate) struct SendAssetRequest {
     pub(crate) asset_id: String,
     pub(crate) amount: u64,
-    pub(crate) blinded_utxo: String,
+    pub(crate) recipient_id: String,
     pub(crate) donation: bool,
     pub(crate) min_confirmations: u8,
     pub(crate) transport_endpoints: Vec<String>,
@@ -932,17 +932,21 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InsufficientSpendableAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InsufficientTotalAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
-            RgbLibError::InvalidBlindedUTXO { details } => APIError::InvalidBlindedUTXO(details),
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
             RgbLibError::InvalidName { details } => APIError::InvalidName(details),
             RgbLibError::InvalidPrecision { details } => APIError::InvalidPrecision(details),
+            RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
+            RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
             RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
             RgbLibError::InvalidTransportEndpoints { details } => {
                 APIError::InvalidTransportEndpoints(details)
             }
             RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
-            _ => APIError::Unexpected,
+            _ => {
+                tracing::debug!("Unexpected rgb-lib error: {error:?}");
+                APIError::Unexpected
+            }
         }
     }
 }
@@ -1188,7 +1192,7 @@ pub(crate) async fn decode_rgb_invoice(
         asset_iface: invoice_data.asset_iface.map(|i| i.into()),
         asset_id: invoice_data.asset_id,
         amount: invoice_data.amount,
-        network: invoice_data.network.map(|n| n.into()),
+        network: invoice_data.network.into(),
         expiration_timestamp: invoice_data.expiration_timestamp,
         transport_endpoints: invoice_data.transport_endpoints,
     }))
@@ -2347,17 +2351,17 @@ pub(crate) async fn send_asset(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-        let secret_seal = SecretSeal::from_str(&payload.blinded_utxo)
-            .map_err(|e| APIError::InvalidBlindedUTXO(e.to_string()))?;
+        RecipientInfo::new(payload.recipient_id.clone())?;
         let recipient_map = map! {
             payload.asset_id => vec![Recipient {
-                recipient_data: RecipientData::BlindedUTXO(secret_seal),
+                recipient_id: payload.recipient_id,
+                witness_data: None,
                 amount: payload.amount,
                 transport_endpoints: payload.transport_endpoints,
             }]
         };
 
-        let txid = tokio::task::spawn_blocking(move || {
+        let send_result = tokio::task::spawn_blocking(move || {
             unlocked_state.rgb_send(
                 recipient_map,
                 payload.donation,
@@ -2368,7 +2372,9 @@ pub(crate) async fn send_asset(
         .await
         .unwrap()?;
 
-        Ok(Json(SendAssetResponse { txid }))
+        Ok(Json(SendAssetResponse {
+            txid: send_result.txid,
+        }))
     })
     .await
 }
