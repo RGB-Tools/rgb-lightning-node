@@ -25,7 +25,7 @@ async fn close_coop_vanilla() {
     fund_and_create_utxos(node2_addr).await;
     fund_and_create_utxos(node3_addr).await;
 
-    let initial_balance = 99677060;
+    let initial_balance = 99676206;
 
     assert_eq!(
         btc_balance(node1_addr).await.vanilla.spendable,

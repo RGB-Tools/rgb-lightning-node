@@ -1,17 +1,9 @@
 use amplify::map;
-use bdk::bitcoin::psbt::PartiallySignedTransaction;
-use bdk::bitcoin::{psbt::Psbt as BdkPsbt, OutPoint, Script as BdkScript};
-use bdk::keys::bip39::Mnemonic;
-use bdk::keys::{DerivableKey, ExtendedKey};
-use bdk::{FeeRate, SignOptions};
-use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::network::constants::Network;
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::util::bip32::{ChildNumber, ExtendedPrivKey};
-use bitcoin::{BlockHash, LockTime, PackedLockTime, Script, Sequence, TxIn, TxOut, Witness};
-use bitcoin_30::{Address, ScriptBuf};
+use bitcoin::{psbt::Psbt, Script as BdkScript};
+use bitcoin::{BlockHash, LockTime, PackedLockTime};
 use bitcoin_bech32::WitnessProgram;
-use bp::ScriptPubkey;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{Filter, Watch};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
@@ -24,17 +16,15 @@ use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, Simple
 use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::{DefaultMessageRouter, SimpleArcOnionMessenger};
 use lightning::rgb_utils::{
-    get_rgb_channel_info_pending, get_rgb_runtime, is_channel_rgb, parse_rgb_payment_info,
-    read_rgb_transfer_info, update_rgb_channel_amount, STATIC_BLINDING, WALLET_FINGERPRINT_FNAME,
+    get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
+    update_rgb_channel_amount, STATIC_BLINDING, WALLET_ACCOUNT_XPUB_FNAME,
+    WALLET_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
-use lightning::sign::{
-    DelayedPaymentOutputDescriptor, EntropySource, InMemorySigner, KeysManager,
-    SpendableOutputDescriptor,
-};
+use lightning::sign::{EntropySource, InMemorySigner, KeysManager, SpendableOutputDescriptor};
 use lightning::util::config::UserConfig;
 use lightning::util::persist::{KVStore, MonitorUpdatingPersister};
 use lightning::util::ser::{Readable, ReadableArgs, WithoutLength, Writeable};
@@ -47,12 +37,20 @@ use lightning_block_sync::UnboundedCache;
 use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::fs_store::FilesystemStore;
 use rand::{thread_rng, Rng, RngCore};
-use rgb_lib::utils::get_account_xpub;
-use rgb_lib::wallet::{DatabaseType, Recipient, Wallet as RgbLibWallet, WalletData, WitnessData};
-use rgb_lib::AssetSchema;
-use rgbstd::containers::{FileContent, Transfer as RgbTransfer};
-use rgbstd::invoice::{AddressPayload, Beneficiary, XChainNet};
-use rgbstd::persistence::Inventory;
+use rgb_lib::{
+    bdk::keys::{bip39::Mnemonic, DerivableKey, ExtendedKey},
+    bitcoin::{
+        bip32::{ChildNumber, ExtendedPrivKey},
+        psbt::PartiallySignedTransaction as RgbLibPsbt,
+        secp256k1::Secp256k1 as Secp256k1_30,
+        Address, ScriptBuf,
+    },
+    utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
+    wallet::{
+        DatabaseType, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData, WitnessData,
+    },
+    AssetSchema, FileContent, RgbTransfer,
+};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -65,22 +63,18 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime};
-use strict_encoding::{FieldName, TypeName};
 use time::OffsetDateTime;
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
-use crate::bdk::{broadcast_tx, get_bdk_wallet_seckey, sync_wallet};
 use crate::bitcoind::BitcoindClient;
 use crate::disk::{
     self, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, TAKER_SWAPS_FNAME,
 };
 use crate::disk::{FilesystemLogger, PENDING_SPENDABLE_OUTPUT_DIR};
 use crate::error::APIError;
-use crate::proxy::post_consignment;
 use crate::rgb::{
-    get_bitcoin_network, get_rgb_channel_info_optional, update_transition_beneficiary,
-    RgbLibWalletWrapper, RgbUtilities,
+    get_bitcoin_network, get_coloring_info, get_rgb_channel_info_optional, RgbLibWalletWrapper,
 };
 use crate::routes::{HTLCStatus, SwapStatus};
 use crate::swap::SwapData;
@@ -415,13 +409,10 @@ async fn handle_ldk_events(
                 let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
 
-                let address_payload = AddressPayload::from_script(
-                    &ScriptPubkey::try_from(script_buf.into_bytes()).unwrap(),
-                )
-                .unwrap();
-                let beneficiary = Beneficiary::WitnessVout(address_payload);
-                let chain_net = get_bitcoin_network(&static_state.network).into();
-                let recipient_id = XChainNet::with(chain_net, beneficiary).to_string();
+                let recipient_id = recipient_id_from_script_buf(
+                    script_buf,
+                    get_bitcoin_network(&static_state.network),
+                );
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
@@ -451,7 +442,7 @@ async fn handle_ldk_events(
             };
 
             let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
-            let psbt = BdkPsbt::from_str(&signed_psbt).unwrap();
+            let psbt = Psbt::from_str(&signed_psbt).unwrap();
 
             let funding_tx = psbt.clone().extract_tx();
             let funding_txid = funding_tx.txid().to_string();
@@ -469,19 +460,24 @@ async fn handle_ldk_events(
                     .join(funding_txid.clone())
                     .join(asset_id)
                     .join("consignment_out");
-                let proxy_ref = (*static_state.proxy_client).clone();
-                let proxy_url_copy = static_state.proxy_url.clone();
-                let res = post_consignment(
-                    proxy_ref,
-                    &proxy_url_copy,
-                    funding_txid.clone(),
-                    consignment_path,
-                    funding_txid,
-                    Some(0),
-                )
-                .await;
-                if res.is_err() || res.unwrap().result.is_none() {
-                    tracing::error!("Cannot post consignment");
+                let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
+                    .unwrap()
+                    .endpoint;
+                let unlocked_state_copy = unlocked_state.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    unlocked_state_copy.rgb_post_consignment(
+                        &proxy_url,
+                        funding_txid.clone(),
+                        &consignment_path,
+                        funding_txid,
+                        Some(0),
+                    )
+                })
+                .await
+                .unwrap();
+
+                if res.is_err() {
+                    tracing::error!("cannot post consignment");
                     return;
                 }
             }
@@ -842,14 +838,8 @@ async fn handle_ldk_events(
                 let contract_id = consignment.contract_id();
                 let schema_id = consignment.schema_id().to_string();
                 let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
-                let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
 
-                match unlocked_state.rgb_save_new_asset(
-                    &mut runtime,
-                    &asset_schema,
-                    contract_id,
-                    None,
-                ) {
+                match unlocked_state.rgb_save_new_asset(&asset_schema, contract_id, None) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {}", e),
@@ -1084,206 +1074,43 @@ async fn _spend_outputs(
             .unwrap();
         let recipient_id = receive_data.recipient_id;
 
-        let xchainnet_beneficiary = XChainNet::<Beneficiary>::from_str(&recipient_id).unwrap();
-        let bdk_script = match xchainnet_beneficiary.into_inner() {
-            Beneficiary::WitnessVout(address_payload) => {
-                let script_pubkey = address_payload.script_pubkey();
-                let script_bytes = script_pubkey.as_script_bytes();
-                let script_bytes_vec = script_bytes.clone().into_vec();
-                let script_buf = ScriptBuf::from_bytes(script_bytes_vec);
-                BdkScript::from(script_buf.clone().into_bytes())
-            }
-            Beneficiary::BlindedSeal(_) => unreachable!("impossible"),
-        };
+        let script_buf = script_buf_from_recipient_id(recipient_id.clone()).unwrap();
+        let bdk_script = BdkScript::from(script_buf.clone().into_bytes());
 
-        let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
-
-        runtime
-            .stock
-            .consume(transfer_info.fascia.clone())
-            .expect("should consume fascia");
-
-        let rgb_inputs: Vec<OutPoint> = vec![OutPoint {
-            txid: outpoint.txid,
-            vout: outpoint.index as u32,
-        }];
+        unlocked_state
+            .rgb_consume_fascia(transfer_info.fascia.clone())
+            .unwrap();
 
         let amt_rgb = transfer_info.rgb_amount;
 
-        let asset_transition_builder = runtime
-            .stock
-            .transition_builder(contract_id, TypeName::from("RGB20"), None::<&str>)
-            .expect("ok");
-        let assignment_id = asset_transition_builder
-            .assignments_type(&FieldName::from("assetOwner"))
-            .expect("valid assignment");
-        let mut beneficiaries = vec![];
+        let descriptors = &[*outp];
 
-        let (tx, vout, consignment) = match outp {
-            SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
-                let input = vec![TxIn {
-                    previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
-                    script_sig: Script::new(),
-                    sequence: Sequence::from_consensus(1),
-                    witness: Witness::new(),
-                }];
-                let witness_weight = descriptor.max_witness_length();
-                let input_value = descriptor.output.value;
-                let output = vec![TxOut {
-                    value: 0,
-                    script_pubkey: Script::new_op_return(&[]),
-                }];
-                let mut spend_tx = Transaction {
-                    version: 2,
-                    lock_time,
-                    input,
-                    output,
-                };
-                let _expected_max_weight =
-                    lightning::util::transaction_utils::maybe_add_change_output(
-                        &mut spend_tx,
-                        input_value,
-                        witness_weight,
-                        tx_feerate,
-                        bdk_script,
-                    )
-                    .expect("can add change");
+        let (psbt, _expected_max_weight) =
+            SpendableOutputDescriptor::create_spendable_outputs_psbt(
+                descriptors,
+                vec![],
+                bdk_script,
+                tx_feerate,
+                Some(lock_time),
+            )
+            .unwrap();
 
-                let psbt = PartiallySignedTransaction::from_unsigned_tx(spend_tx.clone())
-                    .expect("valid transaction");
+        let vout = 0;
+        let coloring_info =
+            get_coloring_info(contract_id, &psbt.clone().extract_tx(), amt_rgb, vout);
+        let mut psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
+        let consignment = unlocked_state
+            .rgb_color_psbt_and_consume(&mut psbt, coloring_info)
+            .unwrap();
+        let mut psbt = Psbt::from_str(&psbt.to_string()).expect("valid transaction");
 
-                let (vout, asset_transition_builder) = update_transition_beneficiary(
-                    &psbt,
-                    &mut beneficiaries,
-                    asset_transition_builder,
-                    assignment_id,
-                    amt_rgb,
-                );
-                let (psbt, consignment) =
-                    runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
+        psbt = unlocked_state
+            .keys_manager
+            .sign_spendable_outputs_psbt(descriptors, psbt, &secp_ctx)
+            .unwrap();
 
-                let input_idx = 0;
-                let mut spend_tx = psbt.extract_tx();
-                let signer = unlocked_state.keys_manager.derive_channel_keys(
-                    descriptor.channel_value_satoshis,
-                    &descriptor.channel_keys_id,
-                );
-                let witness_vec = signer
-                    .sign_counterparty_payment_input(
-                        &spend_tx, input_idx, descriptor, &secp_ctx, true,
-                    )
-                    .expect("possible counterparty payment sign");
-
-                spend_tx.input[input_idx].witness = Witness::from_vec(witness_vec);
-
-                (spend_tx, vout, consignment)
-            }
-            SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
-                let input = vec![TxIn {
-                    previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
-                    script_sig: Script::new(),
-                    sequence: Sequence(descriptor.to_self_delay as u32),
-                    witness: Witness::new(),
-                }];
-                let witness_weight = DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH;
-                let input_value = descriptor.output.value;
-                let output = vec![TxOut {
-                    value: 0,
-                    script_pubkey: Script::new_op_return(&[]),
-                }];
-                let mut spend_tx = Transaction {
-                    version: 2,
-                    lock_time,
-                    input,
-                    output,
-                };
-                let _expected_max_weight =
-                    lightning::util::transaction_utils::maybe_add_change_output(
-                        &mut spend_tx,
-                        input_value,
-                        witness_weight,
-                        tx_feerate,
-                        bdk_script,
-                    )
-                    .expect("can add change");
-
-                let psbt = PartiallySignedTransaction::from_unsigned_tx(spend_tx.clone())
-                    .expect("valid transaction");
-
-                let (vout, asset_transition_builder) = update_transition_beneficiary(
-                    &psbt,
-                    &mut beneficiaries,
-                    asset_transition_builder,
-                    assignment_id,
-                    amt_rgb,
-                );
-                let (psbt, consignment) =
-                    runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
-
-                let input_idx = 0;
-                let mut spend_tx = psbt.extract_tx();
-                let signer = unlocked_state.keys_manager.derive_channel_keys(
-                    descriptor.channel_value_satoshis,
-                    &descriptor.channel_keys_id,
-                );
-                let witness_vec = signer
-                    .sign_dynamic_p2wsh_input(&spend_tx, input_idx, descriptor, &secp_ctx)
-                    .expect("possible dynamic sign");
-                spend_tx.input[input_idx].witness = Witness::from_vec(witness_vec);
-
-                (spend_tx, vout, consignment)
-            }
-            SpendableOutputDescriptor::StaticOutput {
-                outpoint: _,
-                ref output,
-            } => {
-                let derivation_idx =
-                    if output.script_pubkey == unlocked_state.keys_manager.destination_script {
-                        1
-                    } else {
-                        2
-                    };
-                let secret = unlocked_state
-                    .keys_manager
-                    .master_key
-                    .ckd_priv(
-                        &secp_ctx,
-                        ChildNumber::from_hardened_idx(derivation_idx).unwrap(),
-                    )
-                    .unwrap();
-                let intermediate_wallet =
-                    get_bdk_wallet_seckey(static_state.network, secret.private_key);
-                sync_wallet(&intermediate_wallet, static_state.electrum_url.clone());
-                let mut builder = intermediate_wallet.build_tx();
-                builder
-                    .add_utxos(&rgb_inputs)
-                    .expect("valid utxos")
-                    .fee_rate(FeeRate::from_sat_per_vb(FEE_RATE))
-                    .manually_selected_only()
-                    .ordering(bdk::wallet::tx_builder::TxOrdering::Untouched)
-                    .add_data(&[])
-                    .drain_to(bdk_script);
-                let psbt = builder.finish().expect("valid psbt finish").0;
-
-                let (vout, asset_transition_builder) = update_transition_beneficiary(
-                    &psbt,
-                    &mut beneficiaries,
-                    asset_transition_builder,
-                    assignment_id,
-                    amt_rgb,
-                );
-                let (mut psbt, consignment) =
-                    runtime.send_rgb(contract_id, psbt, asset_transition_builder, beneficiaries);
-
-                intermediate_wallet
-                    .sign(&mut psbt, SignOptions::default())
-                    .expect("able to sign");
-
-                (psbt.extract_tx(), vout, consignment)
-            }
-        };
-
-        broadcast_tx(&tx, static_state.electrum_url.clone());
+        let psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
+        let tx = unlocked_state.rgb_broadcast_tx(psbt.extract_tx()).unwrap();
 
         let closing_txid = tx.txid().to_string();
         let consignment_path = static_state
@@ -1292,19 +1119,24 @@ async fn _spend_outputs(
         consignment
             .save_file(&consignment_path)
             .expect("successful save");
-        let proxy_ref = (*static_state.proxy_client).clone();
-        let proxy_url_copy = static_state.proxy_url.clone();
-        let res = post_consignment(
-            proxy_ref,
-            &proxy_url_copy,
-            recipient_id,
-            consignment_path,
-            closing_txid,
-            Some(vout),
-        )
-        .await;
-        if res.is_err() || res.unwrap().result.is_none() {
-            tracing::error!("Cannot post consignment");
+        let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
+            .unwrap()
+            .endpoint;
+        let unlocked_state_copy = unlocked_state.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_post_consignment(
+                &proxy_url,
+                recipient_id,
+                &consignment_path,
+                closing_txid,
+                Some(vout),
+            )
+        })
+        .await
+        .unwrap();
+
+        if res.is_err() {
+            tracing::error!("cannot post consignment");
             return;
         }
     }
@@ -1317,7 +1149,7 @@ async fn _spend_outputs(
 
         if let Ok(spending_tx) = unlocked_state.keys_manager.spend_spendable_outputs(
             vanilla_output_descriptors.as_ref(),
-            Vec::new(),
+            vec![],
             bdk_script,
             tx_feerate,
             Some(lock_time),
@@ -1325,7 +1157,12 @@ async fn _spend_outputs(
         ) {
             // Note that, most likely, we've already sweeped this set of outputs
             // and they're already confirmed on-chain, so this broadcast will fail.
-            broadcast_tx(&spending_tx, static_state.electrum_url.clone());
+            let spending_tx = rgb_lib::bitcoin::consensus::encode::deserialize(
+                &bitcoin::consensus::encode::serialize(&spending_tx),
+            )
+            .unwrap();
+
+            unlocked_state.rgb_broadcast_tx(spending_tx).unwrap();
         } else {
             tracing::error!("Failed to sweep spendable outputs! This may indicate the outputs are dust. Will try again in a day.");
         }
@@ -1517,7 +1354,7 @@ pub(crate) async fn start_ldk(
     let ldk_peer_listening_port = static_state.ldk_peer_listening_port;
     let ldk_announced_listen_addr = static_state.ldk_announced_listen_addr.clone();
     let ldk_announced_node_name = static_state.ldk_announced_node_name;
-    let electrum_url = static_state.electrum_url.clone();
+    let indexer_url = static_state.indexer_url.clone();
     let bitcoin_network = get_bitcoin_network(&network);
 
     // Initialize the FeeEstimator
@@ -1537,11 +1374,10 @@ pub(crate) async fn start_ldk(
         .into_extended_key()
         .expect("a valid key should have been provided");
     let master_xprv = &xkey
-        .into_xprv(network)
+        .into_xprv(bitcoin_network.into())
         .expect("should be possible to get an extended private key");
-    let secp = Secp256k1::new();
     let xprv: ExtendedPrivKey = master_xprv
-        .ckd_priv(&secp, ChildNumber::Hardened { index: 535 })
+        .ckd_priv(&Secp256k1_30::new(), ChildNumber::Hardened { index: 535 })
         .unwrap();
     let ldk_seed: [u8; 32] = xprv.private_key.secret_bytes();
     let cur = SystemTime::now()
@@ -1835,11 +1671,18 @@ pub(crate) async fn start_ldk(
     .await
     .unwrap();
     let rgb_online = rgb_wallet
-        .go_online(false, electrum_url.clone())
+        .go_online(false, indexer_url.clone())
         .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
         account_xpub.fingerprint().to_string(),
+    )
+    .expect("able to write");
+    fs::write(
+        static_state
+            .storage_dir_path
+            .join(WALLET_ACCOUNT_XPUB_FNAME),
+        account_xpub.to_string(),
     )
     .expect("able to write");
 

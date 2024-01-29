@@ -1,6 +1,3 @@
-use amplify::confinement::Confined;
-use amplify::ByteArray;
-use bdk::bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::blockdata::constants::WITNESS_SCALE_FACTOR;
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::Hash;
@@ -9,65 +6,47 @@ use bitcoin::util::address::{Payload, WitnessVersion};
 use bitcoin::{
     Address, Network, OutPoint, Script, Transaction, TxOut, WPubkeyHash, XOnlyPublicKey,
 };
-use bitcoin_30::hashes::Hash as Hash30;
-use bitcoin_30::psbt::PartiallySignedTransaction as BitcoinPsbt;
-use bp::seals::txout::blind::BlindSeal;
-use bp::seals::txout::{CloseMethod, ExplicitSeal, TxPtr};
-use bp::Outpoint as RgbOutpoint;
 use lightning::events::bump_transaction::{Utxo, WalletSource};
 use lightning::ln::ChannelId;
 use lightning::rgb_utils::{
     get_rgb_channel_info_path, is_channel_rgb, parse_rgb_channel_info, RgbInfo, STATIC_BLINDING,
 };
-use psbt::{Psbt as RgbPsbt, RgbPsbt as RgbPsbtTrait};
-use rgb::{AssignmentType, BlindingFactor, Layer1, Operation, WitnessId, XChain, XOutputSeal};
-use rgb_lib::utils::{RgbInExt, RgbOutExt, RgbPsbtExt, RgbRuntime};
-use rgb_lib::wallet::{
-    AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Online, Outpoint, ReceiveData,
-    Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction, Transfer, Unspent,
-};
 use rgb_lib::{
-    AssetSchema, BitcoinNetwork, Contract, ContractId, Error as RgbLibError, SignOptions,
+    bdk::bitcoin::Transaction as BdkTransaction,
+    bdk::SignOptions,
+    bitcoin::{psbt::PartiallySignedTransaction as BitcoinPsbt, Transaction as BtcTransaction},
+    wallet::{
+        rust_only::ColoringInfo, AssetCFA, AssetIface, AssetNIA, AssetUDA, Assets, Balance,
+        BtcBalance, Online, Outpoint, ReceiveData, Recipient, RefreshResult, SendResult,
+        Transaction as RgbLibTransaction, Transfer, Unspent,
+    },
+    AssetSchema, BitcoinNetwork, Contract, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
     Wallet as RgbLibWallet,
 };
-use rgbstd::containers::{BuilderSeal, CloseMethodSet, Transfer as RgbTransfer};
-use rgbstd::contract::GraphSeal;
-use rgbstd::interface::TransitionBuilder;
-use rgbstd::persistence::Inventory;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use crate::utils::UnlockedAppState;
 
-pub(crate) fn update_transition_beneficiary(
-    psbt: &PartiallySignedTransaction,
-    beneficiaries: &mut Vec<BuilderSeal<BlindSeal<TxPtr>>>,
-    mut asset_transition_builder: TransitionBuilder,
-    assignment_id: AssignmentType,
+pub(crate) fn get_coloring_info(
+    contract_id: ContractId,
+    tx_to_color: &Transaction,
     amt_rgb: u64,
-) -> (u32, TransitionBuilder) {
-    let mut seal_vout = 0;
-    if let Some((index, _)) = psbt
-        .clone()
-        .unsigned_tx
-        .output
-        .iter_mut()
-        .enumerate()
-        .find(|(_, o)| o.script_pubkey.is_op_return())
-    {
-        seal_vout = index as u32 ^ 1;
+    seal_vout: u32,
+) -> ColoringInfo {
+    let previous_output = tx_to_color.input.first().unwrap().previous_output;
+    ColoringInfo {
+        contract_id,
+        iface: AssetIface::RGB20,
+        input_outpoint: Outpoint {
+            txid: previous_output.txid.to_string(),
+            vout: previous_output.vout,
+        },
+        output_map: HashMap::from([(seal_vout, amt_rgb)]),
+        static_blinding: STATIC_BLINDING,
     }
-    let graph_seal =
-        GraphSeal::with_blinded_vout(CloseMethod::OpretFirst, seal_vout, STATIC_BLINDING);
-    let seal = BuilderSeal::Revealed(XChain::with(Layer1::Bitcoin, graph_seal));
-
-    beneficiaries.push(seal);
-    asset_transition_builder = asset_transition_builder
-        .add_fungible_state_raw(assignment_id, seal, amt_rgb, BlindingFactor::random())
-        .expect("ok");
-    (seal_vout, asset_transition_builder)
 }
 
 // TODO: remove after updating to bitcoin 0.30
@@ -89,6 +68,26 @@ impl UnlockedAppState {
             transport_endpoints,
             min_confirmations,
         )
+    }
+
+    pub(crate) fn rgb_broadcast_tx(
+        &self,
+        tx: BdkTransaction,
+    ) -> Result<BtcTransaction, RgbLibError> {
+        self.get_rgb_wallet().broadcast_tx(tx)
+    }
+
+    pub(crate) fn rgb_color_psbt_and_consume(
+        &self,
+        psbt_to_color: &mut BitcoinPsbt,
+        coloring_info: ColoringInfo,
+    ) -> Result<RgbTransfer, RgbLibError> {
+        self.get_rgb_wallet()
+            .color_psbt_and_consume(psbt_to_color, coloring_info)
+    }
+
+    pub(crate) fn rgb_consume_fascia(&self, fascia: Fascia) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().consume_fascia(fascia)
     }
 
     pub(crate) fn rgb_create_utxos(
@@ -206,6 +205,23 @@ impl UnlockedAppState {
             .list_unspents(Some(self.rgb_online.clone()), false)
     }
 
+    pub(crate) fn rgb_post_consignment<P: AsRef<Path>>(
+        &self,
+        proxy_url: &str,
+        recipient_id: String,
+        consignment_path: P,
+        txid: String,
+        vout: Option<u32>,
+    ) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().post_consignment(
+            proxy_url,
+            recipient_id,
+            consignment_path,
+            txid,
+            vout,
+        )
+    }
+
     pub(crate) fn rgb_refresh(&self) -> Result<RefreshResult, RgbLibError> {
         self.get_rgb_wallet()
             .refresh(self.rgb_online.clone(), None, vec![])
@@ -213,13 +229,12 @@ impl UnlockedAppState {
 
     pub(crate) fn rgb_save_new_asset(
         &self,
-        runtime: &mut RgbRuntime,
         asset_schema: &AssetSchema,
         contract_id: ContractId,
         contract: Option<Contract>,
     ) -> Result<(), RgbLibError> {
         self.get_rgb_wallet()
-            .save_new_asset(runtime, asset_schema, contract_id, contract)
+            .save_new_asset(asset_schema, contract_id, contract)
     }
 
     pub(crate) fn rgb_send(
@@ -294,139 +309,6 @@ impl UnlockedAppState {
     ) -> Result<ReceiveData, RgbLibError> {
         self.get_rgb_wallet()
             .witness_receive(None, None, None, transport_endpoints, 0)
-    }
-}
-
-pub(crate) trait RgbUtilities {
-    fn send_rgb(
-        &mut self,
-        contract_id: ContractId,
-        psbt: PartiallySignedTransaction,
-        asset_transition_builder: TransitionBuilder,
-        beneficiaries: Vec<BuilderSeal<GraphSeal>>,
-    ) -> (PartiallySignedTransaction, RgbTransfer);
-}
-
-impl RgbUtilities for RgbRuntime {
-    fn send_rgb(
-        &mut self,
-        contract_id: ContractId,
-        psbt: PartiallySignedTransaction,
-        asset_transition_builder: TransitionBuilder,
-        beneficiaries: Vec<BuilderSeal<GraphSeal>>,
-    ) -> (PartiallySignedTransaction, RgbTransfer) {
-        let mut psbt = BitcoinPsbt::from_str(&psbt.to_string()).unwrap();
-        let prev_outputs = psbt
-            .unsigned_tx
-            .input
-            .iter()
-            .map(|txin| txin.previous_output)
-            .map(|outpoint| {
-                XChain::with(
-                    Layer1::Bitcoin,
-                    ExplicitSeal::new(CloseMethod::OpretFirst, Outpoint::from(outpoint).into()),
-                )
-            })
-            .collect::<HashSet<XOutputSeal>>();
-        let mut asset_transition_builder = asset_transition_builder;
-        for ((opout, _), state) in self
-            .stock
-            .state_for_outpoints(contract_id, prev_outputs.iter().copied())
-            .expect("ok")
-        {
-            asset_transition_builder = asset_transition_builder
-                .add_input(opout, state)
-                .expect("valid input");
-        }
-        let transition = asset_transition_builder
-            .complete_transition()
-            .expect("should complete transition");
-
-        let (opreturn_index, _) = psbt
-            .unsigned_tx
-            .output
-            .iter()
-            .enumerate()
-            .find(|(_, o)| o.script_pubkey.is_op_return())
-            .expect("psbt should have an op_return output");
-        let (_, opreturn_output) = psbt
-            .outputs
-            .iter_mut()
-            .enumerate()
-            .find(|(i, _)| i == &opreturn_index)
-            .unwrap();
-        opreturn_output.set_opret_host();
-
-        let mut contract_inputs = HashMap::<ContractId, Vec<XOutputSeal>>::new();
-        for output in prev_outputs {
-            for id in self.stock.contracts_by_outputs([output]).expect("ok") {
-                contract_inputs.entry(id).or_default().push(output);
-            }
-        }
-        let inputs = contract_inputs.remove(&contract_id).unwrap_or_default();
-        for (input, txin) in psbt.inputs.iter_mut().zip(&psbt.unsigned_tx.input) {
-            let prevout = txin.previous_output;
-            let outpoint = RgbOutpoint::new(prevout.txid.to_byte_array().into(), prevout.vout);
-            let output = XChain::with(
-                Layer1::Bitcoin,
-                ExplicitSeal::new(CloseMethod::OpretFirst, outpoint),
-            );
-            if inputs.contains(&output) {
-                input
-                    .set_rgb_consumer(contract_id, transition.id())
-                    .expect("ok");
-            }
-        }
-        psbt.push_rgb_transition(transition, CloseMethodSet::OpretFirst)
-            .expect("ok");
-
-        let mut rgb_psbt = RgbPsbt::from_str(&psbt.to_string()).unwrap();
-        rgb_psbt.complete_construction();
-        let fascia = rgb_psbt.rgb_commit().unwrap();
-
-        let witness_txid = rgb_psbt.txid();
-
-        self.stock.consume(fascia.clone()).unwrap();
-
-        let mut beneficiaries_outputs = vec![];
-        let mut beneficiaries_secret_seals = vec![];
-        for beneficiary in beneficiaries {
-            match beneficiary {
-                BuilderSeal::Revealed(seal) => {
-                    beneficiaries_outputs.push(XChain::Bitcoin(ExplicitSeal::new(
-                        CloseMethod::OpretFirst,
-                        RgbOutpoint::new(
-                            witness_txid.to_byte_array().into(),
-                            seal.as_reduced_unsafe().vout,
-                        ),
-                    )))
-                }
-                BuilderSeal::Concealed(seal) => beneficiaries_secret_seals.push(seal),
-            };
-        }
-        let mut transfer = self
-            .stock
-            .transfer(
-                contract_id,
-                beneficiaries_outputs,
-                beneficiaries_secret_seals,
-            )
-            .expect("valid transfer");
-
-        let mut terminals = transfer.terminals.to_inner();
-        for (bundle_id, terminal) in terminals.iter_mut() {
-            let Some(ab) = transfer.anchored_bundle(*bundle_id) else {
-                continue;
-            };
-            if ab.anchor.witness_id_unchecked() == WitnessId::Bitcoin(witness_txid) {
-                terminal.witness_tx = Some(XChain::Bitcoin(rgb_psbt.to_unsigned_tx().into()));
-            }
-        }
-        transfer.terminals = Confined::from_collection_unsafe(terminals);
-
-        let psbt = PartiallySignedTransaction::from_str(&rgb_psbt.to_string()).unwrap();
-
-        (psbt, transfer)
     }
 }
 
@@ -505,7 +387,7 @@ impl WalletSource for RgbLibWalletWrapper {
     }
 }
 
-pub fn get_rgb_channel_info_optional(
+pub(crate) fn get_rgb_channel_info_optional(
     channel_id: &ChannelId,
     ldk_data_dir: &Path,
     pending: bool,

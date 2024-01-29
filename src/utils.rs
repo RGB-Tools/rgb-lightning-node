@@ -1,11 +1,10 @@
 use amplify::s;
-use bdk::keys::bip39::Mnemonic;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use futures::Future;
 use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::SocketAddress;
-use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
+use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME};
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
@@ -17,9 +16,11 @@ use lightning::{
 };
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use reqwest::Client as RestClient;
-use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
-use rgb_lib::ContractId;
+use rgb_lib::{
+    bdk::keys::bip39::Mnemonic,
+    wallet::{Online, Wallet as RgbLibWallet},
+    ContractId,
+};
 use std::{
     fmt::Write,
     fs,
@@ -54,10 +55,7 @@ pub(crate) const LOGS_DIR: &str = "logs";
 const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 pub(crate) const PROXY_ENDPOINT_REGTEST: &str = "rpc://127.0.0.1:3000/json-rpc";
-const PROXY_URL_REGTEST: &str = "http://127.0.0.1:3000/json-rpc";
 const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";
-const PROXY_URL_TESTNET: &str = "https://proxy.iriswallet.com/0.2/json-rpc";
-const PROXY_TIMEOUT: u8 = 90;
 const PASSWORD_MIN_LENGTH: u8 = 8;
 
 pub(crate) struct AppState {
@@ -97,10 +95,8 @@ pub(crate) struct StaticState {
     pub(crate) storage_dir_path: PathBuf,
     pub(crate) ldk_data_dir: PathBuf,
     pub(crate) logger: Arc<FilesystemLogger>,
-    pub(crate) electrum_url: String,
+    pub(crate) indexer_url: String,
     pub(crate) proxy_endpoint: String,
-    pub(crate) proxy_url: String,
-    pub(crate) proxy_client: Arc<RestClient>,
     pub(crate) bitcoind_client: Arc<BitcoindClient>,
 }
 
@@ -383,34 +379,20 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
     }
 
     // RGB setup
-    let (electrum_url, proxy_url, proxy_endpoint) = match network {
-        bitcoin::Network::Testnet => (
-            ELECTRUM_URL_TESTNET,
-            PROXY_URL_TESTNET,
-            PROXY_ENDPOINT_TESTNET,
-        ),
-        bitcoin::Network::Regtest => (
-            ELECTRUM_URL_REGTEST,
-            PROXY_URL_REGTEST,
-            PROXY_ENDPOINT_REGTEST,
-        ),
+    let (indexer_url, proxy_endpoint) = match network {
+        bitcoin::Network::Testnet => (ELECTRUM_URL_TESTNET, PROXY_ENDPOINT_TESTNET),
+        bitcoin::Network::Regtest => (ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_REGTEST),
         _ => {
             return Err(AppError::UnsupportedBitcoinNetwork);
         }
     };
-    fs::write(args.storage_dir_path.join(ELECTRUM_URL_FNAME), electrum_url).expect("able to write");
+    fs::write(args.storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
     let bitcoin_network = get_bitcoin_network(&network);
     fs::write(
         args.storage_dir_path.join(BITCOIN_NETWORK_FNAME),
         bitcoin_network.to_string(),
     )
     .expect("able to write");
-    let rest_client = RestClient::builder()
-        .timeout(Duration::from_secs(PROXY_TIMEOUT as u64))
-        .connection_verbose(true)
-        .build()
-        .expect("valid proxy");
-    let proxy_client = Arc::new(rest_client);
 
     let cancel_token = CancellationToken::new();
 
@@ -422,10 +404,8 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         storage_dir_path: args.storage_dir_path,
         ldk_data_dir,
         logger,
-        electrum_url: electrum_url.to_string(),
+        indexer_url: indexer_url.to_string(),
         proxy_endpoint: proxy_endpoint.to_string(),
-        proxy_url: proxy_url.to_string(),
-        proxy_client,
         bitcoind_client,
     });
 
@@ -439,14 +419,14 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
     }))
 }
 
-pub fn get_current_timestamp() -> u64 {
+pub(crate) fn get_current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs()
 }
 
-pub fn get_max_local_rgb_amount<'r>(
+pub(crate) fn get_max_local_rgb_amount<'r>(
     contract_id: ContractId,
     ldk_data_dir_path: &Path,
     channels: impl Iterator<Item = &'r ChannelDetails>,

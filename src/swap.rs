@@ -1,5 +1,5 @@
 use lightning::{impl_writeable_tlv_based, ln::PaymentHash};
-use rgbstd::contract::ContractId;
+use rgb_lib::ContractId;
 use std::convert::TryInto;
 use std::fmt;
 use std::str::FromStr;

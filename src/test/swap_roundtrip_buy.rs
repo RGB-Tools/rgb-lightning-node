@@ -115,7 +115,7 @@ async fn swap_roundtrip_buy() {
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,
-        SwapStatus::Pending,
+        SwapStatus::Succeeded,
     )
     .await;
 

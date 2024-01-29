@@ -1,11 +1,9 @@
 mod args;
 mod backup;
-mod bdk;
 mod bitcoind;
 mod disk;
 mod error;
 mod ldk;
-mod proxy;
 mod rgb;
 mod routes;
 mod swap;

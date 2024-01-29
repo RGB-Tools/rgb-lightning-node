@@ -62,11 +62,7 @@ async fn backup_and_restore() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::BAD_REQUEST);
-    let text = res.text().await.unwrap();
-    let response: ErrorResponse = serde_json::from_str(&text).unwrap();
-    assert_eq!(response.error, "Invalid backup path");
-    assert_eq!(response.code, 400);
+    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid backup path").await;
 
     shutdown(&[node1_addr, node2_addr]).await;
 

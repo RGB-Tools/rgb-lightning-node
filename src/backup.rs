@@ -41,7 +41,11 @@ struct CypherSecrets {
 /// Scrypt is used for hashing and xchacha20poly1305 is used for encryption. A random salt for
 /// hashing and a random nonce for encrypting are randomly generated and included in the final
 /// backup file, along with the backup version
-pub fn do_backup(wallet_dir: &Path, backup_file: &Path, password: &str) -> Result<(), APIError> {
+pub(crate) fn do_backup(
+    wallet_dir: &Path,
+    backup_file: &Path,
+    password: &str,
+) -> Result<(), APIError> {
     // setup
     tracing::info!("starting backup...");
     if backup_file.exists() {
@@ -82,7 +86,7 @@ pub fn do_backup(wallet_dir: &Path, backup_file: &Path, password: &str) -> Resul
 }
 
 /// Restore a backup from the given file and password to the provided target directory.
-pub fn restore_backup(
+pub(crate) fn restore_backup(
     backup_path: &Path,
     password: &str,
     target_dir: &Path,

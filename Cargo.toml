@@ -8,17 +8,16 @@ rust-version = "1.75.0"
 name = "rgb-lightning-node"
 
 [dependencies]
+amplify = { version = "=4.6.0", default-features = false }
 anyhow = "1.0.72"
 axum = "0.6.19"
 axum-extra = "0.7.5"
 # axum-macros = "0.3.8"  # uncomment to use debug_handler
 baid58 = "0.4.4"
 base64 = "0.13.0"
-bdk = { version = "0.28", features = ["electrum", "keys-bip39"] }
 bech32 = "0.8"
 bitcoin = { package = "bitcoin", version = "0.29.2" }
 bitcoin-bech32 = "0.12"
-bitcoin_30 = { package = "bitcoin", version = "0.30.0" }
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = "4.3.19"
@@ -36,7 +35,10 @@ lightning-rapid-gossip-sync = { version = "0.0.118" }
 magic-crypt = "3.1.12"
 miniscript = { version = "8.0", features = ["serde"] }
 rand = "0.8.5"
-reqwest = { version = "0.11", default-features = false, features = ["json", "multipart", "native-tls", "stream"] }
+rgb-lib = { version = "0.3.0-alpha.3", features = [
+    "electrum",
+    "esplora",
+] }
 scrypt = "0.11.0"
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -53,35 +55,13 @@ typenum = "1.16.0"
 walkdir = "2.3.3"
 zip = { version = "0.6.6", default-features = false, features = ["time", "zstd"] }
 
-# RGB-related deps
-amplify = { version = "=4.6.0", default-features = false }
-bp-core = { version = "=0.11.0-beta.5", default-features = false }
-rgb-invoice = { version = "=0.11.0-beta.5", default-features = false }
-rgb-lib = { version = "0.3.0-alpha.2", features = [
-    "electrum",
-    "esplora",
-] }
-rgb-psbt = { version = "=0.11.0-beta.5", default-features = false }
-rgb-std = { version = "=0.11.0-beta.5", default-features = false }
-rgb-runtime = { version = "=0.11.0-beta.5", default-features = false, features = [
-    "electrum",
-    "serde",
-] }
-rgb-core = { version = "=0.11.0-beta.5", default-features = false, features = [
-    "stl",
-] }
-strict_encoding = { version = "=2.7.0-beta.1", default-features = false }
-strict_types = { version = "=2.7.0-beta.2", default-features = false }
-
-amplify_num = "=0.5.2" # temporary dependency pin
-aluvm = "=0.11.0-beta.5" # temporary dependency pin
-
 [dev-dependencies]
 dircmp = "0.2.0"
 electrum-client = "0.19.0"
 mime = "0.3.17"
 once_cell = "1.17.1"
 regex = "1.9.5"
+reqwest = { version = "0.11", default-features = false, features = ["json", "multipart", "native-tls", "stream"] }
 serial_test = "2.0.0"
 tower = "0.4.13"
 tracing-test = "0.2.4"

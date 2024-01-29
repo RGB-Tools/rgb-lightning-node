@@ -6,7 +6,6 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
-use invoice::RgbTransport;
 use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
 use lightning::onion_message::{Destination, OnionMessagePath};
@@ -34,16 +33,16 @@ use lightning::{
 use lightning_invoice::payment::pay_invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
-use rgb_lib::wallet::{
-    AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
-    AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
-    Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
-};
 use rgb_lib::{
-    generate_keys, AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork,
-    Error as RgbLibError,
+    generate_keys,
+    wallet::{
+        AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
+        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
+        Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
+    },
+    AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork, ContractId,
+    Error as RgbLibError, RgbTransport,
 };
-use rgbstd::contract::ContractId;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,

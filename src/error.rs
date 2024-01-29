@@ -5,7 +5,13 @@ use axum::{
     Json,
 };
 use bitcoin::Network;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct APIErrorResponse {
+    pub(crate) error: String,
+    pub(crate) code: u16,
+}
 
 /// The error variants returned by APIs
 #[derive(Debug, thiserror::Error)]
@@ -154,9 +160,6 @@ pub enum APIError {
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
 
-    #[error("Proxy error: {0}")]
-    Proxy(#[from] reqwest::Error),
-
     #[error("Recipient ID already used")]
     RecipientIDAlreadyUsed,
 
@@ -197,7 +200,6 @@ impl IntoResponse for APIError {
             | APIError::FailedSendingOnionMessage(_)
             | APIError::FailedStartingLDK(_)
             | APIError::IO(_)
-            | APIError::Proxy(_)
             | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             APIError::AnchorsRequired
             | APIError::ExpiredSwapOffer
@@ -244,10 +246,13 @@ impl IntoResponse for APIError {
             | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),
         };
 
-        let body = Json(json!({
-            "error": error_message,
-            "code": status.as_u16(),
-        }));
+        let body = Json(
+            serde_json::to_value(APIErrorResponse {
+                error: error_message,
+                code: status.as_u16(),
+            })
+            .unwrap(),
+        );
 
         (status, body).into_response()
     }

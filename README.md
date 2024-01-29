@@ -42,7 +42,7 @@ cargo install --debug --path .
 
 In order to operate, the node will need:
 - a bitcoind node
-- an electrs instance
+- an indexer instance (electrum or esplora)
 - an [RGB proxy server] instance
 
 Once services are running, daemons can be started.

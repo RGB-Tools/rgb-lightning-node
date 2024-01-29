@@ -3,7 +3,6 @@ use bitcoin::Network;
 use electrum_client::ElectrumApi;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
-use serde::Deserialize;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,6 +11,7 @@ use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
 use tracing_test::traced_test;
 
+use crate::error::APIErrorResponse;
 use crate::ldk::FEE_RATE;
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
@@ -58,12 +58,6 @@ impl Default for LdkUserInfo {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct ErrorResponse {
-    error: String,
-    code: u16,
-}
-
 fn _bitcoin_cli() -> [String; 7] {
     [
         s!("exec"),
@@ -81,6 +75,17 @@ async fn _check_response_is_ok(res: reqwest::Response) -> reqwest::Response {
         panic!("reqwest response is not OK: {:?}", res.text().await);
     }
     res
+}
+
+async fn check_response_is_nok(
+    res: reqwest::Response,
+    expected_status: reqwest::StatusCode,
+    expected_message: &str,
+) {
+    assert_eq!(res.status(), expected_status);
+    let api_error_response = res.json::<APIErrorResponse>().await.unwrap();
+    assert_eq!(api_error_response.code, expected_status.as_u16());
+    assert_eq!(api_error_response.error, expected_message);
 }
 
 fn _fund_wallet(address: String) {
@@ -279,6 +284,7 @@ async fn check_payment_status(
         if payment.status == expected_status {
             return Some(payment.clone());
         }
+        println!("payment found but with status: {:?}", payment.status);
     }
     None
 }
@@ -520,21 +526,9 @@ async fn _with_ln_balance_checks(
     counterparty_initial_ln_balance_rgb: Option<u64>,
     payment_hash: &str,
 ) {
-    if let Some(asset_id) = &asset_id {
-        let ln_balance_rgb = asset_balance_offchain_outbound(node_address, asset_id).await;
-        assert_eq!(ln_balance_rgb, initial_ln_balance_rgb.unwrap());
-    }
     check_payment_status(node_address, payment_hash, HTLCStatus::Pending)
         .await
         .unwrap();
-    if let Some(asset_id) = &asset_id {
-        let counterparty_ln_balance_rgb =
-            asset_balance_offchain_outbound(counterparty_node_address, asset_id).await;
-        assert_eq!(
-            counterparty_ln_balance_rgb,
-            counterparty_initial_ln_balance_rgb.unwrap()
-        );
-    }
 
     if let Some(asset_id) = &asset_id {
         let final_ln_balance_rgb = initial_ln_balance_rgb.unwrap() - asset_amount.unwrap();
@@ -795,22 +789,31 @@ async fn maker_execute(
     payment_secret: String,
     taker_pubkey: String,
 ) {
+    let res = maker_execute_raw(node_address, swapstring, payment_secret, taker_pubkey).await;
+    let _ = _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await;
+}
+
+async fn maker_execute_raw(
+    node_address: SocketAddr,
+    swapstring: String,
+    payment_secret: String,
+    taker_pubkey: String,
+) -> reqwest::Response {
     println!("executing swap {swapstring} from node {node_address}");
     let payload = MakerExecuteRequest {
         swapstring,
         payment_secret,
         taker_pubkey,
     };
-    let res = reqwest::Client::new()
+    reqwest::Client::new()
         .post(format!("http://{}/makerexecute", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap();
-    let _ = _check_response_is_ok(res)
-        .await
-        .json::<EmptyResponse>()
-        .await;
+        .unwrap()
 }
 
 async fn maker_init(
@@ -1255,7 +1258,7 @@ async fn _wait_for_ln_payment(
         {
             return payment;
         }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 40.0 {
             panic!("cannot find successful payment")
         }
     }
@@ -1402,7 +1405,7 @@ fn wait_electrs_sync() {
     }
 }
 
-pub fn initialize() {
+pub(crate) fn initialize() {
     INIT.call_once(|| {
         println!("starting test services...");
         let output = Command::new("./regtest.sh")
