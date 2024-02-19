@@ -16,6 +16,8 @@ use crate::error::APIError;
 use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage};
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
+pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
+
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 
@@ -47,7 +49,7 @@ impl Logger for FilesystemLogger {
             record.line,
             raw_log
         );
-        let logs_file_path = format!("{}/logs.txt", self.data_dir.clone());
+        let logs_file_path = format!("{}/{LDK_LOGS_FILE}", self.data_dir.clone());
         fs::OpenOptions::new()
             .create(true)
             .append(true)

@@ -38,6 +38,7 @@ use crate::{
     rgb::get_bitcoin_network,
 };
 
+pub(crate) const LDK_DIR: &str = ".ldk";
 pub(crate) const LOGS_DIR: &str = "logs";
 const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
@@ -317,7 +318,7 @@ pub(crate) fn parse_peer_info(
 
 pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, AppError> {
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
-    let ldk_data_dir = format!("{}/.ldk", args.storage_dir_path);
+    let ldk_data_dir = format!("{}/{LDK_DIR}", args.storage_dir_path);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
 
     // Initialize our bitcoind client.

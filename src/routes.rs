@@ -11,6 +11,7 @@ use lightning::ln::ChannelId;
 use lightning::onion_message::{Destination, OnionMessagePath};
 use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
 use lightning::sign::EntropySource;
+use lightning::util::config::ChannelConfig;
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -244,7 +245,7 @@ pub(crate) struct DisconnectPeerRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct EmptyResponse {}
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
     Pending,
     Succeeded,
@@ -390,6 +391,8 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) asset_id: String,
     pub(crate) public: bool,
     pub(crate) with_anchors: bool,
+    pub(crate) fee_base_msat: Option<u32>,
+    pub(crate) fee_proportional_millionths: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1515,6 +1518,13 @@ pub(crate) async fn open_channel(
             return Err(APIError::InsufficientAssets(spendable_rgb_amount));
         }
 
+        let mut channel_config = ChannelConfig::default();
+        if let Some(fee_base_msat) = payload.fee_base_msat {
+            channel_config.forwarding_fee_base_msat = fee_base_msat;
+        }
+        if let Some(fee_proportional_millionths) = payload.fee_proportional_millionths {
+            channel_config.forwarding_fee_proportional_millionths = fee_proportional_millionths;
+        }
         let config = UserConfig {
             channel_handshake_limits: ChannelHandshakeLimits {
                 // lnd's max to_self_delay is 2016, so we want to be compatible.
@@ -1528,6 +1538,7 @@ pub(crate) async fn open_channel(
                 negotiate_anchors_zero_fee_htlc_tx: payload.with_anchors,
                 ..Default::default()
             },
+            channel_config,
             ..Default::default()
         };
 

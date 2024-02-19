@@ -335,7 +335,7 @@ async fn fund_and_create_utxos(node_address: SocketAddr) {
 
     let payload = CreateUtxosRequest {
         up_to: false,
-        num: None,
+        num: Some(10),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/createutxos", node_address))
@@ -485,22 +485,26 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
         .unwrap()
 }
 
-async fn open_channel(
+async fn open_channel_with_custom_fees(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: u16,
     asset_amount: u64,
     asset_id: &str,
+    fee_base_msat: Option<u32>,
+    fee_proportional_millionths: Option<u32>,
 ) -> Channel {
     stop_mining();
     let payload = OpenChannelRequest {
         peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
-        capacity_sat: 30010,
-        push_msat: 2130000,
+        capacity_sat: 100_000,
+        push_msat: 3_500_000,
         asset_amount,
         asset_id: asset_id.to_string(),
         public: true,
         with_anchors: true,
+        fee_base_msat,
+        fee_proportional_millionths,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node_address))
@@ -552,6 +556,25 @@ async fn open_channel(
             panic!("channel is taking too long to be ready")
         }
     }
+}
+
+async fn open_channel(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: u16,
+    asset_amount: u64,
+    asset_id: &str,
+) -> Channel {
+    open_channel_with_custom_fees(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        asset_amount,
+        asset_id,
+        None,
+        None,
+    )
+    .await
 }
 
 async fn list_assets(node_address: SocketAddr) -> Vec<Asset> {
@@ -695,6 +718,14 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
 }
 
 async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
+    send_payment_with_status(node_address, invoice, HTLCStatus::Succeeded).await
+}
+
+async fn send_payment_with_status(
+    node_address: SocketAddr,
+    invoice: String,
+    expected_status: HTLCStatus,
+) -> Payment {
     let payload = SendPaymentRequest { invoice };
     let res = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node_address))
@@ -716,12 +747,12 @@ async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
             .iter()
             .find(|p| p.payment_hash == send_payment.payment_hash)
         {
-            if matches!(payment.status, HTLCStatus::Succeeded) {
+            if payment.status == expected_status {
                 return payment.clone();
             }
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("cannot find successful payment")
+            panic!("cannot find payment in expected status")
         }
     }
 }
@@ -946,5 +977,6 @@ mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
 mod payment;
+mod refuse_high_fees;
 mod restart;
 mod send_receive;

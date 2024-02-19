@@ -26,7 +26,7 @@ async fn close_coop_standard() {
     fund_and_create_utxos(node3_addr).await;
 
     let unspents = list_unspents(node1_addr).await;
-    assert_eq!(unspents.len(), 5);
+    assert_eq!(unspents.len(), 11);
 
     let assets = list_assets(node1_addr).await;
     assert_eq!(assets.len(), 0);
