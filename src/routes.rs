@@ -10,6 +10,8 @@ use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
 use lightning::onion_message::{Destination, OnionMessagePath};
 use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
+use lightning::routing::gossip::RoutingFees;
+use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
 use lightning::{
     ln::{
@@ -24,10 +26,11 @@ use lightning::{
         router::{PaymentParameters, RouteParameters},
     },
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
+    util::IS_SWAP_SCID,
 };
 use lightning_invoice::payment::pay_invoice;
-use lightning_invoice::Bolt11Invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
+use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use rgb_lib::wallet::{Invoice as RgbLibInvoice, Recipient, RecipientData};
 use rgb_lib::{generate_keys, BitcoinNetwork as RgbLibNetwork, Error as RgbLibError};
 use rgbstd::contract::{ContractId, SecretSeal};
@@ -43,17 +46,20 @@ use tokio::sync::MutexGuard as TokioMutexGuard;
 
 use crate::backup::{do_backup, restore_backup};
 use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
-use crate::rgb::get_bitcoin_network;
+use crate::rgb::{get_bitcoin_network, get_rgb_channel_info_optional};
+use crate::swap::{Swap, SwapString};
 use crate::utils::{
     check_already_initialized, check_password_strength, check_password_validity,
-    encrypt_and_save_mnemonic, get_mnemonic_path, hex_str, hex_str_to_compressed_pubkey,
-    hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
+    encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
 };
 use crate::{
     disk,
     error::APIError,
     ldk::{PaymentInfo, FEE_RATE, UTXO_SIZE_SAT},
-    utils::{connect_peer_if_necessary, no_cancel, parse_peer_info, AppState},
+    utils::{
+        connect_peer_if_necessary, get_current_timestamp, no_cancel, parse_peer_info, AppState,
+    },
 };
 
 const UTXO_NUM: u8 = 4;
@@ -64,9 +70,11 @@ const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
 
 const DUST_LIMIT_MSAT: u64 = 546000;
 
-const HTLC_MIN_MSAT: u64 = 3000000;
+pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
 
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
+
+pub(crate) const DEFAULT_FINAL_CLTV_EXPIRY_DELTA: u32 = 14;
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AddressResponse {
@@ -302,8 +310,8 @@ pub(crate) struct IssueAssetResponse {
 pub(crate) struct KeysendRequest {
     pub(crate) dest_pubkey: String,
     pub(crate) amt_msat: u64,
-    pub(crate) asset_id: String,
-    pub(crate) asset_amount: u64,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) asset_amount: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -331,6 +339,12 @@ pub(crate) struct ListPaymentsResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListPeersResponse {
     pub(crate) peers: Vec<Peer>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct ListTradesResponse {
+    pub(crate) maker: Vec<Trade>,
+    pub(crate) taker: Vec<Trade>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -367,6 +381,29 @@ pub(crate) struct LNInvoiceResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct MakerExecuteRequest {
+    pub(crate) swapstring: String,
+    pub(crate) payment_secret: String,
+    pub(crate) taker_pubkey: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct MakerInitRequest {
+    pub(crate) qty_from: u64,
+    pub(crate) qty_to: u64,
+    pub(crate) from_asset: Option<String>,
+    pub(crate) to_asset: Option<String>,
+    pub(crate) timeout_sec: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct MakerInitResponse {
+    pub(crate) payment_hash: String,
+    pub(crate) payment_secret: String,
+    pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct NetworkInfoResponse {
     pub(crate) network: BitcoinNetwork,
     pub(crate) height: u32,
@@ -386,8 +423,8 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) peer_pubkey_and_addr: String,
     pub(crate) capacity_sat: u64,
     pub(crate) push_msat: u64,
-    pub(crate) asset_amount: u64,
-    pub(crate) asset_id: String,
+    pub(crate) asset_amount: Option<u64>,
+    pub(crate) asset_id: Option<String>,
     pub(crate) public: bool,
     pub(crate) with_anchors: bool,
 }
@@ -492,6 +529,20 @@ pub(crate) struct SignMessageRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct SignMessageResponse {
     pub(crate) signed_message: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct TakerRequest {
+    pub(crate) swapstring: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Trade {
+    pub(crate) qty_from: u64,
+    pub(crate) qty_to: u64,
+    pub(crate) from_asset: Option<String>,
+    pub(crate) to_asset: Option<String>,
+    pub(crate) payment_hash: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -627,25 +678,19 @@ impl From<RgbLibError> for APIError {
         match error {
             RgbLibError::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
             RgbLibError::AssetNotFound { .. } => APIError::UnknownContractId,
-            RgbLibError::FailedIssuance { details } => {
-                APIError::FailedIssuingAsset(details.clone())
-            }
+            RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
             RgbLibError::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
             RgbLibError::InsufficientBitcoins { needed, available } => {
                 APIError::InsufficientFunds(needed - available)
             }
-            RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id.clone()),
-            RgbLibError::InvalidBlindedUTXO { details } => {
-                APIError::InvalidBlindedUTXO(details.clone())
-            }
-            RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details.clone()),
-            RgbLibError::InvalidName { details } => APIError::InvalidName(details.clone()),
-            RgbLibError::InvalidPrecision { details } => {
-                APIError::InvalidPrecision(details.clone())
-            }
-            RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details.clone()),
+            RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
+            RgbLibError::InvalidBlindedUTXO { details } => APIError::InvalidBlindedUTXO(details),
+            RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
+            RgbLibError::InvalidName { details } => APIError::InvalidName(details),
+            RgbLibError::InvalidPrecision { details } => APIError::InvalidPrecision(details),
+            RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
             RgbLibError::InvalidTransportEndpoints { details } => {
-                APIError::InvalidTransportEndpoints(details.clone())
+                APIError::InvalidTransportEndpoints(details)
             }
             RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
@@ -909,7 +954,7 @@ pub(crate) async fn disconnect_peer(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-        let peer_pubkey = match bitcoin::secp256k1::PublicKey::from_str(&payload.peer_pubkey) {
+        let peer_pubkey = match PublicKey::from_str(&payload.peer_pubkey) {
             Ok(pubkey) => pubkey,
             Err(_e) => return Err(APIError::InvalidPubkey),
         };
@@ -1029,22 +1074,30 @@ pub(crate) async fn keysend(
             )));
         }
 
-        let contract_id = ContractId::from_str(&payload.asset_id)
-            .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
-
         let payment_preimage =
             PaymentPreimage(unlocked_state.keys_manager.get_secure_random_bytes());
         let payment_hash_inner = Sha256::hash(&payment_preimage.0[..]).into_inner();
         let payment_id = PaymentId(payment_hash_inner);
         let payment_hash = PaymentHash(payment_hash_inner);
 
-        write_rgb_payment_info_file(
-            &PathBuf::from(&state.static_state.ldk_data_dir),
-            &payment_hash,
-            contract_id,
-            payload.asset_amount,
-            false,
-        );
+        match (payload.asset_id, payload.asset_amount) {
+            (Some(rgb_contract_id), Some(rgb_amount)) => {
+                let contract_id = ContractId::from_str(&rgb_contract_id)
+                    .map_err(|_| APIError::InvalidAssetID(rgb_contract_id))?;
+
+                write_rgb_payment_info_file(
+                    &PathBuf::from(&state.static_state.ldk_data_dir),
+                    &payment_hash,
+                    contract_id,
+                    rgb_amount,
+                    true,
+                );
+            }
+            (None, None) => {}
+            _ => {
+                return Err(APIError::IncompleteRGBInfo);
+            }
+        }
 
         let route_params = RouteParameters::from_payment_params_and_value(
             PaymentParameters::for_keysend(dest_pubkey, 40, false),
@@ -1242,6 +1295,28 @@ pub(crate) async fn list_peers(
     Ok(Json(ListPeersResponse { peers }))
 }
 
+pub(crate) async fn list_trades(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ListTradesResponse>, APIError> {
+    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+    let map_trade = |(payment_hash, swap): (&PaymentHash, &Swap)| Trade {
+        payment_hash: payment_hash.to_string(),
+        qty_from: swap.qty_from,
+        qty_to: swap.qty_to,
+        from_asset: swap.from_asset.map(|c| c.to_string()),
+        to_asset: swap.to_asset.map(|c| c.to_string()),
+    };
+
+    let taker_trades = unlocked_state.taker_trades();
+    let maker_trades = unlocked_state.maker_trades();
+
+    Ok(Json(ListTradesResponse {
+        taker: taker_trades.iter().map(map_trade).collect(),
+        maker: maker_trades.iter().map(map_trade).collect(),
+    }))
+}
+
 pub(crate) async fn list_transactions(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListTransactionsResponse>, APIError> {
@@ -1436,6 +1511,272 @@ pub(crate) async fn lock(
     .await
 }
 
+pub(crate) async fn maker_execute(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<MakerExecuteRequest>, APIError>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
+
+        let swapstring = SwapString::from_str(&payload.swapstring)
+            .map_err(|e| APIError::InvalidSwapString(payload.swapstring.clone(), e.to_string()))?;
+        let payment_secret = hex_str_to_vec(&payload.payment_secret)
+            .and_then(|data| data.try_into().ok())
+            .map(PaymentSecret)
+            .ok_or(APIError::InvalidPaymentSecret)?;
+        let taker_pk =
+            PublicKey::from_str(&payload.taker_pubkey).map_err(|_| APIError::InvalidPubkey)?;
+
+        if get_current_timestamp() > swapstring.expiry {
+            return Err(APIError::ExpiredSwapOffer);
+        }
+
+        let payment_preimage = unlocked_state
+            .channel_manager
+            .get_payment_preimage(swapstring.payment_hash, payment_secret)
+            .map_err(|_| APIError::MissingSwapPaymentPreimage)?;
+
+        let swap = swapstring.swap;
+
+        let receive_hints = unlocked_state
+            .channel_manager
+            .list_usable_channels()
+            .iter()
+            .filter(|details| {
+                match get_rgb_channel_info_optional(&details.channel_id, &ldk_data_dir_path) {
+                    _ if swap.is_from_btc() => true,
+                    Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap.from_asset => true,
+                    _ => false,
+                }
+            })
+            .map(|details| {
+                let config = details.counterparty.forwarding_info.as_ref().unwrap();
+                RouteHint(vec![RouteHintHop {
+                    src_node_id: details.counterparty.node_id,
+                    short_channel_id: details.short_channel_id.unwrap(),
+                    cltv_expiry_delta: config.cltv_expiry_delta,
+                    htlc_maximum_msat: None,
+                    htlc_minimum_msat: None,
+                    fees: RoutingFees {
+                        base_msat: config.fee_base_msat,
+                        proportional_millionths: config.fee_proportional_millionths,
+                    },
+                }])
+            })
+            .collect();
+
+        let first_leg = get_route(
+            &unlocked_state.channel_manager,
+            &unlocked_state.router,
+            unlocked_state.channel_manager.get_our_node_id(),
+            taker_pk,
+            if swap.is_to_btc() {
+                Some(swap.qty_to)
+            } else {
+                Some(HTLC_MIN_MSAT)
+            },
+            swap.to_asset,
+            vec![],
+        );
+        let second_leg = get_route(
+            &unlocked_state.channel_manager,
+            &unlocked_state.router,
+            taker_pk,
+            unlocked_state.channel_manager.get_our_node_id(),
+            if swap.is_from_btc() {
+                Some(swap.qty_from)
+            } else {
+                Some(HTLC_MIN_MSAT)
+            },
+            swap.from_asset,
+            receive_hints,
+        );
+
+        let (mut first_leg, mut second_leg) = match (first_leg, second_leg) {
+            (Some(f), Some(s)) => (f, s),
+            _ => {
+                return Err(APIError::NoRoute);
+            }
+        };
+
+        // Set swap flag
+        second_leg.paths[0].hops[0].short_channel_id |= IS_SWAP_SCID;
+
+        // Generally in the last hop the fee_amount is set to the payment amount, so we need to
+        // override it depending on what type of swap we are doing
+        first_leg.paths[0]
+            .hops
+            .last_mut()
+            .expect("Path not to be empty")
+            .fee_msat = if swap.is_to_btc() { HTLC_MIN_MSAT } else { 0 };
+
+        let fullpaths = first_leg.paths[0]
+            .hops
+            .clone()
+            .into_iter()
+            .map(|mut hop| {
+                if !swap.is_to_btc() {
+                    hop.rgb_amount = Some(swap.qty_to);
+                    hop.payment_amount = HTLC_MIN_MSAT;
+                }
+                hop
+            })
+            .chain(second_leg.paths[0].hops.clone().into_iter().map(|mut hop| {
+                if !swap.is_from_btc() {
+                    hop.rgb_amount = Some(swap.qty_from);
+                    hop.payment_amount = HTLC_MIN_MSAT;
+                }
+                hop
+            }))
+            .collect::<Vec<_>>();
+
+        let route = Route {
+            paths: vec![LnPath {
+                hops: fullpaths,
+                blinded_tail: None,
+            }],
+            route_params: Some(RouteParameters {
+                payment_params: PaymentParameters::for_keysend(
+                    unlocked_state.channel_manager.get_our_node_id(),
+                    DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
+                    false,
+                ),
+                // This value is not used anywhere, it's set by the router
+                // when creating a route, but here we are creating it manually
+                // by composing a pre-existing list of hops
+                final_value_msat: 0,
+                max_total_routing_fee_msat: None,
+            }),
+        };
+
+        if !swap.is_to_btc() {
+            write_rgb_payment_info_file(
+                &ldk_data_dir_path,
+                &swapstring.payment_hash,
+                swap.to_asset.unwrap(),
+                swap.qty_to,
+                false,
+            );
+        }
+
+        let payment_id = PaymentId(swapstring.payment_hash.0);
+        let amt_msat = if swap.is_to_btc() {
+            swap.qty_to
+        } else {
+            HTLC_MIN_MSAT
+        };
+
+        let payment_info = PaymentInfo {
+            preimage: None,
+            secret: None,
+            status: HTLCStatus::Pending,
+            amt_msat: Some(amt_msat),
+        };
+
+        unlocked_state.add_outbound_payment(payment_id, payment_info.clone());
+
+        let (status, err) = match unlocked_state.channel_manager.send_spontaneous_payment(
+            &route,
+            Some(payment_preimage),
+            RecipientOnionFields::spontaneous_empty(),
+            PaymentId(swapstring.payment_hash.0),
+        ) {
+            Ok(_payment_hash) => {
+                tracing::debug!("EVENT: initiated swap");
+                (HTLCStatus::Pending, None)
+            }
+            Err(e) => {
+                tracing::warn!("ERROR: failed to send payment: {:?}", e);
+                (HTLCStatus::Failed, Some(e))
+            }
+        };
+
+        unlocked_state.add_inbound_payment(swapstring.payment_hash, payment_info);
+        unlocked_state.update_outbound_payment_status(payment_id, status);
+
+        match err {
+            None => Ok(Json(EmptyResponse {})),
+            Some(e) => Err(APIError::FailedPayment(format!("{:?}", e))),
+        }
+    })
+    .await
+}
+
+pub(crate) async fn maker_init(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<MakerInitRequest>, APIError>,
+) -> Result<Json<MakerInitResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
+
+        let from_asset = match &payload.from_asset {
+            None => None,
+            Some(asset) => Some(
+                ContractId::from_str(asset)
+                    .map_err(|_| APIError::InvalidAssetID(asset.clone()))?,
+            ),
+        };
+
+        let to_asset = match &payload.to_asset {
+            None => None,
+            Some(asset) => Some(
+                ContractId::from_str(asset)
+                    .map_err(|_| APIError::InvalidAssetID(asset.clone()))?,
+            ),
+        };
+
+        let qty_from = payload.qty_from;
+        let qty_to = payload.qty_to;
+
+        let swap = Swap {
+            from_asset,
+            to_asset,
+            qty_from,
+            qty_to,
+        };
+
+        // Check that we have enough assets to send
+        if let Some(to_asset) = to_asset {
+            let max_balance = get_max_local_rgb_amount(
+                to_asset,
+                &ldk_data_dir_path,
+                unlocked_state.channel_manager.list_channels().iter(),
+            );
+            if swap.qty_to > max_balance {
+                return Err(APIError::InsufficientAssets(max_balance, swap.qty_to));
+            }
+        }
+
+        let (payment_hash, payment_secret) = unlocked_state
+            .channel_manager
+            .create_inbound_payment(Some(546000), payload.timeout_sec, None)
+            .unwrap();
+        unlocked_state.add_maker_trade(payment_hash, swap);
+
+        let expiry = get_current_timestamp() + payload.timeout_sec as u64;
+        let swapstring = format!(
+            "{}/{}/{}/{}/{}/{}",
+            qty_from,
+            from_asset.map(|c| c.to_string()).unwrap_or("btc".into()),
+            qty_to,
+            to_asset.map(|c| c.to_string()).unwrap_or("btc".into()),
+            expiry,
+            payment_hash,
+        );
+
+        let payment_secret = payment_secret.0.to_hex();
+        let payment_hash = payment_hash.0.to_hex();
+        Ok(Json(MakerInitResponse {
+            payment_hash,
+            payment_secret,
+            swapstring,
+        }))
+    })
+    .await
+}
+
 pub(crate) async fn network_info(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<NetworkInfoResponse>, APIError> {
@@ -1474,8 +1815,22 @@ pub(crate) async fn open_channel(
 
         let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
 
-        let contract_id = ContractId::from_str(&payload.asset_id)
-            .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
+        let colored_info = match (payload.asset_id, payload.asset_amount) {
+            (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
+                return Err(APIError::InvalidAmount(format!(
+                    "Channel RGB amount must be equal or higher than {OPENCHANNEL_MIN_RGB_AMT}"
+                )));
+            }
+            (Some(asset), Some(amt)) => {
+                let asset =
+                    ContractId::from_str(&asset).map_err(|_| APIError::InvalidAssetID(asset))?;
+                Some((asset, amt))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(APIError::IncompleteRGBInfo);
+            }
+        };
 
         if payload.capacity_sat < OPENCHANNEL_MIN_SAT {
             return Err(APIError::InvalidAmount(format!(
@@ -1488,15 +1843,9 @@ pub(crate) async fn open_channel(
             )));
         }
 
-        if payload.push_msat < DUST_LIMIT_MSAT {
+        if colored_info.is_some() && payload.push_msat < DUST_LIMIT_MSAT {
             return Err(APIError::InvalidAmount(format!(
                 "Push amount must be equal or higher than the dust limit ({DUST_LIMIT_MSAT})"
-            )));
-        }
-
-        if payload.asset_amount < OPENCHANNEL_MIN_RGB_AMT {
-            return Err(APIError::InvalidAmount(format!(
-                "Channel RGB amount must be equal or higher than {OPENCHANNEL_MIN_RGB_AMT}"
             )));
         }
 
@@ -1506,14 +1855,6 @@ pub(crate) async fn open_channel(
 
         connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
             .await?;
-
-        let balance = unlocked_state.rgb_get_asset_balance(contract_id)?;
-
-        let spendable_rgb_amount = balance.spendable;
-
-        if payload.asset_amount > spendable_rgb_amount {
-            return Err(APIError::InsufficientAssets(spendable_rgb_amount));
-        }
 
         let config = UserConfig {
             channel_handshake_limits: ChannelHandshakeLimits {
@@ -1531,8 +1872,21 @@ pub(crate) async fn open_channel(
             ..Default::default()
         };
 
-        let consignment_endpoint =
-            RgbTransport::from_str(&state.static_state.proxy_endpoint).unwrap();
+        let consignment_endpoint = if let Some((contract_id, asset_amount)) = &colored_info {
+            let balance = unlocked_state.rgb_get_asset_balance(*contract_id)?;
+            let spendable_rgb_amount = balance.spendable;
+
+            if *asset_amount > spendable_rgb_amount {
+                return Err(APIError::InsufficientAssets(
+                    spendable_rgb_amount,
+                    *asset_amount,
+                ));
+            }
+
+            Some(RgbTransport::from_str(&state.static_state.proxy_endpoint).unwrap())
+        } else {
+            None
+        };
         let temporary_channel_id = unlocked_state
             .channel_manager
             .create_channel(
@@ -1541,30 +1895,34 @@ pub(crate) async fn open_channel(
                 payload.push_msat,
                 0,
                 Some(config),
-                Some(consignment_endpoint),
+                consignment_endpoint,
             )
             .map_err(|e| APIError::FailedOpenChannel(format!("{:?}", e)))?;
+        let temporary_channel_id = temporary_channel_id.to_hex();
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 
-        let peer_data_path = format!(
-            "{}/channel_peer_data",
-            state.static_state.ldk_data_dir.clone()
-        );
-        let _ =
-            disk::persist_channel_peer(Path::new(&peer_data_path), &payload.peer_pubkey_and_addr);
+        if let Some((contract_id, asset_amount)) = &colored_info {
+            let peer_data_path = format!(
+                "{}/channel_peer_data",
+                state.static_state.ldk_data_dir.clone()
+            );
+            let _ = disk::persist_channel_peer(
+                Path::new(&peer_data_path),
+                &payload.peer_pubkey_and_addr,
+            );
 
-        let temporary_channel_id = temporary_channel_id.to_hex();
-        let channel_rgb_info_path = format!(
-            "{}/{}",
-            state.static_state.ldk_data_dir.clone(),
-            temporary_channel_id,
-        );
-        let rgb_info = RgbInfo {
-            contract_id,
-            local_rgb_amount: payload.asset_amount,
-            remote_rgb_amount: 0,
-        };
-        write_rgb_channel_info(&PathBuf::from(&channel_rgb_info_path), &rgb_info);
+            let channel_rgb_info_path = format!(
+                "{}/{}",
+                state.static_state.ldk_data_dir.clone(),
+                temporary_channel_id,
+            );
+            let rgb_info = RgbInfo {
+                contract_id: *contract_id,
+                local_rgb_amount: *asset_amount,
+                remote_rgb_amount: 0,
+            };
+            write_rgb_channel_info(&PathBuf::from(&channel_rgb_info_path), &rgb_info);
+        }
 
         Ok(Json(OpenChannelResponse {
             temporary_channel_id,
@@ -1784,7 +2142,7 @@ pub(crate) async fn send_payment(
                 &payment_hash,
                 rgb_contract_id,
                 rgb_amount,
-                false,
+                true,
             ),
             (None, None) => {}
             (Some(_), None) => {
@@ -1869,6 +2227,42 @@ pub(crate) async fn sign_message(
     .map_err(|e| APIError::FailedMessageSigning(e.to_string()))?;
 
     Ok(Json(SignMessageResponse { signed_message }))
+}
+
+pub(crate) async fn taker(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<TakerRequest>, APIError>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
+        let swapstring = SwapString::from_str(&payload.swapstring)
+            .map_err(|e| APIError::InvalidSwapString(payload.swapstring.clone(), e.to_string()))?;
+
+        if get_current_timestamp() > swapstring.expiry {
+            return Err(APIError::ExpiredSwapOffer);
+        }
+
+        // We are selling assets, check if we have enough
+        if let Some(from_asset) = swapstring.swap.from_asset {
+            let max_balance = get_max_local_rgb_amount(
+                from_asset,
+                &ldk_data_dir_path,
+                unlocked_state.channel_manager.list_channels().iter(),
+            );
+            if swapstring.swap.qty_from > max_balance {
+                return Err(APIError::InsufficientAssets(
+                    max_balance,
+                    swapstring.swap.qty_from,
+                ));
+            }
+        }
+
+        unlocked_state.add_taker_trade(swapstring.payment_hash, swapstring.swap);
+
+        Ok(Json(EmptyResponse {}))
+    })
+    .await
 }
 
 pub(crate) async fn unlock(

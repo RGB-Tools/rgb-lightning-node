@@ -14,7 +14,8 @@ use bp::seals::txout::blind::{BlindSeal, SingleBlindSeal};
 use bp::seals::txout::{CloseMethod, TxPtr};
 use bp::Outpoint as RgbOutpoint;
 use lightning::events::bump_transaction::{Utxo, WalletSource};
-use lightning::rgb_utils::STATIC_BLINDING;
+use lightning::ln::ChannelId;
+use lightning::rgb_utils::{is_channel_rgb, RgbInfo, STATIC_BLINDING};
 use rgb_core::Operation;
 use rgb_lib::utils::RgbRuntime;
 use rgb_lib::wallet::{
@@ -32,7 +33,8 @@ use rgbstd::Txid as RgbTxid;
 use rgbwallet::psbt::opret::OutputOpret;
 use rgbwallet::psbt::{PsbtDbc, RgbExt, RgbInExt};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -218,6 +220,21 @@ impl UnlockedAppState {
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
             .send_btc(self.rgb_online.clone(), address, amount, fee_rate)
+    }
+
+    pub(crate) fn rgb_send_btc_begin(
+        &self,
+        address: String,
+        amount: u64,
+        fee_rate: f32,
+    ) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_btc_begin(self.rgb_online.clone(), address, amount, fee_rate)
+    }
+
+    pub(crate) fn rgb_send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_btc_end(self.rgb_online.clone(), signed_psbt)
     }
 
     pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
@@ -417,4 +434,18 @@ impl WalletSource for RgbLibWalletWrapper {
             .unwrap();
         Ok(Psbt::from_str(&signed).unwrap().extract_tx())
     }
+}
+
+pub fn get_rgb_channel_info_optional(
+    channel_id: &ChannelId,
+    ldk_data_dir: &Path,
+) -> Option<(RgbInfo, PathBuf)> {
+    if !is_channel_rgb(channel_id, ldk_data_dir) {
+        return None;
+    }
+
+    let info_file_path = ldk_data_dir.join(channel_id.to_hex());
+    let serialized_info = fs::read_to_string(&info_file_path).expect("valid rgb info file");
+    let info: RgbInfo = serde_json::from_str(&serialized_info).expect("valid rgb info file");
+    Some((info, info_file_path))
 }

@@ -11,6 +11,7 @@ anyhow = "1.0.72"
 axum = "0.6.19"
 axum-extra = "0.7.5"
 # axum-macros = "0.3.8"  # uncomment to use debug_handler
+baid58 = "0.4.4"
 base64 = "0.13.0"
 bdk = { version = "0.28", features = ["electrum", "keys-bip39"] }
 bech32 = "0.8"

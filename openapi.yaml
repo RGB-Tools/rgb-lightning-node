@@ -25,6 +25,8 @@ tags:
     description: APIs to perform on-chain operations
   - name: RGB
     description: APIs to perform RGB operations
+  - name: Swaps
+    description: APIs to perform asset swaps
   - name: Other
     description: APIs to perform other operations
 paths:
@@ -353,6 +355,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListTransactionsResponse'
+  /listtrades:
+    get:
+      tags:
+        - Swaps
+      summary: List trades
+      description: List the whitelisted trades
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTradesResponse'
   /listtransfers:
     post:
       tags:
@@ -415,6 +430,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LNInvoiceResponse'
+  /makerexecute:
+    post:
+      tags:
+        - Swaps
+      summary: Execute a maker swap
+      description: Execute a swap on the maker side
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakerExecuteRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+  /makerinit:
+    post:
+      tags:
+        - Swaps
+      summary: Init a maker swap
+      description: Init a swap on the maker side
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakerInitRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MakerInitResponse'
   /networkinfo:
     get:
       tags:
@@ -446,7 +497,7 @@ paths:
       tags:
         - Channels
       summary: Open a channel
-      description: Open a new LN channel
+      description: Open a new LN channel (RGB-enabled when both asset_id and asset_amount are specified)
       requestBody:
         content:
           application/json:
@@ -611,6 +662,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SignMessageResponse'
+  /taker:
+    post:
+      tags:
+        - Swaps
+      summary: Accept a swap
+      description: Accept a swap on the taker side
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TakerRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /unlock:
     post:
       tags:
@@ -1009,6 +1078,17 @@ components:
           type: array
           items:
               $ref: '#/components/schemas/Transaction'
+    ListTradesResponse:
+      type: object
+      properties:
+        maker:
+          type: array
+          items:
+              $ref: '#/components/schemas/Trade'
+        taker:
+          type: array
+          items:
+              $ref: '#/components/schemas/Trade'
     ListTransfersRequest:
       type: object
       properties:
@@ -1050,6 +1130,48 @@ components:
         invoice:
           type: string
           example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
+    MakerExecuteRequest:
+      type: object
+      properties:
+        swapstring:
+            type: string
+            example: 2:JuniorAlohaMagnum0F6TKNoZQDCvAasm92crmHqmgr8eur42WY17bZuzJgJJX:buy:2628259:1701256490:9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+        payment_secret:
+            type: string
+            example: 777a7756c620868199ed5fdc35bee4095b5709d543e5c2bf0494396bf27d2ea2
+        taker_pubkey:
+          type: string
+          example: 02270dadcd6e7ba0ef707dac72acccae1a3607453a8dd2aef36ff3be4e0d31f043
+    MakerInitRequest:
+      type: object
+      properties:
+        qty_from:
+          type: integer
+          example: 3000000
+        qty_to:
+          type: integer
+          example: 10
+        from_asset:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        to_asset:
+          type: string
+          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+        timeout_sec:
+          type: integer
+          example: 100
+    MakerInitResponse:
+      type: object
+      properties:
+        payment_hash:
+            type: string
+            example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
+        payment_secret:
+            type: string
+            example: 777a7756c620868199ed5fdc35bee4095b5709d543e5c2bf0494396bf27d2ea2
+        swapstring:
+            type: string
+            example: 2:JuniorAlohaMagnum0F6TKNoZQDCvAasm92crmHqmgr8eur42WY17bZuzJgJJX:buy:2628259:1701256490:9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
     NetworkInfoResponse:
       type: object
       properties:
@@ -1264,6 +1386,45 @@ components:
         signed_message:
           type: string
           example: signed message
+    TakerRequest:
+      type: object
+      properties:
+        swapstring:
+            type: string
+            example: 2:JuniorAlohaMagnum0F6TKNoZQDCvAasm92crmHqmgr8eur42WY17bZuzJgJJX:buy:2628259:1701256490:9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+    Trade:
+      type: object
+      properties:
+        payment_hash:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
+        qty_from:
+          type: integer
+          example: 3000000
+        qty_to:
+          type: integer
+          example: 10
+        from_asset:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        to_asset:
+          type: string
+          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+    TradeEntry:
+      type: object
+      properties:
+        qty_from:
+          type: integer
+          example: 3000000
+        qty_to:
+          type: integer
+          example: 10
+        from_asset:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        to_asset:
+          type: string
+          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
     Transaction:
       type: object
       properties:
