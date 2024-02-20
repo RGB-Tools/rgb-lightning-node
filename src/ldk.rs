@@ -53,7 +53,7 @@ use rgbstd::persistence::Inventory;
 use rgbstd::Txid as RgbTxid;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -787,11 +787,7 @@ async fn _spend_outputs(
 
         let asset_transition_builder = runtime
             .runtime
-            .transition_builder(
-                contract_id,
-                TypeName::try_from("RGB20").unwrap(),
-                None::<&str>,
-            )
+            .transition_builder(contract_id, TypeName::from("RGB20"), None::<&str>)
             .expect("ok");
         let assignment_id = asset_transition_builder
             .assignments_type(&FieldName::from("beneficiary"))
@@ -1117,7 +1113,7 @@ async fn periodic_sweep(
                             file.seek(SeekFrom::Current(-1)).unwrap();
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                        Err(e) => Err(e).unwrap(),
+                        Err(e) => panic!("{:?}", e),
                     }
                     outputs.push(Readable::read(&mut file).unwrap());
                 }
