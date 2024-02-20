@@ -246,7 +246,7 @@ pub(crate) struct DisconnectPeerRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct EmptyResponse {}
 
-#[derive(Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
     Pending,
     Succeeded,
