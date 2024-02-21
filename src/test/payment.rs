@@ -30,10 +30,10 @@ async fn payment() {
     let node2_pubkey = node2_info.pubkey;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 100, 900).await;
-    let _ = send_payment(node1_addr, invoice.clone()).await;
+    send_payment_with_ln_balance(node1_addr, node2_addr, invoice.clone(), 600, 0).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
     assert_eq!(decoded.expiry_sec, 900);
@@ -45,7 +45,7 @@ async fn payment() {
     assert!(matches!(status, InvoiceStatus::Succeeded));
 
     let LNInvoiceResponse { invoice } = ln_invoice(node1_addr, &asset_id, 50, 900).await;
-    let _ = send_payment(node2_addr, invoice.clone()).await;
+    send_payment_with_ln_balance(node2_addr, node1_addr, invoice.clone(), 100, 500).await;
 
     let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 50, 900).await;
     let _ = send_payment(node1_addr, invoice.clone()).await;
@@ -71,7 +71,7 @@ async fn payment() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 25);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 25);
-    assert_eq!(asset_balance(node3_addr, &asset_id).await, 950);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 25);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 25);
+    assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 950);
 }

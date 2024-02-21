@@ -31,19 +31,19 @@ async fn restart() {
     fund_and_create_utxos(node3_addr).await;
 
     let asset_id = issue_asset(node1_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 1000);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
     println!("2 - restart 1+2");
     shutdown(&[node1_addr, node2_addr, node3_addr], &ldk_sockets).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 1000);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     println!("3 - restart 1");
     shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
@@ -82,7 +82,7 @@ async fn restart() {
             panic!("cannot find re-established channel")
         }
     }
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 100, 900).await;
     let send_payment = send_payment(node1_addr, invoice).await;
@@ -145,8 +145,8 @@ async fn restart() {
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 100);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 900);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 100);
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 700, recipient_id).await;
@@ -167,7 +167,7 @@ async fn restart() {
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 200);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 50);
-    assert_eq!(asset_balance(node3_addr, &asset_id).await, 750);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 200);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
+    assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 750);
 }

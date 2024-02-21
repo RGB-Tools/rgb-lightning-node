@@ -9,7 +9,10 @@ use bitcoin::Network;
 use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
 use lightning::onion_message::{Destination, OnionMessagePath};
-use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
+use lightning::rgb_utils::{
+    get_rgb_channel_info_path, get_rgb_payment_info_path, parse_rgb_channel_info,
+    parse_rgb_payment_info,
+};
 use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
 use lightning::{
@@ -17,9 +20,7 @@ use lightning::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
         PaymentHash, PaymentPreimage,
     },
-    rgb_utils::{
-        get_rgb_channel_info, write_rgb_channel_info, write_rgb_payment_info_file, RgbInfo,
-    },
+    rgb_utils::{write_rgb_channel_info, write_rgb_payment_info_file, RgbInfo},
     routing::{
         gossip::NodeId,
         router::{PaymentParameters, RouteParameters},
@@ -682,11 +683,12 @@ pub(crate) async fn asset_balance(
     let mut offchain_outbound = 0;
     let mut offchain_inbound = 0;
     for chan_info in unlocked_state.channel_manager.list_channels() {
-        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
+        let info_file_path =
+            get_rgb_channel_info_path(&chan_info.channel_id.to_hex(), &ldk_data_dir_path, false);
         if !info_file_path.exists() {
             continue;
         }
-        let (rgb_info, _) = get_rgb_channel_info(&chan_info.channel_id, &ldk_data_dir_path);
+        let rgb_info = parse_rgb_channel_info(&info_file_path);
         if rgb_info.contract_id == contract_id {
             offchain_outbound += rgb_info.local_rgb_amount;
             offchain_inbound += rgb_info.remote_rgb_amount;
@@ -1160,9 +1162,10 @@ pub(crate) async fn list_channels(
         }
 
         let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
-        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
+        let info_file_path =
+            get_rgb_channel_info_path(&chan_info.channel_id.to_hex(), &ldk_data_dir_path, false);
         if info_file_path.exists() {
-            let (rgb_info, _) = get_rgb_channel_info(&chan_info.channel_id, &ldk_data_dir_path);
+            let rgb_info = parse_rgb_channel_info(&info_file_path);
             channel.asset_id = Some(rgb_info.contract_id.to_string());
             channel.asset_local_amount = Some(rgb_info.local_rgb_amount);
             channel.asset_remote_amount = Some(rgb_info.remote_rgb_amount);
@@ -1564,18 +1567,21 @@ pub(crate) async fn open_channel(
         let _ =
             disk::persist_channel_peer(Path::new(&peer_data_path), &payload.peer_pubkey_and_addr);
 
-        let temporary_channel_id = temporary_channel_id.to_hex();
-        let channel_rgb_info_path = format!(
-            "{}/{}",
-            state.static_state.ldk_data_dir.clone(),
-            temporary_channel_id,
-        );
         let rgb_info = RgbInfo {
             contract_id,
             local_rgb_amount: payload.asset_amount,
             remote_rgb_amount: 0,
         };
-        write_rgb_channel_info(&PathBuf::from(&channel_rgb_info_path), &rgb_info);
+        let temporary_channel_id = temporary_channel_id.to_hex();
+        let ldk_data_dir_path = PathBuf::from(&state.static_state.ldk_data_dir);
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&temporary_channel_id, &ldk_data_dir_path, true),
+            &rgb_info,
+        );
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&temporary_channel_id, &ldk_data_dir_path, false),
+            &rgb_info,
+        );
 
         Ok(Json(OpenChannelResponse {
             temporary_channel_id,

@@ -1,11 +1,13 @@
 use amplify::s;
 use bitcoin::Network;
 use electrum_client::ElectrumApi;
+use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::str::FromStr;
 use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
 use tracing_test::traced_test;
@@ -175,7 +177,7 @@ async fn start_node(
     (node_address, password)
 }
 
-async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
+async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalanceResponse {
     let payload = AssetBalanceRequest {
         asset_id: asset_id.to_string(),
     };
@@ -190,7 +192,10 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
         .json::<AssetBalanceResponse>()
         .await
         .unwrap()
-        .spendable
+}
+
+async fn asset_balance_spendable(node_address: SocketAddr, asset_id: &str) -> u64 {
+    asset_balance(node_address, asset_id).await.spendable
 }
 
 async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
@@ -209,6 +214,20 @@ async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
         .json::<EmptyResponse>()
         .await
         .unwrap();
+}
+
+async fn check_payment_status(
+    node_address: SocketAddr,
+    payment_hash: &str,
+    expected_status: HTLCStatus,
+) -> Option<Payment> {
+    let payments = list_payments(node_address).await;
+    if let Some(payment) = payments.iter().find(|p| p.payment_hash == payment_hash) {
+        if payment.status == expected_status {
+            return Some(payment.clone());
+        }
+    }
+    None
 }
 
 async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &str) {
@@ -405,6 +424,12 @@ async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
         .peers
 }
 
+async fn asset_balance_offchain_outbound(node_address: SocketAddr, asset_id: &str) -> u64 {
+    asset_balance(node_address, asset_id)
+        .await
+        .offchain_outbound
+}
+
 async fn ln_invoice(
     node_address: SocketAddr,
     asset_id: &str,
@@ -430,12 +455,48 @@ async fn ln_invoice(
         .unwrap()
 }
 
-async fn keysend(
+async fn _with_ln_balance_checks(
+    node_address: SocketAddr,
+    counterparty_node_address: SocketAddr,
+    asset_id: &str,
+    asset_amount: u64,
+    initial_ln_balance: u64,
+    counterparty_initial_ln_balance: u64,
+    payment_hash: &str,
+) {
+    let ln_balance = asset_balance_offchain_outbound(node_address, asset_id).await;
+    assert_eq!(ln_balance, initial_ln_balance);
+    check_payment_status(node_address, payment_hash, HTLCStatus::Pending)
+        .await
+        .unwrap();
+    let counterparty_ln_balance =
+        asset_balance_offchain_outbound(counterparty_node_address, asset_id).await;
+    assert_eq!(counterparty_ln_balance, counterparty_initial_ln_balance);
+
+    let final_ln_balance = initial_ln_balance - asset_amount;
+    wait_for_ln_balance(node_address, asset_id, final_ln_balance).await;
+    wait_for_ln_payment(node_address, payment_hash, HTLCStatus::Succeeded).await;
+    let counterparty_final_ln_balance = counterparty_initial_ln_balance + asset_amount;
+    wait_for_ln_balance(
+        counterparty_node_address,
+        asset_id,
+        counterparty_final_ln_balance,
+    )
+    .await;
+    wait_for_ln_payment(
+        counterparty_node_address,
+        payment_hash,
+        HTLCStatus::Succeeded,
+    )
+    .await;
+}
+
+async fn keysend_raw(
     node_address: SocketAddr,
     dest_pubkey: &str,
     asset_id: &str,
     asset_amount: u64,
-) -> Payment {
+) -> KeysendResponse {
     let payload = KeysendRequest {
         dest_pubkey: dest_pubkey.to_string(),
         amt_msat: 3000000,
@@ -448,28 +509,44 @@ async fn keysend(
         .send()
         .await
         .unwrap();
-    let keysend = _check_response_is_ok(res)
+    _check_response_is_ok(res)
         .await
         .json::<KeysendResponse>()
         .await
-        .unwrap();
+        .unwrap()
+}
 
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let payments = list_payments(node_address).await;
-        if let Some(payment) = payments
-            .iter()
-            .find(|p| p.payment_hash == keysend.payment_hash)
-        {
-            if matches!(payment.status, HTLCStatus::Succeeded) {
-                return payment.clone();
-            }
-        }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("cannot find successful payment")
-        }
-    }
+async fn keysend(
+    node_address: SocketAddr,
+    dest_pubkey: &str,
+    asset_id: &str,
+    asset_amount: u64,
+) -> Payment {
+    let keysend = keysend_raw(node_address, dest_pubkey, asset_id, asset_amount).await;
+    wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
+}
+
+async fn keysend_with_ln_balance(
+    node_address: SocketAddr,
+    counterparty_node_address: SocketAddr,
+    dest_pubkey: &str,
+    asset_id: &str,
+    asset_amount: u64,
+    initial_ln_balance: u64,
+    counterparty_initial_ln_balance: u64,
+) {
+    let res = keysend_raw(node_address, dest_pubkey, asset_id, asset_amount).await;
+
+    _with_ln_balance_checks(
+        node_address,
+        counterparty_node_address,
+        asset_id,
+        asset_amount,
+        initial_ln_balance,
+        counterparty_initial_ln_balance,
+        &res.payment_hash,
+    )
+    .await;
 }
 
 async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
@@ -717,15 +794,7 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         .unwrap();
 }
 
-async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
-    send_payment_with_status(node_address, invoice, HTLCStatus::Succeeded).await
-}
-
-async fn send_payment_with_status(
-    node_address: SocketAddr,
-    invoice: String,
-    expected_status: HTLCStatus,
-) -> Payment {
+async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
     let payload = SendPaymentRequest { invoice };
     let res = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node_address))
@@ -733,28 +802,49 @@ async fn send_payment_with_status(
         .send()
         .await
         .unwrap();
-    let send_payment = _check_response_is_ok(res)
+    _check_response_is_ok(res)
         .await
         .json::<SendPaymentResponse>()
         .await
-        .unwrap();
+        .unwrap()
+}
 
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let payments = list_payments(node_address).await;
-        if let Some(payment) = payments
-            .iter()
-            .find(|p| p.payment_hash == send_payment.payment_hash)
-        {
-            if payment.status == expected_status {
-                return payment.clone();
-            }
-        }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("cannot find payment in expected status")
-        }
-    }
+async fn send_payment(node_address: SocketAddr, invoice: String) -> Payment {
+    send_payment_with_status(node_address, invoice, HTLCStatus::Succeeded).await
+}
+
+async fn send_payment_with_ln_balance(
+    node_address: SocketAddr,
+    counterparty_node_address: SocketAddr,
+    invoice: String,
+    initial_ln_balance: u64,
+    counterparty_initial_ln_balance: u64,
+) {
+    let bolt11_invoice = Bolt11Invoice::from_str(&invoice).unwrap();
+    let asset_amount = bolt11_invoice.rgb_amount().unwrap();
+    let asset_id = &bolt11_invoice.rgb_contract_id().unwrap().to_string();
+
+    let res = send_payment_raw(node_address, invoice).await;
+
+    _with_ln_balance_checks(
+        node_address,
+        counterparty_node_address,
+        asset_id,
+        asset_amount,
+        initial_ln_balance,
+        counterparty_initial_ln_balance,
+        &res.payment_hash,
+    )
+    .await;
+}
+
+async fn send_payment_with_status(
+    node_address: SocketAddr,
+    invoice: String,
+    expected_status: HTLCStatus,
+) -> Payment {
+    let send_payment = send_payment_raw(node_address, invoice).await;
+    wait_for_ln_payment(node_address, &send_payment.payment_hash, expected_status).await
 }
 
 async fn unlock(node_address: SocketAddr, password: String) {
@@ -776,11 +866,43 @@ async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_bal
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if asset_balance(node_address, asset_id).await == expected_balance {
+        if asset_balance_spendable(node_address, asset_id).await == expected_balance {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
             panic!("balance is not becoming the expected one");
+        }
+    }
+}
+
+async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_balance: u64) {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if asset_balance_offchain_outbound(node_address, asset_id).await == expected_balance {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("balance is not becoming the expected one ({expected_balance})");
+        }
+    }
+}
+
+async fn wait_for_ln_payment(
+    node_address: SocketAddr,
+    payment_hash: &str,
+    expected_status: HTLCStatus,
+) -> Payment {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Some(payment) =
+            check_payment_status(node_address, payment_hash, expected_status).await
+        {
+            return payment;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("cannot find successful payment")
         }
     }
 }

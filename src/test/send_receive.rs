@@ -28,8 +28,8 @@ async fn send_receive() {
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 600);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 600);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
     let RgbInvoiceResponse {
         recipient_id,
@@ -41,8 +41,8 @@ async fn send_receive() {
     refresh_transfers(node1_addr).await;
     refresh_transfers(node1_addr).await;
     refresh_transfers(node2_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 100);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 900);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 100);
 
     // check decoded RGB invoice (with asset ID)
     let decoded = decode_rgb_invoice(node1_addr, &invoice).await;
@@ -60,6 +60,6 @@ async fn send_receive() {
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 700);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 300);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 700);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 300);
 }

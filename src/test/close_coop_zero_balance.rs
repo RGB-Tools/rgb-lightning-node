@@ -24,11 +24,11 @@ async fn close_coop_zero_balance() {
     let node2_pubkey = node2_info.pubkey;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 1000, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 0);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 0);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 1000).await;
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 0);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 0);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 700, recipient_id).await;
@@ -37,6 +37,6 @@ async fn close_coop_zero_balance() {
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
 
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 300);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 700);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 300);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 700);
 }

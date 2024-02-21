@@ -23,8 +23,8 @@ use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, Simple
 use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::{DefaultMessageRouter, SimpleArcOnionMessenger};
 use lightning::rgb_utils::{
-    get_rgb_channel_info, get_rgb_runtime, read_rgb_transfer_info, STATIC_BLINDING,
-    WALLET_FINGERPRINT_FNAME,
+    get_rgb_channel_info_pending, get_rgb_runtime, parse_rgb_payment_info, read_rgb_transfer_info,
+    update_rgb_channel_amount, STATIC_BLINDING, WALLET_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -267,6 +267,38 @@ pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
     Arc<FilesystemLogger>,
 >;
 
+fn _update_rgb_channel_amount(ldk_data_dir: &str, payment_hash: &PaymentHash, receiver: bool) {
+    let ldk_data_dir_path = PathBuf::from(ldk_data_dir);
+    let payment_hash_str = hex_str(&payment_hash.0);
+    let mut found = false;
+    for entry in fs::read_dir(&ldk_data_dir_path).unwrap() {
+        let file = entry.unwrap();
+        let file_name = file.file_name();
+        let file_name_str = file_name.to_string_lossy();
+        if file_name_str.contains(&payment_hash_str) && file_name_str != payment_hash_str {
+            found = true;
+            let rgb_payment_info = parse_rgb_payment_info(&file.path());
+            let channel_id_str = file_name_str.replace(&payment_hash_str, "");
+            let (offered, received) = if receiver {
+                (0, rgb_payment_info.amount)
+            } else {
+                (rgb_payment_info.amount, 0)
+            };
+            update_rgb_channel_amount(
+                &channel_id_str,
+                offered,
+                received,
+                &ldk_data_dir_path,
+                false,
+            );
+            break;
+        }
+    }
+    if !found {
+        unreachable!("file missing indicates a logic bug");
+    }
+}
+
 async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
@@ -293,7 +325,7 @@ async fn handle_ldk_events(
             .to_scriptpubkey();
             let script_buf = ScriptBuf::from_bytes(addr);
 
-            let (rgb_info, _) = get_rgb_channel_info(
+            let (rgb_info, _) = get_rgb_channel_info_pending(
                 &temporary_channel_id,
                 &PathBuf::from(&static_state.ldk_data_dir),
             );
@@ -416,6 +448,9 @@ async fn handle_ldk_events(
                 } => (payment_preimage, Some(payment_secret)),
                 PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
             };
+
+            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, true);
+
             unlocked_state.upsert_inbound_payment(
                 payment_hash,
                 HTLCStatus::Succeeded,
@@ -431,6 +466,8 @@ async fn handle_ldk_events(
             payment_id,
             ..
         } => {
+            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, false);
+
             let payment = unlocked_state.update_outbound_payment(
                 payment_id.unwrap(),
                 HTLCStatus::Succeeded,

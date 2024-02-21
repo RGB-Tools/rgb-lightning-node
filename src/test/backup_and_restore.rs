@@ -27,7 +27,7 @@ async fn backup_and_restore() {
     let node2_pubkey = node2_info.pubkey;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
 

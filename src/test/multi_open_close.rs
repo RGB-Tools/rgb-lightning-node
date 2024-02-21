@@ -28,7 +28,7 @@ async fn multi_open_close() {
     let node2_pubkey = node2_info.pubkey;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
 
@@ -37,7 +37,7 @@ async fn multi_open_close() {
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
     let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 400);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
 
@@ -60,7 +60,7 @@ async fn multi_open_close() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 100);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 50);
-    assert_eq!(asset_balance(node3_addr, &asset_id).await, 850);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
+    assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 850);
 }

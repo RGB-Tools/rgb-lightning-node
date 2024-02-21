@@ -35,7 +35,7 @@ async fn open_after_double_send() {
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 900);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 900);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 200, recipient_id).await;
@@ -43,11 +43,11 @@ async fn open_after_double_send() {
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 700);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 300);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 700);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 300);
 
     let channel = open_channel(node2_addr, &node1_pubkey, NODE1_PEER_PORT, 250, &asset_id).await;
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 50);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
 
     let LNInvoiceResponse { invoice } = ln_invoice(node1_addr, &asset_id, 50, 900).await;
     let _ = send_payment(node2_addr, invoice).await;
@@ -70,7 +70,7 @@ async fn open_after_double_send() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
-    assert_eq!(asset_balance(node1_addr, &asset_id).await, 25);
-    assert_eq!(asset_balance(node2_addr, &asset_id).await, 25);
-    assert_eq!(asset_balance(node3_addr, &asset_id).await, 950);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 25);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 25);
+    assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 950);
 }
