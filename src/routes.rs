@@ -624,6 +624,11 @@ impl AppState {
         let mut unlocked_app_state = self.get_unlocked_app_state().await;
         *unlocked_app_state = updated;
     }
+
+    async fn update_periodic_sweep(&self, updated: Option<tokio::task::JoinHandle<()>>) {
+        let periodic_sweep = self.get_periodic_sweep();
+        *periodic_sweep.await = updated;
+    }
 }
 
 impl From<RgbLibError> for APIError {
@@ -1430,6 +1435,15 @@ pub(crate) async fn lock(
         stop_ldk(state.clone()).await;
         tracing::debug!("LDK stopped");
 
+        tracing::debug!("Waiting for periodic sweep to stop...");
+        let periodic_sweep = state.get_periodic_sweep().await;
+        if let Some(ps) = periodic_sweep.as_ref() {
+            while !ps.is_finished() {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+        tracing::debug!("Periodic sweep has stopped");
+
         state.update_unlocked_app_state(None).await;
 
         state.update_ldk_background_services(None);
@@ -1916,9 +1930,9 @@ pub(crate) async fn unlock(
         };
 
         tracing::debug!("Starting LDK...");
-        let (new_ldk_background_services, new_unlocked_app_state) =
+        let (new_ldk_background_services, new_unlocked_app_state, new_periodic_sweep) =
             match start_ldk(state.clone(), mnemonic).await {
-                Ok((nlbs, nuap)) => (nlbs, nuap),
+                Ok((nlbs, nuap, ps)) => (nlbs, nuap, ps),
                 Err(e) => {
                     state.update_changing_state(false);
                     return Err(e);
@@ -1933,6 +1947,8 @@ pub(crate) async fn unlock(
         state.update_ldk_background_services(Some(new_ldk_background_services));
 
         state.update_changing_state(false);
+
+        state.update_periodic_sweep(Some(new_periodic_sweep)).await;
 
         tracing::info!("Unlock completed");
         Ok(Json(EmptyResponse {}))

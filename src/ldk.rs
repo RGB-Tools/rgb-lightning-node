@@ -1173,7 +1173,14 @@ async fn periodic_sweep(
 pub(crate) async fn start_ldk(
     app_state: Arc<AppState>,
     mnemonic: Mnemonic,
-) -> Result<(LdkBackgroundServices, Arc<UnlockedAppState>), APIError> {
+) -> Result<
+    (
+        LdkBackgroundServices,
+        Arc<UnlockedAppState>,
+        tokio::task::JoinHandle<()>,
+    ),
+    APIError,
+> {
     let static_state = &app_state.static_state;
 
     let bitcoind_client = static_state.bitcoind_client.clone();
@@ -1654,7 +1661,7 @@ pub(crate) async fn start_ldk(
         }
     });
 
-    tokio::spawn(periodic_sweep(
+    let periodic_sweep = tokio::spawn(periodic_sweep(
         Arc::clone(&unlocked_state),
         Arc::clone(static_state),
         Arc::clone(&stop_processing),
@@ -1671,6 +1678,7 @@ pub(crate) async fn start_ldk(
             background_processor: Some(background_processor),
         },
         unlocked_state,
+        periodic_sweep,
     ))
 }
 

@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -55,6 +56,7 @@ pub(crate) struct AppState {
     pub(crate) unlocked_app_state: Arc<TokioMutex<Option<Arc<UnlockedAppState>>>>,
     pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
     pub(crate) changing_state: Mutex<bool>,
+    pub(crate) periodic_sweep: Arc<TokioMutex<Option<JoinHandle<()>>>>,
 }
 
 impl AppState {
@@ -70,6 +72,10 @@ impl AppState {
         &self,
     ) -> TokioMutexGuard<Option<Arc<UnlockedAppState>>> {
         self.unlocked_app_state.lock().await
+    }
+
+    pub(crate) async fn get_periodic_sweep(&self) -> TokioMutexGuard<Option<JoinHandle<()>>> {
+        self.periodic_sweep.lock().await
     }
 }
 
@@ -409,5 +415,6 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
+        periodic_sweep: Arc::new(TokioMutex::new(None)),
     }))
 }
