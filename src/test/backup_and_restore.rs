@@ -82,7 +82,7 @@ async fn backup_and_restore() {
         .unwrap();
     assert!(diff.is_empty());
 
-    unlock(node1_addr, node1_password).await;
+    unlock(node1_addr, &node1_password).await;
 
     let node1_info = node_info(node1_addr).await;
     assert_eq!(node1_pubkey, node1_info.pubkey);

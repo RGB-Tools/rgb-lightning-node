@@ -161,7 +161,7 @@ async fn start_node(
             .unwrap();
     }
 
-    unlock(node_address, password.clone()).await;
+    unlock(node_address, &password).await;
 
     println!("node on peer port {node_peer_port} started with address {node_address:?}");
     (node_address, password)
@@ -880,9 +880,11 @@ async fn send_payment_with_status(
     wait_for_ln_payment(node_address, &send_payment.payment_hash, expected_status).await
 }
 
-async fn unlock(node_address: SocketAddr, password: String) {
+async fn unlock(node_address: SocketAddr, password: &str) {
     println!("unlocking node {node_address}");
-    let payload = UnlockRequest { password };
+    let payload = UnlockRequest {
+        password: password.to_string(),
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{}/unlock", node_address))
         .json(&payload)
@@ -982,7 +984,6 @@ async fn shutdown(node_sockets: &[SocketAddr]) {
             panic!("node sockets not becoming available (last checked: {last_checked})")
         }
     }
-    tokio::time::sleep(std::time::Duration::from_secs(7)).await;
 }
 
 #[derive(Clone, Debug)]
@@ -1118,6 +1119,7 @@ mod close_coop_zero_balance;
 mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
+mod lock_unlock;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
