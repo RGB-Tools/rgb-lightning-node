@@ -56,12 +56,14 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime};
 use strict_encoding::{FieldName, TypeName};
+use time::OffsetDateTime;
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
@@ -1706,6 +1708,25 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
 
     if let Some(join_handle) = app_state.stop_ldk() {
         join_handle.await.unwrap().unwrap();
+    }
+
+    // connect to the peer port so it can be released
+    let peer_port = &app_state.static_state.ldk_peer_listening_port;
+    let sock_addr = SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+        *peer_port,
+    );
+    let _ = std::net::TcpStream::connect(sock_addr);
+    // check the peer port has been released
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if TcpListener::bind(sock_addr).is_ok() {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("LDK peer port not being released")
+        }
     }
 
     tracing::info!("Stopped LDK");

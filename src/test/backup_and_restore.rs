@@ -13,7 +13,6 @@ async fn backup_and_restore() {
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
-    let ldk_sockets = get_ldk_sockets(&[NODE1_PEER_PORT, NODE2_PEER_PORT]);
     let (node1_addr, node1_password) =
         start_node(test_dir_node1.clone(), NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
@@ -63,7 +62,7 @@ async fn backup_and_restore() {
     assert_eq!(response.error, "Invalid backup path");
     assert_eq!(response.code, 400);
 
-    shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr]).await;
 
     let old_test_dir_node1 = format!("{test_dir_node1}_old");
     let old_test_dir_node1_path = Path::new(&old_test_dir_node1);

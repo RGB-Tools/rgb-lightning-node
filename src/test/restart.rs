@@ -14,14 +14,13 @@ async fn restart() {
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
     let test_dir_node3 = format!("{TEST_DIR_BASE}node3");
-    let ldk_sockets = get_ldk_sockets(&[NODE1_PEER_PORT, NODE2_PEER_PORT, NODE3_PEER_PORT]);
 
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, false).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, false).await;
 
     println!("1 - restart all");
-    shutdown(&[node1_addr, node2_addr, node3_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr, node3_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
@@ -34,7 +33,7 @@ async fn restart() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
     println!("2 - restart 1+2");
-    shutdown(&[node1_addr, node2_addr, node3_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr, node3_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
@@ -46,7 +45,7 @@ async fn restart() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     println!("3 - restart 1");
-    shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let t_0 = OffsetDateTime::now_utc();
     loop {
@@ -64,7 +63,7 @@ async fn restart() {
         }
     }
     println!("4 - restart 1+2");
-    shutdown(&[node1_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let t_0 = OffsetDateTime::now_utc();
@@ -88,7 +87,7 @@ async fn restart() {
     let send_payment = send_payment(node1_addr, invoice).await;
 
     println!("5 - restart 1+2");
-    shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let t_0 = OffsetDateTime::now_utc();
@@ -141,7 +140,7 @@ async fn restart() {
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
     println!("6 - restart all");
-    shutdown(&[node1_addr, node2_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
@@ -163,7 +162,7 @@ async fn restart() {
     refresh_transfers(node2_addr).await;
 
     println!("7 - restart all");
-    shutdown(&[node1_addr, node2_addr, node3_addr], &ldk_sockets).await;
+    shutdown(&[node1_addr, node2_addr, node3_addr]).await;
     let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
     let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
     let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;

@@ -3404,6 +3404,7 @@ name = "rgb-lightning-node"
 version = "0.1.0"
 dependencies = [
  "amplify",
+ "amplify_num",
  "anyhow",
  "axum",
  "axum-extra",

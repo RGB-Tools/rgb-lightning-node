@@ -110,18 +110,6 @@ fn get_txout(txid: &str) -> String {
     .unwrap()
 }
 
-fn get_ldk_sockets(peer_ports: &[u16]) -> Vec<SocketAddr> {
-    peer_ports
-        .iter()
-        .map(|p| {
-            SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-                *p,
-            )
-        })
-        .collect::<Vec<SocketAddr>>()
-}
-
 async fn start_daemon(node_test_dir: &str, node_peer_port: u16) -> SocketAddr {
     let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
     let node_address = listener.local_addr().unwrap();
@@ -964,7 +952,7 @@ async fn wait_for_ln_payment(
     }
 }
 
-async fn shutdown(node_sockets: &[SocketAddr], ldk_sockets: &[SocketAddr]) {
+async fn shutdown(node_sockets: &[SocketAddr]) {
     // shutdown nodes
     for node_address in node_sockets {
         println!("shutting down node {node_address}");
@@ -992,29 +980,6 @@ async fn shutdown(node_sockets: &[SocketAddr], ldk_sockets: &[SocketAddr]) {
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
             panic!("node sockets not becoming available (last checked: {last_checked})")
-        }
-    }
-    // connect to LDK peer ports so they can stop listening
-    for ldk_socket in ldk_sockets {
-        let _ = std::net::TcpStream::connect(ldk_socket);
-    }
-    // check LDK sockets have been released
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let mut all_sockets_available = true;
-        let mut last_checked = ldk_sockets[0];
-        for ldk_socket in ldk_sockets {
-            last_checked = *ldk_socket;
-            if TcpListener::bind(*ldk_socket).is_err() {
-                all_sockets_available = false;
-            }
-        }
-        if all_sockets_available {
-            break;
-        }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("LDK sockets not becoming available (last checked: {last_checked})")
         }
     }
     tokio::time::sleep(std::time::Duration::from_secs(7)).await;
