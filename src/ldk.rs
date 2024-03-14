@@ -1065,13 +1065,6 @@ async fn periodic_sweep(
     // Regularly claim outputs which are exclusively spendable by us and send them to BDK.
     // Note that if you more tightly integrate your wallet with LDK you may not need to do this -
     // these outputs can just be treated as normal outputs during coin selection.
-    let pending_spendables_dir = format!(
-        "{}/{}",
-        static_state.ldk_data_dir, PENDING_SPENDABLE_OUTPUT_DIR
-    );
-    let processing_spendables_dir =
-        format!("{}/processing_spendable_outputs", static_state.ldk_data_dir);
-    let spendables_dir = format!("{}/spendable_outputs", static_state.ldk_data_dir);
 
     // We batch together claims of all spendable outputs generated each day, however only after
     // batching any claims of spendable outputs which were generated prior to restart. On a mobile
@@ -1081,91 +1074,119 @@ async fn periodic_sweep(
     //
     // There is no particular rush here, we just have to ensure funds are availably by the time we
     // need to send funds.
-    #[cfg(test)]
-    let interval_secs = 5;
-    #[cfg(not(test))]
-    let interval_secs = 60 * 60 * 24;
-    let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
 
+    let interval_check_secs = 1;
+    #[cfg(test)]
+    let interval_sweep_secs = 5;
+    #[cfg(not(test))]
+    let interval_sweep_secs = 60 * 60 * 24;
+
+    let mut interval = tokio::time::interval(Duration::from_secs(interval_check_secs));
+    let mut start = OffsetDateTime::now_utc();
+    // frequently check if we need to stop, only sweep once every `interval_sweep_secs`
     loop {
         interval.tick().await; // Note that the first tick completes immediately
+
+        // check if we need to stop
         if stop_processing.load(Ordering::Acquire) {
+            tracing::debug!("stopping periodic sweep");
             return;
         }
-        if let Ok(dir_iter) = fs::read_dir(&pending_spendables_dir) {
-            // Move any spendable descriptors from pending folder so that we don't have any
-            // races with new files being added.
-            for file_res in dir_iter {
-                let file = file_res.unwrap();
-                // Only move a file if its a 32-byte-hex'd filename, otherwise it might be a
-                // temporary file.
-                if file.file_name().len() == 64 {
-                    fs::create_dir_all(&processing_spendables_dir).unwrap();
-                    let mut holding_path = PathBuf::new();
-                    holding_path.push(&processing_spendables_dir);
-                    holding_path.push(&file.file_name());
-                    fs::rename(file.path(), holding_path).unwrap();
-                }
-            }
-            // Now concatenate all the pending files we moved into one file in the
-            // `spendable_outputs` directory and drop the processing directory.
-            let mut outputs = Vec::new();
-            if let Ok(processing_iter) = fs::read_dir(&processing_spendables_dir) {
-                for file_res in processing_iter {
-                    outputs.append(&mut fs::read(file_res.unwrap().path()).unwrap());
-                }
-            }
-            if !outputs.is_empty() {
-                let key = hex_str(
-                    &Arc::clone(&unlocked_state)
-                        .keys_manager
-                        .get_secure_random_bytes(),
-                );
-                unlocked_state
-                    .persister
-                    .write(
-                        "spendable_outputs",
-                        "",
-                        &key,
-                        &WithoutLength(&outputs).encode(),
-                    )
-                    .unwrap();
-                fs::remove_dir_all(&processing_spendables_dir).unwrap();
+
+        // sweep if it's time to
+        let now = OffsetDateTime::now_utc();
+        if now - start > Duration::from_secs(interval_sweep_secs) {
+            tracing::debug!("running periodic sweep");
+            sweep(unlocked_state.clone(), static_state.clone()).await;
+            tracing::debug!("periodic sweep complete");
+            start = OffsetDateTime::now_utc(); // reset offset start
+        }
+    }
+}
+
+async fn sweep(unlocked_state: Arc<UnlockedAppState>, static_state: Arc<StaticState>) {
+    let pending_spendables_dir = format!(
+        "{}/{}",
+        static_state.ldk_data_dir, PENDING_SPENDABLE_OUTPUT_DIR
+    );
+    let processing_spendables_dir =
+        format!("{}/processing_spendable_outputs", static_state.ldk_data_dir);
+    let spendables_dir = format!("{}/spendable_outputs", static_state.ldk_data_dir);
+
+    // shouldn't be needed as lock/shutdown wait for the task to exit
+    if let Ok(dir_iter) = fs::read_dir(&pending_spendables_dir) {
+        // Move any spendable descriptors from pending folder so that we don't have any
+        // races with new files being added.
+        for file_res in dir_iter {
+            let file = file_res.unwrap();
+            // Only move a file if its a 32-byte-hex'd filename, otherwise it might be a
+            // temporary file.
+            if file.file_name().len() == 64 {
+                fs::create_dir_all(&processing_spendables_dir).unwrap();
+                let mut holding_path = PathBuf::new();
+                holding_path.push(&processing_spendables_dir);
+                holding_path.push(&file.file_name());
+                fs::rename(file.path(), holding_path).unwrap();
             }
         }
-        // Iterate over all the sets of spendable outputs in `spendables_dir` and try to claim
-        // them.
-        // Note that here we try to claim each set of spendable outputs over and over again
-        // forever, even long after its been claimed. While this isn't an issue per se, in practice
-        // you may wish to track when the claiming transaction has confirmed and remove the
-        // spendable outputs set. You may also wish to merge groups of unspent spendable outputs to
-        // combine batches.
-        if let Ok(dir_iter) = fs::read_dir(&spendables_dir) {
-            for file_res in dir_iter {
-                let mut outputs: Vec<SpendableOutputDescriptor> = Vec::new();
-                let file_path = file_res.unwrap().path();
-                let mut file = fs::File::open(&file_path).unwrap();
-                loop {
-                    // Check if there are any bytes left to read, and if so read a descriptor.
-                    match file.read_exact(&mut [0; 1]) {
-                        Ok(_) => {
-                            file.seek(SeekFrom::Current(-1)).unwrap();
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                        Err(e) => panic!("{:?}", e),
-                    }
-                    outputs.push(Readable::read(&mut file).unwrap());
-                }
-
-                _spend_outputs(
-                    outputs,
-                    Arc::clone(&unlocked_state),
-                    Arc::clone(&static_state),
-                )
-                .await;
-                // TODO: Removing file for now but should be addressed properly in the future.
-                fs::remove_file(file_path).unwrap();
+        // Now concatenate all the pending files we moved into one file in the
+        // `spendable_outputs` directory and drop the processing directory.
+        let mut outputs = Vec::new();
+        if let Ok(processing_iter) = fs::read_dir(&processing_spendables_dir) {
+            for file_res in processing_iter {
+                outputs.append(&mut fs::read(file_res.unwrap().path()).unwrap());
             }
+        }
+        if !outputs.is_empty() {
+            let key = hex_str(
+                &Arc::clone(&unlocked_state)
+                    .keys_manager
+                    .get_secure_random_bytes(),
+            );
+            unlocked_state
+                .persister
+                .write(
+                    "spendable_outputs",
+                    "",
+                    &key,
+                    &WithoutLength(&outputs).encode(),
+                )
+                .unwrap();
+            fs::remove_dir_all(&processing_spendables_dir).unwrap();
+        }
+    }
+    // Iterate over all the sets of spendable outputs in `spendables_dir` and try to claim
+    // them.
+    // Note that here we try to claim each set of spendable outputs over and over again
+    // forever, even long after its been claimed. While this isn't an issue per se, in practice
+    // you may wish to track when the claiming transaction has confirmed and remove the
+    // spendable outputs set. You may also wish to merge groups of unspent spendable outputs to
+    // combine batches.
+    if let Ok(dir_iter) = fs::read_dir(&spendables_dir) {
+        for file_res in dir_iter {
+            let mut outputs: Vec<SpendableOutputDescriptor> = Vec::new();
+            let file_path = file_res.unwrap().path();
+            let mut file = fs::File::open(&file_path).unwrap();
+            loop {
+                // Check if there are any bytes left to read, and if so read a descriptor.
+                match file.read_exact(&mut [0; 1]) {
+                    Ok(_) => {
+                        file.seek(SeekFrom::Current(-1)).unwrap();
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(e) => panic!("{:?}", e),
+                }
+                outputs.push(Readable::read(&mut file).unwrap());
+            }
+
+            _spend_outputs(
+                outputs,
+                Arc::clone(&unlocked_state),
+                Arc::clone(&static_state),
+            )
+            .await;
+            // TODO: Removing file for now but should be addressed properly in the future.
+            fs::remove_file(file_path).unwrap();
         }
     }
 }
