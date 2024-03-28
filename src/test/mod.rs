@@ -213,7 +213,7 @@ async fn check_payment_status(
     payment_hash: &str,
     expected_status: HTLCStatus,
 ) -> Option<Payment> {
-    println!("checking peyment {payment_hash} is {expected_status:?} on node {node_address}");
+    println!("checking payment {payment_hash} is {expected_status:?} on node {node_address}");
     let payments = list_payments(node_address).await;
     if let Some(payment) = payments.iter().find(|p| p.payment_hash == payment_hash) {
         if payment.status == expected_status {

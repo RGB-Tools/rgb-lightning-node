@@ -14,9 +14,9 @@ async fn multi_hop() {
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
     let test_dir_node3 = format!("{TEST_DIR_BASE}node3");
-    let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
-    let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
-    let (node3_addr, _) = start_node(test_dir_node3, NODE3_PEER_PORT, false).await;
+    let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, false).await;
+    let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, false).await;
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
@@ -46,8 +46,134 @@ async fn multi_hop() {
     let channel_23 = open_channel(node2_addr, &node3_pubkey, NODE3_PEER_PORT, 300, &asset_id).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
 
+    println!("check balances and channels before payment");
+    // check off-chain balances
+    let balance_1 = asset_balance(node1_addr, &asset_id).await;
+    let balance_2 = asset_balance(node2_addr, &asset_id).await;
+    let balance_3 = asset_balance(node3_addr, &asset_id).await;
+    assert_eq!(balance_1.offchain_outbound, 500);
+    assert_eq!(balance_1.offchain_inbound, 0);
+    assert_eq!(balance_2.offchain_outbound, 300);
+    assert_eq!(balance_2.offchain_inbound, 500);
+    assert_eq!(balance_3.offchain_outbound, 0);
+    assert_eq!(balance_3.offchain_inbound, 300);
+    // check channel RGB amounts
+    let chan_1 = list_channels(node1_addr).await;
+    let chan_2 = list_channels(node2_addr).await;
+    let chan_3 = list_channels(node3_addr).await;
+    let chan_12 = chan_1
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_21 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_23 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_32 = chan_3
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    assert_eq!(chan_12.asset_local_amount, Some(500));
+    assert_eq!(chan_12.asset_remote_amount, Some(0));
+    assert_eq!(chan_21.asset_local_amount, Some(0));
+    assert_eq!(chan_21.asset_remote_amount, Some(500));
+    assert_eq!(chan_23.asset_local_amount, Some(300));
+    assert_eq!(chan_23.asset_remote_amount, Some(0));
+    assert_eq!(chan_32.asset_local_amount, Some(0));
+    assert_eq!(chan_32.asset_remote_amount, Some(300));
+
     let LNInvoiceResponse { invoice } = ln_invoice(node3_addr, &asset_id, 50, 900).await;
     let _ = send_payment(node1_addr, invoice).await;
+
+    println!("check balances and channels after payment");
+    // check off-chain balances
+    let balance_1 = asset_balance(node1_addr, &asset_id).await;
+    let balance_2 = asset_balance(node2_addr, &asset_id).await;
+    let balance_3 = asset_balance(node3_addr, &asset_id).await;
+    assert_eq!(balance_1.offchain_outbound, 450);
+    assert_eq!(balance_1.offchain_inbound, 50);
+    assert_eq!(balance_2.offchain_outbound, 300);
+    assert_eq!(balance_2.offchain_inbound, 500);
+    assert_eq!(balance_3.offchain_outbound, 50);
+    assert_eq!(balance_3.offchain_inbound, 250);
+    // check channel RGB amounts
+    let chan_1 = list_channels(node1_addr).await;
+    let chan_2 = list_channels(node2_addr).await;
+    let chan_3 = list_channels(node3_addr).await;
+    let chan_12 = chan_1
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_21 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_23 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_32 = chan_3
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    assert_eq!(chan_12.asset_local_amount, Some(450));
+    assert_eq!(chan_12.asset_remote_amount, Some(50));
+    assert_eq!(chan_21.asset_local_amount, Some(50));
+    assert_eq!(chan_21.asset_remote_amount, Some(450));
+    assert_eq!(chan_23.asset_local_amount, Some(250));
+    assert_eq!(chan_23.asset_remote_amount, Some(50));
+    assert_eq!(chan_32.asset_local_amount, Some(50));
+    assert_eq!(chan_32.asset_remote_amount, Some(250));
+
+    println!("restart all nodes");
+    shutdown(&[node1_addr, node2_addr, node3_addr]).await;
+    let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
+    let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
+    let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
+
+    println!("check balances and channels after nodes have restarted");
+    // check off-chain balances
+    let balance_1 = asset_balance(node1_addr, &asset_id).await;
+    let balance_2 = asset_balance(node2_addr, &asset_id).await;
+    let balance_3 = asset_balance(node3_addr, &asset_id).await;
+    assert_eq!(balance_1.offchain_outbound, 450);
+    assert_eq!(balance_1.offchain_inbound, 50);
+    assert_eq!(balance_2.offchain_outbound, 300);
+    assert_eq!(balance_2.offchain_inbound, 500);
+    assert_eq!(balance_3.offchain_outbound, 50);
+    assert_eq!(balance_3.offchain_inbound, 250);
+    // check channel RGB amounts
+    let chan_1 = list_channels(node1_addr).await;
+    let chan_2 = list_channels(node2_addr).await;
+    let chan_3 = list_channels(node3_addr).await;
+    let chan_12 = chan_1
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_21 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_23 = chan_2
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_32 = chan_3
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    assert_eq!(chan_12.asset_local_amount, Some(450));
+    assert_eq!(chan_12.asset_remote_amount, Some(50));
+    assert_eq!(chan_21.asset_local_amount, Some(50));
+    assert_eq!(chan_21.asset_remote_amount, Some(450));
+    assert_eq!(chan_23.asset_local_amount, Some(250));
+    assert_eq!(chan_23.asset_remote_amount, Some(50));
+    assert_eq!(chan_32.asset_local_amount, Some(50));
+    assert_eq!(chan_32.asset_remote_amount, Some(250));
 
     close_channel(node2_addr, &channel_12.channel_id, &node1_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 550).await;
