@@ -554,7 +554,29 @@ async fn handle_ldk_events(
             fee_earned_msat,
             claim_from_onchain_tx,
             outbound_amount_forwarded_msat,
+            outbound_amount_forwarded_rgb,
         } => {
+            if let Some(amount_rgb) = outbound_amount_forwarded_rgb {
+                let ldk_data_dir_path = Path::new(&static_state.ldk_data_dir);
+                let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
+                let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
+
+                update_rgb_channel_amount(
+                    &prev_channel_id_str,
+                    0,
+                    amount_rgb,
+                    ldk_data_dir_path,
+                    false,
+                );
+                update_rgb_channel_amount(
+                    &next_channel_id_str,
+                    amount_rgb,
+                    0,
+                    ldk_data_dir_path,
+                    false,
+                );
+            }
+
             let read_only_network_graph = unlocked_state.network_graph.read_only();
             let nodes = read_only_network_graph.nodes();
             let channels = unlocked_state.channel_manager.list_channels();
