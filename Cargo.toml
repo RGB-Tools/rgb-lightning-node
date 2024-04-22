@@ -61,7 +61,8 @@ rgb_core = { package = "rgb-core", version = "=0.10.8" }
 strict_encoding = "=2.6.1"
 strict_types = "=1.6.3"
 
-amplify_num = "=0.5.1"
+amplify_num = "=0.5.1" # temporary dependency pin
+aluvm = "=0.10.6" # temporary dependency pin
 
 [dev-dependencies]
 dircmp = "0.2.0"
