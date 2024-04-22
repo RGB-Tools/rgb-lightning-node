@@ -28,6 +28,7 @@ async fn refuse_high_fees() {
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
+    fund_and_create_utxos(node3_addr).await;
 
     let asset_id = issue_asset(node1_addr).await;
 
@@ -45,23 +46,24 @@ async fn refuse_high_fees() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 600);
 
     let _channel_12 =
-        open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
+        open_colored_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
-    let _channel_23 = open_channel_with_custom_fees(
+    let _channel_23 = open_colored_channel_custom_btc_amount(
         node2_addr,
         &node3_pubkey,
         NODE3_PEER_PORT,
         300,
         &asset_id,
+        100_000,
         Some(2_000_000),
         None,
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node3_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } = ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await;
 
     let file = File::open(

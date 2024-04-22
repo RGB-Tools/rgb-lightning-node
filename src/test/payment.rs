@@ -1,7 +1,6 @@
 use crate::routes::BitcoinNetwork;
 
 use super::*;
-
 const TEST_DIR_BASE: &str = "tmp/payment/";
 const NODE1_PEER_PORT: u16 = 9821;
 const NODE2_PEER_PORT: u16 = 9822;
@@ -19,7 +18,7 @@ async fn payment() {
     let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
     let (node3_addr, _) = start_node(test_dir_node3, NODE3_PEER_PORT, false).await;
-
+    
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
     fund_and_create_utxos(node3_addr).await;
@@ -29,11 +28,13 @@ async fn payment() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
+    let channel =
+        open_colored_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 100, 900).await;
-    send_payment_with_ln_balance(node1_addr, node2_addr, invoice.clone(), 600, 0).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node2_addr, None, Some(&asset_id), Some(100), 900).await;
+    let _ = send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
     assert_eq!(decoded.expiry_sec, 900);
@@ -44,13 +45,16 @@ async fn payment() {
     let status = invoice_status(node2_addr, &invoice).await;
     assert!(matches!(status, InvoiceStatus::Succeeded));
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node1_addr, &asset_id, 50, 900).await;
-    send_payment_with_ln_balance(node2_addr, node1_addr, invoice.clone(), 100, 500).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
+    let _ = send_payment(node2_addr, invoice.clone()).await;
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node2_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment(node1_addr, invoice.clone()).await;
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node1_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment(node2_addr, invoice.clone()).await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;

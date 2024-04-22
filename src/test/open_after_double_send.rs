@@ -46,10 +46,12 @@ async fn open_after_double_send() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 700);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 300);
 
-    let channel = open_channel(node2_addr, &node1_pubkey, NODE1_PEER_PORT, 250, &asset_id).await;
+    let channel =
+        open_colored_channel(node2_addr, &node1_pubkey, NODE1_PEER_PORT, 250, &asset_id).await;
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node1_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment(node2_addr, invoice).await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;

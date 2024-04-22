@@ -1,10 +1,16 @@
 use amplify::s;
 use bdk::keys::bip39::Mnemonic;
+use bitcoin::hashes::hex::ToHex;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use futures::Future;
+use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::SocketAddress;
-use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
+use lightning::rgb_utils::{get_rgb_channel_info_pending, BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
+use lightning::routing::router::{
+    Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
+    DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
+};
 use lightning::{
     onion_message::OnionMessageContents,
     sign::KeysManager,
@@ -13,6 +19,7 @@ use lightning::{
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use reqwest::Client as RestClient;
+use rgb_core::ContractId;
 use rgb_lib::wallet::{Online, Wallet as RgbLibWallet};
 use std::{
     fmt::Write,
@@ -21,12 +28,14 @@ use std::{
     path::Path,
     str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::ldk::Router;
+use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::LdkUserInfo,
     bitcoind::BitcoindClient,
@@ -34,7 +43,7 @@ use crate::{
     error::{APIError, AppError},
     ldk::{
         BumpTxEventHandler, ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices,
-        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager,
+        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager, TradeMap,
     },
     rgb::get_bitcoin_network,
 };
@@ -105,8 +114,11 @@ pub(crate) struct UnlockedAppState {
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) persister: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
+    pub(crate) maker_trades: Arc<Mutex<TradeMap>>,
+    pub(crate) taker_trades: Arc<Mutex<TradeMap>>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
+    pub(crate) router: Arc<Router>,
 }
 
 impl UnlockedAppState {
@@ -116,6 +128,14 @@ impl UnlockedAppState {
 
     pub(crate) fn get_outbound_payments(&self) -> MutexGuard<OutboundPaymentInfoStorage> {
         self.outbound_payments.lock().unwrap()
+    }
+
+    pub(crate) fn get_maker_trades(&self) -> MutexGuard<TradeMap> {
+        self.maker_trades.lock().unwrap()
+    }
+
+    pub(crate) fn get_taker_trades(&self) -> MutexGuard<TradeMap> {
+        self.taker_trades.lock().unwrap()
     }
 
     pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {
@@ -417,4 +437,69 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         changing_state: Mutex::new(false),
         periodic_sweep: Arc::new(TokioMutex::new(None)),
     }))
+}
+
+pub fn get_current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+pub fn get_max_local_rgb_amount<'r>(
+    contract_id: ContractId,
+    ldk_data_dir_path: &Path,
+    channels: impl Iterator<Item = &'r ChannelDetails>,
+) -> u64 {
+    let mut max_balance = 0;
+    for chan_info in channels {
+        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
+        if !info_file_path.exists() {
+            continue;
+        }
+        let (rgb_info, _) = get_rgb_channel_info_pending(&chan_info.channel_id, ldk_data_dir_path);
+        if rgb_info.contract_id == contract_id && rgb_info.local_rgb_amount > max_balance {
+            max_balance = rgb_info.local_rgb_amount;
+        }
+    }
+
+    max_balance
+}
+
+pub(crate) fn get_route(
+    channel_manager: &crate::ldk::ChannelManager,
+    router: &crate::ldk::Router,
+    start: PublicKey,
+    dest: PublicKey,
+    final_value_msat: Option<u64>,
+    asset_id: Option<ContractId>,
+    hints: Vec<RouteHint>,
+) -> Option<Route> {
+    let inflight_htlcs = channel_manager.compute_inflight_htlcs();
+    let payment_params = PaymentParameters {
+        payee: Payee::Clear {
+            node_id: dest,
+            route_hints: hints,
+            features: None,
+            final_cltv_expiry_delta: DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
+        },
+        expiry_time: None,
+        max_total_cltv_expiry_delta: DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
+        max_path_count: 1,
+        max_channel_saturation_power_of_half: 2,
+        previously_failed_channels: vec![],
+    };
+    let route = router.find_route(
+        &start,
+        &RouteParameters {
+            payment_params,
+            final_value_msat: final_value_msat.unwrap_or(HTLC_MIN_MSAT),
+            max_total_routing_fee_msat: None,
+        },
+        None,
+        inflight_htlcs,
+        asset_id,
+    );
+
+    route.ok()
 }

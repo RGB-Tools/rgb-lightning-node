@@ -3408,6 +3408,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-extra",
+ "baid58",
  "base64 0.13.1",
  "bdk 0.28.2",
  "bech32 0.8.1",

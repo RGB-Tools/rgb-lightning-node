@@ -13,16 +13,17 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest, Channel,
-    CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
-    DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
-    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
-    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse,
-    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsResponse,
-    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListUnspentsResponse,
-    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
-    SendPaymentResponse, UnlockRequest, Unspent,
+    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest,
+    BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
+    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
+    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
+    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest,
+    IssueAssetResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
+    ListTradesResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
+    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
+    SendPaymentRequest, SendPaymentResponse, TakerRequest, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -167,6 +168,21 @@ async fn start_node(
     (node_address, password)
 }
 
+async fn btc_balance(node_address: SocketAddr) -> u64 {
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/btcbalance", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<BtcBalanceResponse>()
+        .await
+        .unwrap()
+        .vanilla
+        .spendable
+}
+
 async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalanceResponse {
     println!("getting balance for asset {asset_id} on node {node_address}");
     let payload = AssetBalanceRequest {
@@ -187,6 +203,28 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalance
 
 async fn asset_balance_spendable(node_address: SocketAddr, asset_id: &str) -> u64 {
     asset_balance(node_address, asset_id).await.spendable
+}
+
+async fn ln_asset_balance(node_address: SocketAddr, asset_id: &str) -> u64 {
+    let payload = AssetBalanceRequest {
+        asset_id: asset_id.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/assetbalance", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<AssetBalanceResponse>()
+        .await
+        .unwrap()
+        .offchain_outbound
+}
+
+async fn asset_balance_offchain_outbound(node_address: SocketAddr, asset_id: &str) -> u64 {
+    asset_balance(node_address, asset_id).await.offchain_outbound
 }
 
 async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
@@ -429,24 +467,20 @@ async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
         .peers
 }
 
-async fn asset_balance_offchain_outbound(node_address: SocketAddr, asset_id: &str) -> u64 {
-    asset_balance(node_address, asset_id)
-        .await
-        .offchain_outbound
-}
 
 async fn ln_invoice(
     node_address: SocketAddr,
-    asset_id: &str,
-    asset_amount: u64,
+    amt_msat: Option<u64>,
+    asset_id: Option<&str>,
+    asset_amount: Option<u64>,
     expiry_sec: u32,
 ) -> LNInvoiceResponse {
-    println!("generating invoice for {asset_amount} of asset {asset_id} for node {node_address}");
+    let amt_msat = amt_msat.unwrap_or(3000000);
     let payload = LNInvoiceRequest {
-        amt_msat: Some(3000000),
+        amt_msat: Some(amt_msat),
         expiry_sec,
-        asset_id: Some(asset_id.to_string()),
-        asset_amount: Some(asset_amount),
+        asset_id: asset_id.map(|a| a.to_string()),
+        asset_amount,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/lninvoice", node_address))
@@ -500,18 +534,16 @@ async fn _with_ln_balance_checks(
 async fn keysend_raw(
     node_address: SocketAddr,
     dest_pubkey: &str,
-    asset_id: &str,
-    asset_amount: u64,
+    amt_msat: Option<u64>,
+    asset_id: Option<String>,
+    asset_amount: Option<u64>,    
 ) -> KeysendResponse {
-    println!(
-        "sending spontaneously {asset_amount} of asset {asset_id} from node {node_address} \
-         to {dest_pubkey}"
-    );
+    amt_msat.unwrap_or(3000000);
     let payload = KeysendRequest {
         dest_pubkey: dest_pubkey.to_string(),
-        amt_msat: 3000000,
-        asset_id: asset_id.to_string(),
-        asset_amount,
+        amt_msat: amt_msat.expect("amt_msat is required"),
+        asset_id: asset_id,
+        asset_amount: asset_amount,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/keysend", node_address))
@@ -529,34 +561,12 @@ async fn keysend_raw(
 async fn keysend(
     node_address: SocketAddr,
     dest_pubkey: &str,
-    asset_id: &str,
-    asset_amount: u64,
+    amt_msat: Option<u64>,
+    asset_id: Option<String>,
+    asset_amount: Option<u64>,
 ) -> Payment {
-    let keysend = keysend_raw(node_address, dest_pubkey, asset_id, asset_amount).await;
+    let keysend = keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
     wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
-}
-
-async fn keysend_with_ln_balance(
-    node_address: SocketAddr,
-    counterparty_node_address: SocketAddr,
-    dest_pubkey: &str,
-    asset_id: &str,
-    asset_amount: u64,
-    initial_ln_balance: u64,
-    counterparty_initial_ln_balance: u64,
-) {
-    let res = keysend_raw(node_address, dest_pubkey, asset_id, asset_amount).await;
-
-    _with_ln_balance_checks(
-        node_address,
-        counterparty_node_address,
-        asset_id,
-        asset_amount,
-        initial_ln_balance,
-        counterparty_initial_ln_balance,
-        &res.payment_hash,
-    )
-    .await;
 }
 
 async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
@@ -572,12 +582,34 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
         .unwrap()
 }
 
-async fn open_channel_with_custom_fees(
+async fn open_colored_channel(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: u16,
     asset_amount: u64,
     asset_id: &str,
+) -> Channel {
+    let capacity_sat = 30010;
+    open_colored_channel_custom_btc_amount(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        asset_amount,
+        asset_id,
+        capacity_sat,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn open_colored_channel_custom_btc_amount(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: u16,
+    asset_amount: u64,
+    asset_id: &str,
+    btc_amount: u64,
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
 ) -> Channel {
@@ -588,10 +620,10 @@ async fn open_channel_with_custom_fees(
     stop_mining();
     let payload = OpenChannelRequest {
         peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
-        capacity_sat: 100_000,
-        push_msat: 3_500_000,
-        asset_amount,
-        asset_id: asset_id.to_string(),
+        capacity_sat: btc_amount,
+        push_msat: 2130000,
+        asset_amount: Some(asset_amount),
+        asset_id: Some(asset_id.to_string()),
         public: true,
         with_anchors: true,
         fee_base_msat,
@@ -653,19 +685,71 @@ async fn open_channel(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: u16,
-    asset_amount: u64,
-    asset_id: &str,
+    capacity_sat: u64,
+    push_msat: u64,
 ) -> Channel {
-    open_channel_with_custom_fees(
-        node_address,
-        dest_peer_pubkey,
-        dest_peer_port,
-        asset_amount,
-        asset_id,
-        None,
-        None,
-    )
-    .await
+    stop_mining();
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
+        capacity_sat,
+        push_msat,
+        public: true,
+        with_anchors: true,
+        asset_amount: None,
+        asset_id: None,
+        fee_base_msat: None,
+        fee_proportional_millionths: None
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<OpenChannelResponse>()
+        .await
+        .unwrap();
+
+    let t_0 = OffsetDateTime::now_utc();
+    let mut channel_id = None;
+    let mut channel_funded = false;
+    while !channel_funded {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node_address).await;
+        if let Some(channel) = channels.iter().find(|c| c.peer_pubkey == dest_peer_pubkey) {
+            if channel.funding_txid.is_some() {
+                let txout = get_txout(channel.funding_txid.as_ref().unwrap());
+                if !txout.is_empty() {
+                    mine_n_blocks(true, 6);
+                    channel_id = Some(channel.channel_id.clone());
+                    channel_funded = true;
+                    continue;
+                }
+            }
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 50.0 {
+            panic!("cannot find funding TX")
+        }
+    }
+    let channel_id = channel_id.unwrap();
+
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node_address).await;
+        let channel = channels
+            .iter()
+            .find(|c| c.channel_id == channel_id)
+            .unwrap();
+        if channel.ready {
+            return channel.clone();
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("channel is taking too long to be ready")
+        }
+    }
 }
 
 async fn list_assets(node_address: SocketAddr) -> Vec<Asset> {
@@ -728,6 +812,15 @@ async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
         .unspents
 }
 
+async fn list_trades(node_address: SocketAddr) -> ListTradesResponse {
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/listtrades", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res).await.json().await.unwrap()
+}
+
 async fn lock(node_address: SocketAddr) {
     println!("locking node {node_address}");
     let res = reqwest::Client::new()
@@ -740,6 +833,64 @@ async fn lock(node_address: SocketAddr) {
         .json::<EmptyResponse>()
         .await
         .unwrap();
+}
+
+async fn maker_execute(
+    node_address: SocketAddr,
+    swapstring: String,
+    payment_secret: String,
+    taker_pubkey: String,
+) {
+    let payload = MakerExecuteRequest {
+        swapstring,
+        payment_secret,
+        taker_pubkey,
+    };
+    let swapstring_str = &payload.swapstring.clone();
+    println!(
+        "executing maker swap with swapstring {swapstring_str} for node {node_address}"
+    );
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/makerexecute", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    let _ = _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await;
+}
+
+async fn maker_init(
+    node_address: SocketAddr,
+    qty_from: u64,
+    from_asset: Option<&str>,
+    qty_to: u64,
+    to_asset: Option<&str>,
+    timeout_sec: u32,
+) -> MakerInitResponse {
+    let payload = MakerInitRequest {
+        qty_from,
+        qty_to,
+        from_asset: from_asset.map(|a| a.into()),
+        to_asset: to_asset.map(|a| a.into()),
+        timeout_sec,
+    };
+    println!(
+        "initializing maker swap"
+    );
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/makerinit", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<MakerInitResponse>()
+        .await
+        .unwrap()
 }
 
 async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbInvoiceResponse {
@@ -880,6 +1031,22 @@ async fn send_payment_with_status(
     wait_for_ln_payment(node_address, &send_payment.payment_hash, expected_status).await
 }
 
+async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
+    let payload = TakerRequest { swapstring };
+    println!("taker whitelisting swapstring");
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/taker", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap()
+}
+
 async fn unlock(node_address: SocketAddr, password: &str) {
     println!("unlocking node {node_address}");
     let payload = UnlockRequest {
@@ -923,11 +1090,12 @@ async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if asset_balance_offchain_outbound(node_address, asset_id).await == expected_balance {
+        let asset_balance = asset_balance_offchain_outbound(node_address, asset_id).await;
+        if asset_balance == expected_balance {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
-            panic!("balance is not becoming the expected one ({expected_balance})");
+            panic!("current balance ({asset_balance}) is not becoming the expected one ({expected_balance})");
         }
     }
 }
@@ -948,7 +1116,7 @@ async fn wait_for_ln_payment(
         {
             return payment;
         }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
             panic!("cannot find successful payment")
         }
     }
@@ -1115,6 +1283,7 @@ mod backup_and_restore;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
 mod close_coop_standard;
+mod close_coop_vanilla;
 mod close_coop_zero_balance;
 mod close_force_nobtc_acceptor;
 mod close_force_other_side;
@@ -1127,3 +1296,13 @@ mod payment;
 mod refuse_high_fees;
 mod restart;
 mod send_receive;
+mod swap_roundtrip_assets;
+mod swap_roundtrip_buy;
+mod swap_roundtrip_fail_amount_maker;
+mod swap_roundtrip_fail_amount_taker;
+mod swap_roundtrip_fail_timeout;
+mod swap_roundtrip_fail_whitelist;
+mod swap_roundtrip_multihop_asset_asset;
+mod swap_roundtrip_multihop_buy;
+mod swap_roundtrip_multihop_sell;
+mod swap_roundtrip_sell;

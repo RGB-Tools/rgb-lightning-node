@@ -22,6 +22,9 @@ pub enum APIError {
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
+    #[error("The swap offer has expired")]
+    ExpiredSwapOffer,
+
     #[error("Failed closing channel: {0}")]
     FailedClosingChannel(String),
 
@@ -40,6 +43,9 @@ pub enum APIError {
     #[error("Failed to open channel: {0}")]
     FailedOpenChannel(String),
 
+    #[error("Failed payment: {0}")]
+    FailedPayment(String),
+
     #[error("Failed to connect to peer")]
     FailedPeerConnection,
 
@@ -52,8 +58,11 @@ pub enum APIError {
     #[error("Failed to start LDK: {0}")]
     FailedStartingLDK(String),
 
-    #[error("Not enough assets, available: {0}")]
-    InsufficientAssets(u64),
+    #[error("For an RGB operation both asset_id and asset_amount must be set")]
+    IncompleteRGBInfo,
+
+    #[error("Not enough assets, available: {0}, requested: {1}")]
+    InsufficientAssets(u64, u64),
 
     #[error("Not enough funds, call getaddress and send {0} satoshis")]
     InsufficientFunds(u64),
@@ -88,6 +97,9 @@ pub enum APIError {
     #[error("Invalid onion data: {0}")]
     InvalidOnionData(String),
 
+    #[error("Invalid payment secret")]
+    InvalidPaymentSecret,
+
     #[error("Invalid password: {0}")]
     InvalidPassword(String),
 
@@ -99,6 +111,9 @@ pub enum APIError {
 
     #[error("Invalid pubkey")]
     InvalidPubkey,
+
+    #[error("Invalid swap string '{0}': {1}")]
+    InvalidSwapString(String, String),
 
     #[error("Invalid ticker: {0}")]
     InvalidTicker(String),
@@ -118,8 +133,14 @@ pub enum APIError {
     #[error("Node is locked (hint: call unlock)")]
     LockedNode,
 
+    #[error("Unable to find payment preimage, be sure you've provided the correct swap info")]
+    MissingSwapPaymentPreimage,
+
     #[error("No uncolored UTXOs are available (hint: call createutxos)")]
     NoAvailableUtxos,
+
+    #[error("No route found")]
+    NoRoute,
 
     #[error("Wallet has not been initialized (hint: call init)")]
     NotInitialized,
@@ -164,6 +185,7 @@ impl IntoResponse for APIError {
             | APIError::FailedKeysCreation(_, _)
             | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
+            | APIError::FailedPayment(_)
             | APIError::FailedPeerConnection
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
@@ -172,6 +194,8 @@ impl IntoResponse for APIError {
             | APIError::Proxy(_)
             | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             APIError::AnchorsRequired
+            | APIError::ExpiredSwapOffer
+            | APIError::IncompleteRGBInfo
             | APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath
@@ -182,13 +206,16 @@ impl IntoResponse for APIError {
             | APIError::InvalidName(_)
             | APIError::InvalidNodeIds(_)
             | APIError::InvalidOnionData(_)
+            | APIError::InvalidPaymentSecret
             | APIError::InvalidPassword(_)
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
+            | APIError::InvalidSwapString(_, _)
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string())
@@ -197,10 +224,11 @@ impl IntoResponse for APIError {
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::ChangingState
-            | APIError::InsufficientAssets(_)
+            | APIError::InsufficientAssets(_, _)
             | APIError::InsufficientFunds(_)
             | APIError::LockedNode
             | APIError::NoAvailableUtxos
+            | APIError::NoRoute
             | APIError::NotInitialized
             | APIError::RecipientIDAlreadyUsed
             | APIError::UnknownContractId

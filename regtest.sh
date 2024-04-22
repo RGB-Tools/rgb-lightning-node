@@ -31,6 +31,10 @@ _start_services() {
     done
     $COMPOSE up -d
     echo && echo "preparing bitcoind wallet"
+    # wait for bitcoind to be up
+    until $COMPOSE logs bitcoind |grep -q 'Bound to'; do
+        sleep 1
+    done
     $BITCOIN_CLI createwallet miner >/dev/null
     $BITCOIN_CLI -rpcwallet=miner -generate $INITIAL_BLOCKS >/dev/null
     export HEIGHT=$INITIAL_BLOCKS

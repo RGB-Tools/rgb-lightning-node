@@ -29,10 +29,18 @@ async fn close_force_other_side() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
+    let channel =
+        open_colored_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
+    keysend(
+        node1_addr,
+        &node2_pubkey,
+        Some(3000000),
+        Some(asset_id.clone()),
+        Some(100),
+    )
+    .await;
 
     close_channel(node2_addr, &channel.channel_id, &node1_pubkey, true).await;
     wait_for_balance(node1_addr, &asset_id, 900).await;
