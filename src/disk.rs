@@ -13,13 +13,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::APIError;
-use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage};
+use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, TradeMap};
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
 pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
 
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
+
+pub(crate) const MAKER_TRADES_FNAME: &str = "maker_trades";
+pub(crate) const TAKER_TRADES_FNAME: &str = "taker_trades";
 
 pub(crate) const PENDING_SPENDABLE_OUTPUT_DIR: &str = "pending_spendable_outputs";
 
@@ -119,6 +122,17 @@ pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStor
     }
     OutboundPaymentInfoStorage {
         payments: HashMap::new(),
+    }
+}
+
+pub(crate) fn read_trades_info(path: &Path) -> TradeMap {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = TradeMap::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    TradeMap {
+        trades: HashMap::new(),
     }
 }
 

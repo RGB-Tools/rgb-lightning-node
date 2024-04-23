@@ -39,11 +39,29 @@ async fn multi_hop() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 600);
 
-    let channel_12 = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
+    let channel_12 = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        NODE2_PEER_PORT,
+        None,
+        None,
+        Some(500),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
-    let channel_23 = open_channel(node2_addr, &node3_pubkey, NODE3_PEER_PORT, 300, &asset_id).await;
+    let channel_23 = open_channel(
+        node2_addr,
+        &node3_pubkey,
+        NODE3_PEER_PORT,
+        None,
+        None,
+        Some(300),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
 
     println!("check balances and channels before payment");
@@ -86,7 +104,8 @@ async fn multi_hop() {
     assert_eq!(chan_32.asset_local_amount, Some(0));
     assert_eq!(chan_32.asset_remote_amount, Some(300));
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node3_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment(node1_addr, invoice).await;
 
     println!("check balances and channels after payment");

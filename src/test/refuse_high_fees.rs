@@ -44,8 +44,16 @@ async fn refuse_high_fees() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 600);
 
-    let _channel_12 =
-        open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
+    let _channel_12 = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        NODE2_PEER_PORT,
+        None,
+        None,
+        Some(500),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
@@ -53,15 +61,18 @@ async fn refuse_high_fees() {
         node2_addr,
         &node3_pubkey,
         NODE3_PEER_PORT,
-        300,
-        &asset_id,
+        None,
+        None,
+        Some(300),
+        Some(&asset_id),
         Some(2_000_000),
         None,
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node3_addr, &asset_id, 50, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await;
 
     let file = File::open(

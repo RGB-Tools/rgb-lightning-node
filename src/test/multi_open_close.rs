@@ -27,19 +27,37 @@ async fn multi_open_close() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
+    let channel = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        NODE2_PEER_PORT,
+        None,
+        None,
+        Some(600),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
+    keysend(node1_addr, &node2_pubkey, None, Some(&asset_id), Some(100)).await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 900).await;
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 500, &asset_id).await;
+    let channel = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        NODE2_PEER_PORT,
+        None,
+        None,
+        Some(500),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    keysend(node1_addr, &node2_pubkey, &asset_id, 100).await;
+    keysend(node1_addr, &node2_pubkey, None, Some(&asset_id), Some(100)).await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
 

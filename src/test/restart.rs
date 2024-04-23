@@ -41,7 +41,16 @@ async fn restart() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    let channel = open_channel(node1_addr, &node2_pubkey, NODE2_PEER_PORT, 600, &asset_id).await;
+    let channel = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        NODE2_PEER_PORT,
+        None,
+        None,
+        Some(600),
+        Some(&asset_id),
+    )
+    .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     println!("3 - restart 1");
@@ -83,7 +92,8 @@ async fn restart() {
     }
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, &asset_id, 100, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node2_addr, None, Some(&asset_id), Some(100), 900).await;
     let send_payment = send_payment(node1_addr, invoice).await;
 
     println!("5 - restart 1+2");
