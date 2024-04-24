@@ -1,12 +1,11 @@
 use amplify::s;
 use bdk::keys::bip39::Mnemonic;
-use bitcoin::hashes::hex::ToHex;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use futures::Future;
 use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::SocketAddress;
-use lightning::rgb_utils::{parse_rgb_channel_info, BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
+use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, ELECTRUM_URL_FNAME};
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
@@ -35,6 +34,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::ldk::Router;
+use crate::rgb::get_rgb_channel_info_optional;
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::LdkUserInfo,
@@ -453,13 +453,12 @@ pub fn get_max_local_rgb_amount<'r>(
 ) -> u64 {
     let mut max_balance = 0;
     for chan_info in channels {
-        let info_file_path = ldk_data_dir_path.join(chan_info.channel_id.to_hex());
-        if !info_file_path.exists() {
-            continue;
-        }
-        let rgb_info = parse_rgb_channel_info(&info_file_path);
-        if rgb_info.contract_id == contract_id && rgb_info.local_rgb_amount > max_balance {
-            max_balance = rgb_info.local_rgb_amount;
+        if let Some((rgb_info, _)) =
+            get_rgb_channel_info_optional(&chan_info.channel_id, ldk_data_dir_path, false)
+        {
+            if rgb_info.contract_id == contract_id && rgb_info.local_rgb_amount > max_balance {
+                max_balance = rgb_info.local_rgb_amount;
+            }
         }
     }
 

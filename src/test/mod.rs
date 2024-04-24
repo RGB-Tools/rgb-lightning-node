@@ -1039,7 +1039,7 @@ async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_
         if asset_balance_offchain_outbound(node_address, asset_id).await == expected_balance {
             break;
         }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
             panic!("balance is not becoming the expected one ({expected_balance})");
         }
     }

@@ -35,7 +35,6 @@ use rgbstd::Txid as RgbTxid;
 use rgbwallet::psbt::opret::OutputOpret;
 use rgbwallet::psbt::{PsbtDbc, RgbExt, RgbInExt};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -441,11 +440,12 @@ impl WalletSource for RgbLibWalletWrapper {
 pub fn get_rgb_channel_info_optional(
     channel_id: &ChannelId,
     ldk_data_dir: &Path,
+    pending: bool,
 ) -> Option<(RgbInfo, PathBuf)> {
     if !is_channel_rgb(channel_id, ldk_data_dir) {
         return None;
     }
-    let info_file_path = get_rgb_channel_info_path(&channel_id.to_hex(), &ldk_data_dir, false);
+    let info_file_path = get_rgb_channel_info_path(&channel_id.to_hex(), ldk_data_dir, pending);
     let rgb_info = parse_rgb_channel_info(&info_file_path);
     Some((rgb_info, info_file_path))
 }

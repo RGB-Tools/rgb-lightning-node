@@ -1101,6 +1101,7 @@ pub(crate) async fn keysend(
                     contract_id,
                     rgb_amount,
                     true,
+                    false,
                 );
             }
             (None, None) => {}
@@ -1564,7 +1565,8 @@ pub(crate) async fn maker_execute(
             .list_usable_channels()
             .iter()
             .filter(|details| {
-                match get_rgb_channel_info_optional(&details.channel_id, &ldk_data_dir_path) {
+                match get_rgb_channel_info_optional(&details.channel_id, &ldk_data_dir_path, false)
+                {
                     _ if swap.is_from_btc() => true,
                     Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap.from_asset => true,
                     _ => false,
@@ -1677,6 +1679,7 @@ pub(crate) async fn maker_execute(
                 swap.to_asset.unwrap(),
                 swap.qty_to,
                 false,
+                false,
             );
         }
 
@@ -1769,7 +1772,7 @@ pub(crate) async fn maker_init(
 
         let (payment_hash, payment_secret) = unlocked_state
             .channel_manager
-            .create_inbound_payment(Some(546000), payload.timeout_sec, None)
+            .create_inbound_payment(Some(DUST_LIMIT_MSAT), payload.timeout_sec, None)
             .unwrap();
         unlocked_state.add_maker_trade(payment_hash, swap);
 
@@ -2172,6 +2175,7 @@ pub(crate) async fn send_payment(
                 rgb_contract_id,
                 rgb_amount,
                 true,
+                false,
             ),
             (None, None) => {}
             (Some(_), None) => {

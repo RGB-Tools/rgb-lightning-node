@@ -327,15 +327,18 @@ pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
 fn _update_rgb_channel_amount(ldk_data_dir: &str, payment_hash: &PaymentHash, receiver: bool) {
     let ldk_data_dir_path = PathBuf::from(ldk_data_dir);
     let payment_hash_str = hex_str(&payment_hash.0);
-    let mut found = false;
     for entry in fs::read_dir(&ldk_data_dir_path).unwrap() {
         let file = entry.unwrap();
         let file_name = file.file_name();
         let file_name_str = file_name.to_string_lossy();
         if file_name_str.contains(&payment_hash_str) && file_name_str != payment_hash_str {
-            found = true;
             let rgb_payment_info = parse_rgb_payment_info(&file.path());
             let channel_id_str = file_name_str.replace(&payment_hash_str, "");
+
+            if !rgb_payment_info.override_route_amount && receiver != rgb_payment_info.inbound {
+                continue;
+            }
+
             let (offered, received) = if receiver {
                 (0, rgb_payment_info.amount)
             } else {
@@ -350,9 +353,6 @@ fn _update_rgb_channel_amount(ldk_data_dir: &str, payment_hash: &PaymentHash, re
             );
             break;
         }
-    }
-    if !found {
-        unreachable!("file missing indicates a logic bug");
     }
 }
 
@@ -623,23 +623,26 @@ async fn handle_ldk_events(
             claim_from_onchain_tx,
             outbound_amount_forwarded_msat,
             outbound_amount_forwarded_rgb,
+            inbound_amount_forwarded_rgb,
         } => {
-            if let Some(amount_rgb) = outbound_amount_forwarded_rgb {
-                let ldk_data_dir_path = Path::new(&static_state.ldk_data_dir);
-                let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
-                let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
+            let ldk_data_dir_path = Path::new(&static_state.ldk_data_dir);
+            let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
+            let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
+            if let Some(outbound_amount_forwarded_rgb) = outbound_amount_forwarded_rgb {
                 update_rgb_channel_amount(
-                    &prev_channel_id_str,
+                    &next_channel_id_str,
+                    outbound_amount_forwarded_rgb,
                     0,
-                    amount_rgb,
                     ldk_data_dir_path,
                     false,
                 );
+            }
+            if let Some(inbound_amount_forwarded_rgb) = inbound_amount_forwarded_rgb {
                 update_rgb_channel_amount(
-                    &next_channel_id_str,
-                    amount_rgb,
+                    &prev_channel_id_str,
                     0,
+                    inbound_amount_forwarded_rgb,
                     ldk_data_dir_path,
                     false,
                 );
@@ -855,6 +858,7 @@ async fn handle_ldk_events(
                 get_rgb_channel_info_optional(
                     channel_id,
                     &PathBuf::from(&static_state.ldk_data_dir),
+                    true,
                 )
                 .map(|(rgb_info, _)| {
                     (

@@ -47,7 +47,7 @@ async fn swap_roundtrip_assets() {
         NODE2_PEER_PORT,
         None,
         None,
-        Some(100),
+        Some(150),
         Some(&asset_id_2),
     )
     .await;
@@ -92,5 +92,8 @@ async fn swap_roundtrip_assets() {
     )
     .await;
 
+    wait_for_ln_balance(node1_addr, &asset_id_1, 590).await;
+    wait_for_ln_balance(node1_addr, &asset_id_2, 50).await;
     wait_for_ln_balance(node2_addr, &asset_id_1, 10).await;
+    wait_for_ln_balance(node2_addr, &asset_id_2, 100).await;
 }
