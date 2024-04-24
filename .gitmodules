@@ -4,8 +4,8 @@
 	shallow = true
 [submodule "rust-lightning"]
 	path = rust-lightning
-	url = https://github.com/danielabrozzoni/rust-lightning-rgb.git
-	branch = node-swaps
+	url = https://github.com/RGB-Tools/rust-lightning.git
+	branch = rgb
 	shallow = true
 [submodule "rgb-wallet"]
 	path = rgb-wallet
