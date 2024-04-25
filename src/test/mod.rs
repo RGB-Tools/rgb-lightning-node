@@ -490,7 +490,7 @@ async fn _with_ln_balance_checks(
     payment_hash: &str,
 ) {
     if let Some(asset_id) = &asset_id {
-        let ln_balance_rgb = asset_balance_offchain_outbound(node_address, &asset_id).await;
+        let ln_balance_rgb = asset_balance_offchain_outbound(node_address, asset_id).await;
         assert_eq!(ln_balance_rgb, initial_ln_balance_rgb.unwrap());
     }
     check_payment_status(node_address, payment_hash, HTLCStatus::Pending)
@@ -498,7 +498,7 @@ async fn _with_ln_balance_checks(
         .unwrap();
     if let Some(asset_id) = &asset_id {
         let counterparty_ln_balance_rgb =
-            asset_balance_offchain_outbound(counterparty_node_address, &asset_id).await;
+            asset_balance_offchain_outbound(counterparty_node_address, asset_id).await;
         assert_eq!(
             counterparty_ln_balance_rgb,
             counterparty_initial_ln_balance_rgb.unwrap()
@@ -507,7 +507,7 @@ async fn _with_ln_balance_checks(
 
     if let Some(asset_id) = &asset_id {
         let final_ln_balance_rgb = initial_ln_balance_rgb.unwrap() - asset_amount.unwrap();
-        wait_for_ln_balance(node_address, &asset_id, final_ln_balance_rgb).await;
+        wait_for_ln_balance(node_address, asset_id, final_ln_balance_rgb).await;
     }
     wait_for_ln_payment(node_address, payment_hash, HTLCStatus::Succeeded).await;
     if let Some(asset_id) = &asset_id {
@@ -515,7 +515,7 @@ async fn _with_ln_balance_checks(
             counterparty_initial_ln_balance_rgb.unwrap() + asset_amount.unwrap();
         wait_for_ln_balance(
             counterparty_node_address,
-            &asset_id,
+            asset_id,
             counterparty_final_ln_balance,
         )
         .await;
@@ -666,6 +666,7 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
         .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn open_channel_with_custom_fees(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
