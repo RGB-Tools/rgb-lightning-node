@@ -41,21 +41,38 @@ async fn payment() {
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
+    let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), Some(100), 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
     send_payment_with_ln_balance(node1_addr, node2_addr, invoice.clone(), Some(600), Some(0)).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
     assert_eq!(decoded.expiry_sec, 900);
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
-    assert_eq!(decoded.asset_amount, Some(100));
+    assert_eq!(decoded.asset_amount, asset_amount);
     assert_eq!(decoded.payee_pubkey, Some(node2_pubkey.clone()));
     assert!(matches!(decoded.network, BitcoinNetwork::Regtest));
     let status = invoice_status(node2_addr, &invoice).await;
     assert!(matches!(status, InvoiceStatus::Succeeded));
 
+    let payments = list_payments(node1_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+    let payments = list_payments(node2_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+
+    let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
     send_payment_with_ln_balance(
         node2_addr,
         node1_addr,
@@ -65,13 +82,61 @@ async fn payment() {
     )
     .await;
 
-    let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), Some(50), 900).await;
-    let _ = send_payment(node1_addr, invoice.clone()).await;
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    let payments = list_payments(node1_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+    let payments = list_payments(node2_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+    let _ = send_payment(node1_addr, invoice.clone()).await;
+
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    let payments = list_payments(node1_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+    let payments = list_payments(node2_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
     let _ = send_payment(node2_addr, invoice.clone()).await;
+
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    let payments = list_payments(node1_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
+    let payments = list_payments(node2_addr).await;
+    let payment = payments
+        .iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, asset_amount);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 950).await;
