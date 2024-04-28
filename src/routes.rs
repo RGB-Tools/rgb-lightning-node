@@ -1595,7 +1595,7 @@ pub(crate) async fn maker_execute(
             unlocked_state.channel_manager.get_our_node_id(),
             taker_pk,
             if swap.is_to_btc() {
-                Some(swap.qty_to)
+                Some(swap.qty_to + HTLC_MIN_MSAT)
             } else {
                 Some(HTLC_MIN_MSAT)
             },
@@ -1607,10 +1607,10 @@ pub(crate) async fn maker_execute(
             &unlocked_state.router,
             taker_pk,
             unlocked_state.channel_manager.get_our_node_id(),
-            if swap.is_from_btc() {
-                Some(swap.qty_from)
-            } else {
+            if swap.is_to_btc() || swap.is_asset_asset() {
                 Some(HTLC_MIN_MSAT)
+            } else {
+                Some(swap.qty_from + HTLC_MIN_MSAT)
             },
             swap.from_asset,
             receive_hints,
@@ -1627,12 +1627,12 @@ pub(crate) async fn maker_execute(
         second_leg.paths[0].hops[0].short_channel_id |= IS_SWAP_SCID;
 
         // Generally in the last hop the fee_amount is set to the payment amount, so we need to
-        // override it depending on what type of swap we are doing
+        // override it with fee = 0
         first_leg.paths[0]
             .hops
             .last_mut()
             .expect("Path not to be empty")
-            .fee_msat = if swap.is_to_btc() { HTLC_MIN_MSAT } else { 0 };
+            .fee_msat = 0;
 
         let fullpaths = first_leg.paths[0]
             .hops
@@ -1641,14 +1641,12 @@ pub(crate) async fn maker_execute(
             .map(|mut hop| {
                 if !swap.is_to_btc() {
                     hop.rgb_amount = Some(swap.qty_to);
-                    hop.payment_amount = HTLC_MIN_MSAT;
                 }
                 hop
             })
             .chain(second_leg.paths[0].hops.clone().into_iter().map(|mut hop| {
                 if !swap.is_from_btc() {
                     hop.rgb_amount = Some(swap.qty_from);
-                    hop.payment_amount = HTLC_MIN_MSAT;
                 }
                 hop
             }))
