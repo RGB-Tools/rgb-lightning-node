@@ -73,6 +73,7 @@ const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
 const DUST_LIMIT_MSAT: u64 = 546000;
 
 pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
+pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
 
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 
@@ -1652,6 +1653,21 @@ pub(crate) async fn maker_execute(
                 hop
             }))
             .collect::<Vec<_>>();
+
+        // Skip last fee because it's equal to the payment amount
+        let total_fee = fullpaths
+            .iter()
+            .rev()
+            .skip(1)
+            .map(|hop| hop.fee_msat)
+            .sum::<u64>();
+
+        if total_fee >= MAX_SWAP_FEE_MSAT {
+            return Err(APIError::FailedPayment(format!(
+                "Fee too high: {}",
+                total_fee
+            )));
+        }
 
         let route = Route {
             paths: vec![LnPath {
