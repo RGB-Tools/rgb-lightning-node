@@ -61,8 +61,8 @@ pub enum APIError {
     #[error("For an RGB operation both asset_id and asset_amount must be set")]
     IncompleteRGBInfo,
 
-    #[error("Not enough assets, available: {0}, requested: {1}")]
-    InsufficientAssets(u64, u64),
+    #[error("Not enough assets")]
+    InsufficientAssets,
 
     #[error("Not enough funds, call getaddress and send {0} satoshis")]
     InsufficientFunds(u64),
@@ -111,6 +111,9 @@ pub enum APIError {
 
     #[error("Invalid pubkey")]
     InvalidPubkey,
+
+    #[error("Invalid swap: {0}")]
+    InvalidSwap(String),
 
     #[error("Invalid swap string '{0}': {1}")]
     InvalidSwapString(String, String),
@@ -211,6 +214,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
+            | APIError::InvalidSwap(_)
             | APIError::InvalidSwapString(_, _)
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
@@ -224,7 +228,7 @@ impl IntoResponse for APIError {
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::ChangingState
-            | APIError::InsufficientAssets(_, _)
+            | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
             | APIError::LockedNode
             | APIError::NoAvailableUtxos

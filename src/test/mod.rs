@@ -20,7 +20,7 @@ use crate::routes::{
     InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest,
     IssueAssetResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
     ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
-    ListTradesResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
     MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
     RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
     SendPaymentRequest, SendPaymentResponse, TakerRequest, UnlockRequest, Unspent,
@@ -593,9 +593,9 @@ async fn keysend_with_ln_balance(
     .await;
 }
 
-async fn list_trades(node_address: SocketAddr) -> ListTradesResponse {
+async fn list_trades(node_address: SocketAddr) -> ListSwapsResponse {
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listtrades", node_address))
+        .get(format!("http://{}/listswaps", node_address))
         .send()
         .await
         .unwrap();

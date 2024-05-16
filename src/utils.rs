@@ -43,7 +43,7 @@ use crate::{
     error::{APIError, AppError},
     ldk::{
         BumpTxEventHandler, ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices,
-        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager, TradeMap,
+        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager, SwapMap,
     },
     rgb::get_bitcoin_network,
 };
@@ -114,8 +114,8 @@ pub(crate) struct UnlockedAppState {
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) persister: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
-    pub(crate) maker_trades: Arc<Mutex<TradeMap>>,
-    pub(crate) taker_trades: Arc<Mutex<TradeMap>>,
+    pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
+    pub(crate) taker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
     pub(crate) rgb_online: Online,
     pub(crate) router: Arc<Router>,
@@ -130,12 +130,12 @@ impl UnlockedAppState {
         self.outbound_payments.lock().unwrap()
     }
 
-    pub(crate) fn get_maker_trades(&self) -> MutexGuard<TradeMap> {
-        self.maker_trades.lock().unwrap()
+    pub(crate) fn get_maker_swaps(&self) -> MutexGuard<SwapMap> {
+        self.maker_swaps.lock().unwrap()
     }
 
-    pub(crate) fn get_taker_trades(&self) -> MutexGuard<TradeMap> {
-        self.taker_trades.lock().unwrap()
+    pub(crate) fn get_taker_swaps(&self) -> MutexGuard<SwapMap> {
+        self.taker_swaps.lock().unwrap()
     }
 
     pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {

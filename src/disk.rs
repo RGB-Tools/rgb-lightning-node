@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::APIError;
-use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, TradeMap};
+use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, SwapMap};
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
 pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
@@ -21,8 +21,8 @@ pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 
-pub(crate) const MAKER_TRADES_FNAME: &str = "maker_trades";
-pub(crate) const TAKER_TRADES_FNAME: &str = "taker_trades";
+pub(crate) const MAKER_SWAPS_FNAME: &str = "maker_swaps";
+pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
 
 pub(crate) const PENDING_SPENDABLE_OUTPUT_DIR: &str = "pending_spendable_outputs";
 
@@ -125,14 +125,14 @@ pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStor
     }
 }
 
-pub(crate) fn read_trades_info(path: &Path) -> TradeMap {
+pub(crate) fn read_swaps_info(path: &Path) -> SwapMap {
     if let Ok(file) = File::open(path) {
-        if let Ok(info) = TradeMap::read(&mut BufReader::new(file)) {
+        if let Ok(info) = SwapMap::read(&mut BufReader::new(file)) {
             return info;
         }
     }
-    TradeMap {
-        trades: HashMap::new(),
+    SwapMap {
+        swaps: HashMap::new(),
     }
 }
 

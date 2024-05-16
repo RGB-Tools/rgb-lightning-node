@@ -1,47 +1,120 @@
 use lightning::{impl_writeable_tlv_based, ln::PaymentHash};
 use rgbstd::contract::ContractId;
 use std::convert::TryInto;
+use std::fmt;
 use std::str::FromStr;
 
-use crate::utils::hex_str_to_vec;
+use crate::{routes::SwapStatus, utils::hex_str_to_vec};
 
 #[derive(Debug, Clone)]
-pub struct Swap {
+pub(crate) struct SwapData {
+    pub(crate) swap_info: SwapInfo,
+    pub(crate) status: SwapStatus,
+}
+
+impl_writeable_tlv_based!(SwapData, {
+    (0, swap_info, required),
+    (1, status, required),
+});
+
+impl SwapData {
+    pub(crate) fn from_swap_info(swap_info: &SwapInfo, status: SwapStatus) -> Self {
+        Self {
+            swap_info: swap_info.clone(),
+            status,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SwapInfo {
     pub(crate) qty_from: u64,
     pub(crate) qty_to: u64,
     pub(crate) from_asset: Option<ContractId>,
     pub(crate) to_asset: Option<ContractId>,
+    pub(crate) expiry: u64,
 }
 
-impl_writeable_tlv_based!(Swap, {
+impl_writeable_tlv_based!(SwapInfo, {
     (0, qty_from, required),
     (1, qty_to, required),
     (2, from_asset, required),
     (3, to_asset, required),
+    (4, expiry, required),
 });
 
-impl Swap {
-    pub fn same_asset(&self) -> bool {
+impl From<SwapData> for SwapInfo {
+    fn from(value: SwapData) -> Self {
+        Self {
+            qty_from: value.swap_info.qty_from,
+            qty_to: value.swap_info.qty_to,
+            from_asset: value.swap_info.from_asset,
+            to_asset: value.swap_info.to_asset,
+            expiry: value.swap_info.expiry,
+        }
+    }
+}
+
+impl SwapInfo {
+    pub(crate) fn same_asset(&self) -> bool {
         self.from_asset == self.to_asset
     }
 
-    pub fn is_from_btc(&self) -> bool {
+    pub(crate) fn is_from_btc(&self) -> bool {
         self.from_asset.is_none()
     }
-    pub fn is_to_btc(&self) -> bool {
+
+    pub(crate) fn is_from_asset(&self) -> bool {
+        self.from_asset.is_some()
+    }
+
+    pub(crate) fn is_to_btc(&self) -> bool {
         self.to_asset.is_none()
     }
 
-    pub fn is_asset_asset(&self) -> bool {
-        !self.is_from_btc() && !self.is_to_btc()
+    pub(crate) fn is_to_asset(&self) -> bool {
+        self.to_asset.is_some()
+    }
+
+    pub(crate) fn is_asset_asset(&self) -> bool {
+        self.is_from_asset() && self.is_to_asset()
     }
 }
 
 #[derive(Debug)]
-pub struct SwapString {
-    pub swap: Swap,
-    pub expiry: u64,
-    pub payment_hash: PaymentHash,
+pub(crate) struct SwapString {
+    pub(crate) swap_info: SwapInfo,
+    pub(crate) payment_hash: PaymentHash,
+}
+
+impl SwapString {
+    pub(crate) fn from_swap_info(swap_info: &SwapInfo, payment_hash: PaymentHash) -> Self {
+        Self {
+            swap_info: swap_info.clone(),
+            payment_hash,
+        }
+    }
+}
+
+impl fmt::Display for SwapString {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}/{}/{}/{}/{}",
+            self.swap_info.qty_from,
+            self.swap_info
+                .from_asset
+                .map(|c| c.to_string())
+                .unwrap_or("btc".into()),
+            self.swap_info.qty_to,
+            self.swap_info
+                .to_asset
+                .map(|c| c.to_string())
+                .unwrap_or("btc".into()),
+            self.swap_info.expiry,
+            self.payment_hash,
+        )
+    }
 }
 
 impl FromStr for SwapString {
@@ -98,20 +171,20 @@ impl FromStr for SwapString {
             return Err("qty_from, qty_to and expiry should be positive");
         }
 
-        let swap = Swap {
+        let swap_info = SwapInfo {
             qty_from,
             qty_to,
             from_asset,
             to_asset,
+            expiry,
         };
 
-        if swap.same_asset() {
+        if swap_info.same_asset() {
             return Err("From and to assets should be different");
         }
 
         Ok(SwapString {
-            swap,
-            expiry,
+            swap_info,
             payment_hash,
         })
     }

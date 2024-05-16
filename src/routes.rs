@@ -49,7 +49,7 @@ use tokio::sync::MutexGuard as TokioMutexGuard;
 use crate::backup::{do_backup, restore_backup};
 use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
 use crate::rgb::{get_bitcoin_network, get_rgb_channel_info_optional};
-use crate::swap::{Swap, SwapString};
+use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
@@ -345,9 +345,9 @@ pub(crate) struct ListPeersResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct ListTradesResponse {
-    pub(crate) maker: Vec<Trade>,
-    pub(crate) taker: Vec<Trade>,
+pub(crate) struct ListSwapsResponse {
+    pub(crate) maker: Vec<Swap>,
+    pub(crate) taker: Vec<Swap>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -439,7 +439,7 @@ pub(crate) struct OpenChannelResponse {
     pub(crate) temporary_channel_id: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct Payment {
     pub(crate) amt_msat: Option<u64>,
     pub(crate) asset_amount: Option<u64>,
@@ -536,18 +536,36 @@ pub(crate) struct SignMessageResponse {
     pub(crate) signed_message: String,
 }
 
-#[derive(Deserialize, Serialize)]
-pub(crate) struct TakerRequest {
-    pub(crate) swapstring: String,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct Trade {
+pub(crate) struct Swap {
     pub(crate) qty_from: u64,
     pub(crate) qty_to: u64,
     pub(crate) from_asset: Option<String>,
     pub(crate) to_asset: Option<String>,
     pub(crate) payment_hash: String,
+    pub(crate) status: SwapStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) enum SwapStatus {
+    Waiting,
+    Pending,
+    Succeeded,
+    Expired,
+    Failed,
+}
+
+impl_writeable_tlv_based_enum!(SwapStatus,
+    (0, Waiting) => {},
+    (1, Pending) => {},
+    (2, Succeeded) => {},
+    (3, Expired) => {},
+    (4, Failed) => {};
+);
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct TakerRequest {
+    pub(crate) swapstring: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -693,6 +711,8 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InsufficientBitcoins { needed, available } => {
                 APIError::InsufficientFunds(needed - available)
             }
+            RgbLibError::InsufficientSpendableAssets { .. } => APIError::InsufficientAssets,
+            RgbLibError::InsufficientTotalAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
             RgbLibError::InvalidBlindedUTXO { details } => APIError::InvalidBlindedUTXO(details),
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
@@ -1248,16 +1268,16 @@ pub(crate) async fn list_payments(
     let ldk_data_dir_path = Path::new(&state.static_state.ldk_data_dir);
 
     for (payment_hash, payment_info) in &inbound_payments {
-        let rgb_payment_info_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir_path);
-        let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
-            let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
-            (
-                Some(rgb_payment_info.amount),
-                Some(rgb_payment_info.contract_id.to_string()),
-            )
+        let rgb_payment_info_path_inbound =
+            get_rgb_payment_info_path(payment_hash, ldk_data_dir_path, true);
+
+        let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
+            let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
+            (Some(info.amount), Some(info.contract_id.to_string()))
         } else {
             (None, None)
         };
+
         payments.push(Payment {
             amt_msat: payment_info.amt_msat,
             asset_amount,
@@ -1265,21 +1285,22 @@ pub(crate) async fn list_payments(
             payment_hash: hex_str(&payment_hash.0),
             inbound: true,
             status: payment_info.status,
-        })
+        });
     }
 
     for (payment_id, payment_info) in &outbound_payments {
-        let payment_hash = PaymentHash(payment_id.0);
-        let rgb_payment_info_path = get_rgb_payment_info_path(&payment_hash, ldk_data_dir_path);
-        let (asset_amount, asset_id) = if rgb_payment_info_path.exists() {
-            let rgb_payment_info = parse_rgb_payment_info(&rgb_payment_info_path);
-            (
-                Some(rgb_payment_info.amount),
-                Some(rgb_payment_info.contract_id.to_string()),
-            )
+        let payment_hash = &PaymentHash(payment_id.0);
+
+        let rgb_payment_info_path_outbound =
+            get_rgb_payment_info_path(payment_hash, ldk_data_dir_path, false);
+
+        let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
+            let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
+            (Some(info.amount), Some(info.contract_id.to_string()))
         } else {
             (None, None)
         };
+
         payments.push(Payment {
             amt_msat: payment_info.amt_msat,
             asset_amount,
@@ -1287,7 +1308,7 @@ pub(crate) async fn list_payments(
             payment_hash: hex_str(&payment_hash.0),
             inbound: false,
             status: payment_info.status,
-        })
+        });
     }
 
     Ok(Json(ListPaymentsResponse { payments }))
@@ -1308,25 +1329,45 @@ pub(crate) async fn list_peers(
     Ok(Json(ListPeersResponse { peers }))
 }
 
-pub(crate) async fn list_trades(
+pub(crate) async fn list_swaps(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<ListTradesResponse>, APIError> {
+) -> Result<Json<ListSwapsResponse>, APIError> {
     let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-    let map_trade = |(payment_hash, swap): (&PaymentHash, &Swap)| Trade {
-        payment_hash: payment_hash.to_string(),
-        qty_from: swap.qty_from,
-        qty_to: swap.qty_to,
-        from_asset: swap.from_asset.map(|c| c.to_string()),
-        to_asset: swap.to_asset.map(|c| c.to_string()),
+    let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
+        let mut status = swap_data.status.clone();
+        if [SwapStatus::Waiting, SwapStatus::Pending].contains(&status)
+            && get_current_timestamp() > swap_data.swap_info.expiry
+        {
+            status = SwapStatus::Expired;
+            if taker {
+                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
+            } else {
+                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
+            }
+        }
+        Swap {
+            payment_hash: payment_hash.to_string(),
+            qty_from: swap_data.swap_info.qty_from,
+            qty_to: swap_data.swap_info.qty_to,
+            from_asset: swap_data.swap_info.from_asset.map(|c| c.to_string()),
+            to_asset: swap_data.swap_info.to_asset.map(|c| c.to_string()),
+            status,
+        }
     };
 
-    let taker_trades = unlocked_state.taker_trades();
-    let maker_trades = unlocked_state.maker_trades();
+    let taker_swaps = unlocked_state.taker_swaps();
+    let maker_swaps = unlocked_state.maker_swaps();
 
-    Ok(Json(ListTradesResponse {
-        taker: taker_trades.iter().map(map_trade).collect(),
-        maker: maker_trades.iter().map(map_trade).collect(),
+    Ok(Json(ListSwapsResponse {
+        taker: taker_swaps
+            .iter()
+            .map(|(ph, sd)| map_swap(ph, sd, true))
+            .collect(),
+        maker: maker_swaps
+            .iter()
+            .map(|(ph, sd)| map_swap(ph, sd, false))
+            .collect(),
     }))
 }
 
@@ -1446,9 +1487,9 @@ pub(crate) async fn ln_invoice(
             None
         };
 
-        if payload.amt_msat.is_some() && payload.amt_msat.unwrap() < INVOICE_MIN_MSAT {
+        if contract_id.is_some() && payload.amt_msat.unwrap_or(0) < INVOICE_MIN_MSAT {
             return Err(APIError::InvalidAmount(format!(
-                "amt_msat cannot be less than {INVOICE_MIN_MSAT}"
+                "amt_msat cannot be less than {INVOICE_MIN_MSAT} when transferring an RGB asset"
             )));
         }
 
@@ -1550,7 +1591,8 @@ pub(crate) async fn maker_execute(
         let taker_pk =
             PublicKey::from_str(&payload.taker_pubkey).map_err(|_| APIError::InvalidPubkey)?;
 
-        if get_current_timestamp() > swapstring.expiry {
+        if get_current_timestamp() > swapstring.swap_info.expiry {
+            unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Expired);
             return Err(APIError::ExpiredSwapOffer);
         }
 
@@ -1559,7 +1601,7 @@ pub(crate) async fn maker_execute(
             .get_payment_preimage(swapstring.payment_hash, payment_secret)
             .map_err(|_| APIError::MissingSwapPaymentPreimage)?;
 
-        let swap = swapstring.swap;
+        let swap_info = swapstring.swap_info;
 
         let receive_hints = unlocked_state
             .channel_manager
@@ -1568,8 +1610,10 @@ pub(crate) async fn maker_execute(
             .filter(|details| {
                 match get_rgb_channel_info_optional(&details.channel_id, &ldk_data_dir_path, false)
                 {
-                    _ if swap.is_from_btc() => true,
-                    Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap.from_asset => true,
+                    _ if swap_info.is_from_btc() => true,
+                    Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap_info.from_asset => {
+                        true
+                    }
                     _ => false,
                 }
             })
@@ -1594,12 +1638,12 @@ pub(crate) async fn maker_execute(
             &unlocked_state.router,
             unlocked_state.channel_manager.get_our_node_id(),
             taker_pk,
-            if swap.is_to_btc() {
-                Some(swap.qty_to + HTLC_MIN_MSAT)
+            if swap_info.is_to_btc() {
+                Some(swap_info.qty_to + HTLC_MIN_MSAT)
             } else {
                 Some(HTLC_MIN_MSAT)
             },
-            swap.to_asset,
+            swap_info.to_asset,
             vec![],
         );
         let second_leg = get_route(
@@ -1607,12 +1651,12 @@ pub(crate) async fn maker_execute(
             &unlocked_state.router,
             taker_pk,
             unlocked_state.channel_manager.get_our_node_id(),
-            if swap.is_to_btc() || swap.is_asset_asset() {
+            if swap_info.is_to_btc() || swap_info.is_asset_asset() {
                 Some(HTLC_MIN_MSAT)
             } else {
-                Some(swap.qty_from + HTLC_MIN_MSAT)
+                Some(swap_info.qty_from + HTLC_MIN_MSAT)
             },
-            swap.from_asset,
+            swap_info.from_asset,
             receive_hints,
         );
 
@@ -1639,14 +1683,14 @@ pub(crate) async fn maker_execute(
             .clone()
             .into_iter()
             .map(|mut hop| {
-                if !swap.is_to_btc() {
-                    hop.rgb_amount = Some(swap.qty_to);
+                if swap_info.is_to_asset() {
+                    hop.rgb_amount = Some(swap_info.qty_to);
                 }
                 hop
             })
             .chain(second_leg.paths[0].hops.clone().into_iter().map(|mut hop| {
-                if !swap.is_from_btc() {
-                    hop.rgb_amount = Some(swap.qty_from);
+                if swap_info.is_from_asset() {
+                    hop.rgb_amount = Some(swap_info.qty_from);
                 }
                 hop
             }))
@@ -1686,34 +1730,20 @@ pub(crate) async fn maker_execute(
             }),
         };
 
-        if !swap.is_to_btc() {
+        if swap_info.is_to_asset() {
             write_rgb_payment_info_file(
                 &ldk_data_dir_path,
                 &swapstring.payment_hash,
-                swap.to_asset.unwrap(),
-                swap.qty_to,
+                swap_info.to_asset.unwrap(),
+                swap_info.qty_to,
                 false,
                 false,
             );
         }
 
-        let payment_id = PaymentId(swapstring.payment_hash.0);
-        let amt_msat = if swap.is_to_btc() {
-            swap.qty_to
-        } else {
-            HTLC_MIN_MSAT
-        };
+        unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Pending);
 
-        let payment_info = PaymentInfo {
-            preimage: None,
-            secret: None,
-            status: HTLCStatus::Pending,
-            amt_msat: Some(amt_msat),
-        };
-
-        unlocked_state.add_outbound_payment(payment_id, payment_info.clone());
-
-        let (status, err) = match unlocked_state.channel_manager.send_spontaneous_payment(
+        let (_status, err) = match unlocked_state.channel_manager.send_spontaneous_payment(
             &route,
             Some(payment_preimage),
             RecipientOnionFields::spontaneous_empty(),
@@ -1729,12 +1759,13 @@ pub(crate) async fn maker_execute(
             }
         };
 
-        unlocked_state.add_inbound_payment(swapstring.payment_hash, payment_info);
-        unlocked_state.update_outbound_payment_status(payment_id, status);
-
         match err {
             None => Ok(Json(EmptyResponse {})),
-            Some(e) => Err(APIError::FailedPayment(format!("{:?}", e))),
+            Some(e) => {
+                unlocked_state
+                    .update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Failed);
+                Err(APIError::FailedPayment(format!("{:?}", e)))
+            }
         }
     })
     .await
@@ -1762,15 +1793,28 @@ pub(crate) async fn maker_init(
             ),
         };
 
+        // prevent BTC-to-BTC swaps
+        if from_asset.is_none() && to_asset.is_none() {
+            return Err(APIError::InvalidSwap(s!("cannot swap BTC for BTC")));
+        }
+
+        // prevent swaps of same assets
+        if from_asset == to_asset {
+            return Err(APIError::InvalidSwap(s!("cannot swap the same asset")));
+        }
+
         let qty_from = payload.qty_from;
         let qty_to = payload.qty_to;
 
-        let swap = Swap {
+        let expiry = get_current_timestamp() + payload.timeout_sec as u64;
+        let swap_info = SwapInfo {
             from_asset,
             to_asset,
             qty_from,
             qty_to,
+            expiry,
         };
+        let swap_data = SwapData::from_swap_info(&swap_info, SwapStatus::Waiting);
 
         // Check that we have enough assets to send
         if let Some(to_asset) = to_asset {
@@ -1779,8 +1823,8 @@ pub(crate) async fn maker_init(
                 &ldk_data_dir_path,
                 unlocked_state.channel_manager.list_channels().iter(),
             );
-            if swap.qty_to > max_balance {
-                return Err(APIError::InsufficientAssets(max_balance, swap.qty_to));
+            if swap_info.qty_to > max_balance {
+                return Err(APIError::InsufficientAssets);
             }
         }
 
@@ -1788,18 +1832,9 @@ pub(crate) async fn maker_init(
             .channel_manager
             .create_inbound_payment(Some(DUST_LIMIT_MSAT), payload.timeout_sec, None)
             .unwrap();
-        unlocked_state.add_maker_trade(payment_hash, swap);
+        unlocked_state.add_maker_swap(payment_hash, swap_data);
 
-        let expiry = get_current_timestamp() + payload.timeout_sec as u64;
-        let swapstring = format!(
-            "{}/{}/{}/{}/{}/{}",
-            qty_from,
-            from_asset.map(|c| c.to_string()).unwrap_or("btc".into()),
-            qty_to,
-            to_asset.map(|c| c.to_string()).unwrap_or("btc".into()),
-            expiry,
-            payment_hash,
-        );
+        let swapstring = SwapString::from_swap_info(&swap_info, payment_hash).to_string();
 
         let payment_secret = payment_secret.0.to_hex();
         let payment_hash = payment_hash.0.to_hex();
@@ -1920,10 +1955,7 @@ pub(crate) async fn open_channel(
             let spendable_rgb_amount = balance.spendable;
 
             if *asset_amount > spendable_rgb_amount {
-                return Err(APIError::InsufficientAssets(
-                    spendable_rgb_amount,
-                    *asset_amount,
-                ));
+                return Err(APIError::InsufficientAssets);
             }
 
             Some(RgbTransport::from_str(&state.static_state.proxy_endpoint).unwrap())
@@ -2286,26 +2318,24 @@ pub(crate) async fn taker(
         let swapstring = SwapString::from_str(&payload.swapstring)
             .map_err(|e| APIError::InvalidSwapString(payload.swapstring.clone(), e.to_string()))?;
 
-        if get_current_timestamp() > swapstring.expiry {
+        if get_current_timestamp() > swapstring.swap_info.expiry {
             return Err(APIError::ExpiredSwapOffer);
         }
 
         // We are selling assets, check if we have enough
-        if let Some(from_asset) = swapstring.swap.from_asset {
+        if let Some(from_asset) = swapstring.swap_info.from_asset {
             let max_balance = get_max_local_rgb_amount(
                 from_asset,
                 &ldk_data_dir_path,
                 unlocked_state.channel_manager.list_channels().iter(),
             );
-            if swapstring.swap.qty_from > max_balance {
-                return Err(APIError::InsufficientAssets(
-                    max_balance,
-                    swapstring.swap.qty_from,
-                ));
+            if swapstring.swap_info.qty_from > max_balance {
+                return Err(APIError::InsufficientAssets);
             }
         }
 
-        unlocked_state.add_taker_trade(swapstring.payment_hash, swapstring.swap);
+        let swap_data = SwapData::from_swap_info(&swapstring.swap_info, SwapStatus::Waiting);
+        unlocked_state.add_taker_swap(swapstring.payment_hash, swap_data);
 
         Ok(Json(EmptyResponse {}))
     })

@@ -163,11 +163,14 @@ The node currently exposes the following APIs:
 - `/listchannels` (GET)
 - `/listpayments` (GET)
 - `/listpeers` (GET)
+- `/listswaps` (GET)
 - `/listtransactions` (GET)
 - `/listtransfers` (POST)
 - `/listunspents` (GET)
 - `/lninvoice` (POST)
 - `/lock` (POST)
+- `/makerexecute` (POST)
+- `/makerinit` (POST)
 - `/networkinfo` (GET)
 - `/nodeinfo` (GET)
 - `/openchannel` (POST)
@@ -180,6 +183,7 @@ The node currently exposes the following APIs:
 - `/sendpayment` (POST)
 - `/shutdown` (POST)
 - `/signmessage` (POST)
+- `/taker` (POST)
 - `/unlock` (POST)
 
 To get more details about the available APIs see the [OpenAPI specification].
