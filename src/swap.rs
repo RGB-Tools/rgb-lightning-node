@@ -31,6 +31,10 @@ impl Swap {
     pub fn is_to_btc(&self) -> bool {
         self.to_asset.is_none()
     }
+
+    pub fn is_asset_asset(&self) -> bool {
+        !self.is_from_btc() && !self.is_to_btc()
+    }
 }
 
 #[derive(Debug)]

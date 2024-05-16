@@ -902,16 +902,11 @@ async fn handle_ldk_events(
 
             let mut fail = false;
             if whitelist_swap.is_from_btc() {
-                // We subtract HTLC_MIN_MSAT because a node receiving an RGB payment also
-                // receives that amount of sats with it as the payment amount, so we exclude
-                // it from the calculation of how many sats we are effectively giving out.
-                let net_msat_diff = expected_outbound_amount_msat.saturating_sub(
-                    inbound_amount_msat.saturating_sub(crate::routes::HTLC_MIN_MSAT),
-                );
+                let net_msat_diff = expected_outbound_amount_msat.checked_sub(inbound_amount_msat);
 
                 if inbound_rgb_amount != Some(whitelist_swap.qty_to)
                     || inbound_rgb_info.map(|x| x.0) != whitelist_swap.to_asset
-                    || net_msat_diff != whitelist_swap.qty_from
+                    || net_msat_diff != Some(whitelist_swap.qty_from)
                     || outbound_rgb_info.is_some()
                 {
                     fail = true;
