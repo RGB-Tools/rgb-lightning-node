@@ -23,7 +23,7 @@ use crate::routes::{
     ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
     MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
     RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
-    SendPaymentRequest, SendPaymentResponse, TakerRequest, UnlockRequest, Unspent,
+    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -593,7 +593,7 @@ async fn keysend_with_ln_balance(
     .await;
 }
 
-async fn list_trades(node_address: SocketAddr) -> ListSwapsResponse {
+async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
     let res = reqwest::Client::new()
         .get(format!("http://{}/listswaps", node_address))
         .send()
@@ -712,7 +712,12 @@ async fn open_channel_with_custom_fees(
     while !channel_funded {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let channels = list_channels(node_address).await;
-        if let Some(channel) = channels.iter().find(|c| c.peer_pubkey == dest_peer_pubkey) {
+        if let Some(channel) = channels.iter().find(|c| {
+            !c.ready
+                && c.peer_pubkey == dest_peer_pubkey
+                && c.asset_id == asset_id.map(|id| id.to_string())
+                && c.asset_local_amount == asset_amount
+        }) {
             if channel.funding_txid.is_some() {
                 let txout = get_txout(channel.funding_txid.as_ref().unwrap());
                 if !txout.is_empty() {
@@ -1037,11 +1042,12 @@ async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if asset_balance_offchain_outbound(node_address, asset_id).await == expected_balance {
+        let balance = asset_balance_offchain_outbound(node_address, asset_id).await;
+        if balance == expected_balance {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
-            panic!("balance is not becoming the expected one ({expected_balance})");
+            panic!("balance ({balance}) is not becoming the expected one ({expected_balance})");
         }
     }
 }
@@ -1065,6 +1071,35 @@ async fn wait_for_ln_payment(
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
             panic!("cannot find successful payment")
         }
+    }
+}
+
+async fn wait_for_swap_status(
+    node_address: SocketAddr,
+    payment_hash: &str,
+    expected_status: SwapStatus,
+) {
+    println!(
+        "waiting for status for swap with payment hash {payment_hash} to become \
+        {expected_status:?} on node {node_address}",
+    );
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let swaps = list_swaps(node_address).await;
+        let swap = swaps
+            .maker
+            .iter()
+            .chain(swaps.taker.iter())
+            .find(|s| s.payment_hash == payment_hash)
+            .unwrap();
+        let status = &swap.status;
+        if status == &expected_status {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
+            panic!("status ({status:?}) is not becoming the expected one ({expected_status:?})");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs_f32(0.5)).await;
     }
 }
 
@@ -1215,13 +1250,14 @@ fn wait_electrs_sync() {
 pub fn initialize() {
     INIT.call_once(|| {
         println!("starting test services...");
-        let status = Command::new("./regtest.sh")
+        let output = Command::new("./regtest.sh")
             .args(["start"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .output()
             .expect("failed to start test services");
-        assert!(status.success());
+        if !output.status.success() {
+            println!("{output:?}");
+            panic!("failed to start test services");
+        }
     });
 }
 
@@ -1234,6 +1270,8 @@ mod close_coop_zero_balance;
 mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
+mod concurrent_btc_payments;
+mod invoice;
 mod lock_unlock;
 mod multi_hop;
 mod multi_open_close;
@@ -1244,11 +1282,17 @@ mod restart;
 mod send_receive;
 mod swap_roundtrip_assets;
 mod swap_roundtrip_buy;
+mod swap_roundtrip_buy_same_channel;
 mod swap_roundtrip_fail_amount_maker;
 mod swap_roundtrip_fail_amount_taker;
+mod swap_roundtrip_fail_btc2btc;
+mod swap_roundtrip_fail_invalid_asset_from;
+mod swap_roundtrip_fail_invalid_asset_to;
+mod swap_roundtrip_fail_same_asset;
 mod swap_roundtrip_fail_timeout;
 mod swap_roundtrip_fail_whitelist;
 mod swap_roundtrip_multihop_asset_asset;
 mod swap_roundtrip_multihop_buy;
 mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
+mod vanilla_payment_on_rgb_channel;
