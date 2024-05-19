@@ -145,8 +145,11 @@ impl UnlockedAppState {
         )
     }
 
-    pub(crate) fn rgb_list_assets(&self) -> Result<Assets, RgbLibError> {
-        self.get_rgb_wallet().list_assets(vec![])
+    pub(crate) fn rgb_list_assets(
+        &self,
+        filter_asset_schemas: Vec<AssetSchema>,
+    ) -> Result<Assets, RgbLibError> {
+        self.get_rgb_wallet().list_assets(filter_asset_schemas)
     }
 
     pub(crate) fn rgb_list_transactions(&self) -> Result<Vec<RgbLibTransaction>, RgbLibError> {

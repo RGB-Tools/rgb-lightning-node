@@ -296,6 +296,11 @@ paths:
         - RGB
       summary: List assets
       description: List the node's RGB assets
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListAssetsRequest'
       responses:
         '200':
           description: Successful operation
@@ -706,27 +711,6 @@ components:
         address:
           type: string
           example: bcrt1qnc5y6j6dmejrkwy93farhvpezk0lf46gk7aecs
-    Asset:
-      type: object
-      properties:
-        asset_id:
-          type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
-        ticker:
-          type: string
-          example: USDT
-        name:
-          type: string
-          example: Tether
-        precision:
-          type: integer
-          example: 0
-        issued_supply:
-          type: integer
-          example: 777
-        timestamp:
-          type: integer
-          example: 1691160565
     AssetBalanceRequest:
       type: object
       properties:
@@ -751,11 +735,114 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    AssetCFA:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        asset_iface:
+          $ref: '#/components/schemas/AssetIface'
+        name:
+          type: string
+          example: Collectible
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/BtcBalance'
+        media:
+          $ref: '#/components/schemas/Media'
     AssetIface:
       type: string
       enum:
         - RGB20
+        - RGB21
         - RGB25
+    AssetNIA:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        asset_iface:
+          $ref: '#/components/schemas/AssetIface'
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/BtcBalance'
+        media:
+          $ref: '#/components/schemas/Media'
+    AssetSchema:
+      type: string
+      enum:
+        - Nia
+        - Uda
+        - Cfa
+    AssetUDA:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        asset_iface:
+          $ref: '#/components/schemas/AssetIface'
+        ticker:
+          type: string
+          example: UNI
+        name:
+          type: string
+          example: Unique
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/BtcBalance'
+        token:
+          $ref: '#/components/schemas/TokenLight'
     BackupRequest:
       type: object
       properties:
@@ -1043,52 +1130,68 @@ components:
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
         status:
           $ref: '#/components/schemas/HTLCStatus'
+    ListAssetsRequest:
+      type: object
+      properties:
+        filter_asset_schemas:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetSchema'
+          example: [ "Nia", "Uda", "Cfa" ]
     ListAssetsResponse:
       type: object
       properties:
-        assets:
+        nia:
           type: array
           items:
-              $ref: '#/components/schemas/Asset'
+            $ref: '#/components/schemas/AssetNIA'
+        uda:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetUDA'
+        cfa:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetCFA'
     ListChannelsResponse:
       type: object
       properties:
         channels:
           type: array
           items:
-              $ref: '#/components/schemas/Channel'
+            $ref: '#/components/schemas/Channel'
     ListPaymentsResponse:
       type: object
       properties:
         payments:
           type: array
           items:
-              $ref: '#/components/schemas/Payment'
+            $ref: '#/components/schemas/Payment'
     ListPeersResponse:
       type: object
       properties:
         peers:
           type: array
           items:
-              $ref: '#/components/schemas/Peer'
+            $ref: '#/components/schemas/Peer'
     ListSwapsResponse:
       type: object
       properties:
         maker:
           type: array
           items:
-              $ref: '#/components/schemas/Swap'
+            $ref: '#/components/schemas/Swap'
         taker:
           type: array
           items:
-              $ref: '#/components/schemas/Swap'
+            $ref: '#/components/schemas/Swap'
     ListTransactionsResponse:
       type: object
       properties:
         transactions:
           type: array
           items:
-              $ref: '#/components/schemas/Transaction'
+            $ref: '#/components/schemas/Transaction'
     ListTransfersRequest:
       type: object
       properties:
@@ -1101,14 +1204,14 @@ components:
         transfers:
           type: array
           items:
-              $ref: '#/components/schemas/Transfer'
+            $ref: '#/components/schemas/Transfer'
     ListUnspentsResponse:
       type: object
       properties:
         unspents:
           type: array
           items:
-              $ref: '#/components/schemas/Unspent'
+            $ref: '#/components/schemas/Unspent'
     LNInvoiceRequest:
       type: object
       properties:
@@ -1172,6 +1275,15 @@ components:
         swapstring:
             type: string
             example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+    Media:
+      type: object
+      properties:
+        file_path:
+          type: string
+          example: "/path/to/media"
+        mime:
+          type: string
+          example: "text/plain"
     NetworkInfoResponse:
       type: object
       properties:
@@ -1426,6 +1538,35 @@ components:
         swapstring:
             type: string
             example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+    TokenLight:
+      type: object
+      properties:
+        index:
+          type: integer
+          example: 0
+        ticker:
+          type: string
+          example: TKN
+        name:
+          type: string
+          example: Token
+        details:
+          type: string
+          example: token details
+        embedded_media:
+          type: boolean
+          example: true
+        media:
+          $ref: '#/components/schemas/Media'
+        attachments:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Media'
+          example:
+            0: { file_path: "path/to/media", mime: "text/plain" }
+        reserves:
+          type: boolean
+          example: false
     Transaction:
       type: object
       properties:

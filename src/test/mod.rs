@@ -13,17 +13,18 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, Asset, AssetBalanceRequest, AssetBalanceResponse, BackupRequest,
+    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetNIA, BackupRequest,
     BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
     DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
     DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
     InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest,
     IssueAssetResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
-    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
-    ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
-    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, UnlockRequest, Unspent,
+    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
+    ListPeersResponse, ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest,
+    MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse,
+    Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest,
+    SendAssetResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
+    UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -774,10 +775,14 @@ async fn open_channel(
     .await
 }
 
-async fn list_assets(node_address: SocketAddr) -> Vec<Asset> {
+async fn list_assets(node_address: SocketAddr) -> Vec<AssetNIA> {
     println!("listing assets for node {node_address}");
+    let payload = ListAssetsRequest {
+        filter_asset_schemas: vec![],
+    };
     let res = reqwest::Client::new()
         .get(format!("http://{}/listassets", node_address))
+        .json(&payload)
         .send()
         .await
         .unwrap();
@@ -786,7 +791,7 @@ async fn list_assets(node_address: SocketAddr) -> Vec<Asset> {
         .json::<ListAssetsResponse>()
         .await
         .unwrap()
-        .assets
+        .nia
 }
 
 async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {

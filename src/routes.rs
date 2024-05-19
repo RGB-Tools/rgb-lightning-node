@@ -33,12 +33,19 @@ use lightning::{
 use lightning_invoice::payment::pay_invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
-use rgb_lib::wallet::{Invoice as RgbLibInvoice, Recipient, RecipientData};
-use rgb_lib::{generate_keys, BitcoinNetwork as RgbLibNetwork, Error as RgbLibError};
+use rgb_lib::wallet::{
+    AssetIface as RgbLibAssetIface, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
+    Media as RgbLibMedia, Recipient, RecipientData, TokenLight as RgbLibTokenLight,
+};
+use rgb_lib::{
+    generate_keys, AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork,
+    Error as RgbLibError,
+};
 use rgbstd::contract::{ContractId, SecretSeal};
 use rgbwallet::RgbTransport;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -85,16 +92,6 @@ pub(crate) struct AddressResponse {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct Asset {
-    pub(crate) asset_id: String,
-    pub(crate) ticker: String,
-    pub(crate) name: String,
-    pub(crate) precision: u8,
-    pub(crate) issued_supply: u64,
-    pub(crate) timestamp: i64,
-}
-
-#[derive(Deserialize, Serialize)]
 pub(crate) struct AssetBalanceRequest {
     pub(crate) asset_id: String,
 }
@@ -108,11 +105,82 @@ pub(crate) struct AssetBalanceResponse {
     pub(crate) offchain_inbound: u64,
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetCFA {
+    pub(crate) asset_id: String,
+    pub(crate) asset_iface: AssetIface,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) issued_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) added_at: i64,
+    pub(crate) balance: BtcBalance,
+    pub(crate) media: Option<Media>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum AssetIface {
     RGB20,
     RGB21,
     RGB25,
+}
+
+impl From<RgbLibAssetIface> for AssetIface {
+    fn from(value: RgbLibAssetIface) -> Self {
+        match value {
+            RgbLibAssetIface::RGB20 => Self::RGB20,
+            RgbLibAssetIface::RGB21 => Self::RGB21,
+            RgbLibAssetIface::RGB25 => Self::RGB25,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetNIA {
+    pub(crate) asset_id: String,
+    pub(crate) asset_iface: AssetIface,
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) issued_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) added_at: i64,
+    pub(crate) balance: BtcBalance,
+    pub(crate) media: Option<Media>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum AssetSchema {
+    Nia,
+    Uda,
+    Cfa,
+}
+
+impl From<AssetSchema> for RgbLibAssetSchema {
+    fn from(value: AssetSchema) -> Self {
+        match value {
+            AssetSchema::Nia => Self::Nia,
+            AssetSchema::Uda => Self::Uda,
+            AssetSchema::Cfa => Self::Cfa,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetUDA {
+    pub(crate) asset_id: String,
+    pub(crate) asset_iface: AssetIface,
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) issued_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) added_at: i64,
+    pub(crate) balance: BtcBalance,
+    pub(crate) token: Option<TokenLight>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -130,23 +198,23 @@ pub(crate) enum BitcoinNetwork {
 }
 
 impl From<Network> for BitcoinNetwork {
-    fn from(x: Network) -> BitcoinNetwork {
+    fn from(x: Network) -> Self {
         match x {
-            Network::Bitcoin => BitcoinNetwork::Mainnet,
-            Network::Testnet => BitcoinNetwork::Testnet,
-            Network::Regtest => BitcoinNetwork::Regtest,
-            Network::Signet => BitcoinNetwork::Signet,
+            Network::Bitcoin => Self::Mainnet,
+            Network::Testnet => Self::Testnet,
+            Network::Regtest => Self::Regtest,
+            Network::Signet => Self::Signet,
         }
     }
 }
 
 impl From<RgbLibNetwork> for BitcoinNetwork {
-    fn from(x: RgbLibNetwork) -> BitcoinNetwork {
+    fn from(x: RgbLibNetwork) -> Self {
         match x {
-            RgbLibNetwork::Mainnet => BitcoinNetwork::Mainnet,
-            RgbLibNetwork::Testnet => BitcoinNetwork::Testnet,
-            RgbLibNetwork::Regtest => BitcoinNetwork::Regtest,
-            RgbLibNetwork::Signet => BitcoinNetwork::Signet,
+            RgbLibNetwork::Mainnet => Self::Mainnet,
+            RgbLibNetwork::Testnet => Self::Testnet,
+            RgbLibNetwork::Regtest => Self::Regtest,
+            RgbLibNetwork::Signet => Self::Signet,
         }
     }
 }
@@ -162,6 +230,16 @@ pub(crate) struct BtcBalance {
     pub(crate) settled: u64,
     pub(crate) future: u64,
     pub(crate) spendable: u64,
+}
+
+impl From<RgbLibBalance> for BtcBalance {
+    fn from(value: RgbLibBalance) -> Self {
+        Self {
+            settled: value.settled,
+            future: value.future,
+            spendable: value.spendable,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -325,8 +403,15 @@ pub(crate) struct KeysendResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct ListAssetsRequest {
+    pub(crate) filter_asset_schemas: Vec<AssetSchema>,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct ListAssetsResponse {
-    pub(crate) assets: Vec<Asset>,
+    pub(crate) nia: Vec<AssetNIA>,
+    pub(crate) uda: Vec<AssetUDA>,
+    pub(crate) cfa: Vec<AssetCFA>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -404,6 +489,21 @@ pub(crate) struct MakerInitResponse {
     pub(crate) payment_hash: String,
     pub(crate) payment_secret: String,
     pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Media {
+    pub(crate) file_path: String,
+    pub(crate) mime: String,
+}
+
+impl From<RgbLibMedia> for Media {
+    fn from(value: RgbLibMedia) -> Self {
+        Self {
+            file_path: value.file_path,
+            mime: value.mime,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -566,6 +666,37 @@ impl_writeable_tlv_based_enum!(SwapStatus,
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TakerRequest {
     pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct TokenLight {
+    pub(crate) index: u32,
+    pub(crate) ticker: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) details: Option<String>,
+    pub(crate) embedded_media: bool,
+    pub(crate) media: Option<Media>,
+    pub(crate) attachments: HashMap<u8, Media>,
+    pub(crate) reserves: bool,
+}
+
+impl From<RgbLibTokenLight> for TokenLight {
+    fn from(value: RgbLibTokenLight) -> Self {
+        Self {
+            index: value.index,
+            ticker: value.ticker,
+            name: value.name,
+            details: value.details,
+            embedded_media: value.embedded_media,
+            media: value.media.map(|m| m.into()),
+            attachments: value
+                .attachments
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            reserves: value.reserves,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -965,11 +1096,7 @@ pub(crate) async fn decode_rgb_invoice(
 
     Ok(Json(DecodeRGBInvoiceResponse {
         recipient_id: invoice_data.recipient_id,
-        asset_iface: invoice_data.asset_iface.map(|i| match i {
-            rgb_lib::wallet::AssetIface::RGB20 => AssetIface::RGB20,
-            rgb_lib::wallet::AssetIface::RGB21 => AssetIface::RGB21,
-            rgb_lib::wallet::AssetIface::RGB25 => AssetIface::RGB25,
-        }),
+        asset_iface: invoice_data.asset_iface.map(|i| i.into()),
         asset_id: invoice_data.asset_id,
         amount: invoice_data.amount,
         network: invoice_data.network.map(|n| n.into()),
@@ -1179,24 +1306,67 @@ pub(crate) async fn keysend(
 
 pub(crate) async fn list_assets(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<ListAssetsRequest>, APIError>,
 ) -> Result<Json<ListAssetsResponse>, APIError> {
     let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-    let rgb_assets = unlocked_state.rgb_list_assets()?;
+    let rgb_assets = unlocked_state.rgb_list_assets(
+        payload
+            .filter_asset_schemas
+            .into_iter()
+            .map(|s| s.into())
+            .collect(),
+    )?;
 
-    let mut assets = vec![];
+    let mut nia = vec![];
     for asset in rgb_assets.nia.unwrap() {
-        assets.push(Asset {
+        nia.push(AssetNIA {
             asset_id: asset.asset_id,
+            asset_iface: asset.asset_iface.into(),
             ticker: asset.ticker,
             name: asset.name,
+            details: asset.details,
             precision: asset.precision,
             issued_supply: asset.issued_supply,
             timestamp: asset.timestamp,
+            added_at: asset.added_at,
+            balance: asset.balance.into(),
+            media: asset.media.map(|m| m.into()),
+        })
+    }
+    let mut uda = vec![];
+    for asset in rgb_assets.uda.unwrap() {
+        uda.push(AssetUDA {
+            asset_id: asset.asset_id,
+            asset_iface: asset.asset_iface.into(),
+            ticker: asset.ticker,
+            name: asset.name,
+            details: asset.details,
+            precision: asset.precision,
+            issued_supply: asset.issued_supply,
+            timestamp: asset.timestamp,
+            added_at: asset.added_at,
+            balance: asset.balance.into(),
+            token: asset.token.map(|t| t.into()),
+        })
+    }
+    let mut cfa = vec![];
+    for asset in rgb_assets.cfa.unwrap() {
+        cfa.push(AssetCFA {
+            asset_id: asset.asset_id,
+            asset_iface: asset.asset_iface.into(),
+            name: asset.name,
+            details: asset.details,
+            precision: asset.precision,
+            issued_supply: asset.issued_supply,
+            timestamp: asset.timestamp,
+            added_at: asset.added_at,
+            balance: asset.balance.into(),
+            media: asset.media.map(|m| m.into()),
         })
     }
 
-    Ok(Json(ListAssetsResponse { assets }))
+    Ok(Json(ListAssetsResponse { nia, uda, cfa }))
 }
 
 pub(crate) async fn list_channels(
