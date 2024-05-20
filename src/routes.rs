@@ -885,12 +885,14 @@ pub(crate) async fn asset_balance(
 
     let balance = unlocked_state.rgb_get_asset_balance(contract_id)?;
 
-    let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
     let mut offchain_outbound = 0;
     let mut offchain_inbound = 0;
     for chan_info in unlocked_state.channel_manager.list_channels() {
-        let info_file_path =
-            get_rgb_channel_info_path(&chan_info.channel_id.to_hex(), &ldk_data_dir_path, false);
+        let info_file_path = get_rgb_channel_info_path(
+            &chan_info.channel_id.to_hex(),
+            &state.static_state.ldk_data_dir,
+            false,
+        );
         if !info_file_path.exists() {
             continue;
         }
@@ -921,8 +923,8 @@ pub(crate) async fn backup(
             check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
 
         do_backup(
-            PathBuf::from(&state.static_state.storage_dir_path),
-            &payload.backup_path,
+            &state.static_state.storage_dir_path,
+            Path::new(&payload.backup_path),
             &payload.password,
         )?;
 
@@ -968,7 +970,7 @@ pub(crate) async fn change_password(
         encrypt_and_save_mnemonic(
             payload.new_password,
             mnemonic.to_string(),
-            get_mnemonic_path(&state.static_state.storage_dir_path),
+            &get_mnemonic_path(&state.static_state.storage_dir_path),
         )?;
 
         Ok(Json(EmptyResponse {}))
@@ -1164,7 +1166,7 @@ pub(crate) async fn init(
 
         let mnemonic = keys.mnemonic;
 
-        encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), mnemonic_path)?;
+        encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &mnemonic_path)?;
 
         Ok(Json(InitResponse { mnemonic }))
     })
@@ -1415,9 +1417,11 @@ pub(crate) async fn list_channels(
             channel.inbound_balance_msat = Some(chan_info.inbound_capacity_msat);
         }
 
-        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
-        let info_file_path =
-            get_rgb_channel_info_path(&chan_info.channel_id.to_hex(), &ldk_data_dir_path, false);
+        let info_file_path = get_rgb_channel_info_path(
+            &chan_info.channel_id.to_hex(),
+            &state.static_state.ldk_data_dir,
+            false,
+        );
         if info_file_path.exists() {
             let rgb_info = parse_rgb_channel_info(&info_file_path);
             channel.asset_id = Some(rgb_info.contract_id.to_string());
@@ -1439,11 +1443,10 @@ pub(crate) async fn list_payments(
     let inbound_payments = unlocked_state.inbound_payments();
     let outbound_payments = unlocked_state.outbound_payments();
     let mut payments = vec![];
-    let ldk_data_dir_path = Path::new(&state.static_state.ldk_data_dir);
 
     for (payment_hash, payment_info) in &inbound_payments {
         let rgb_payment_info_path_inbound =
-            get_rgb_payment_info_path(payment_hash, ldk_data_dir_path, true);
+            get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, true);
 
         let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
             let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
@@ -1466,7 +1469,7 @@ pub(crate) async fn list_payments(
         let payment_hash = &PaymentHash(payment_id.0);
 
         let rgb_payment_info_path_outbound =
-            get_rgb_payment_info_path(payment_hash, ldk_data_dir_path, false);
+            get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, false);
 
         let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
             let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
@@ -1754,7 +1757,6 @@ pub(crate) async fn maker_execute(
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
-        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
 
         let swapstring = SwapString::from_str(&payload.swapstring)
             .map_err(|e| APIError::InvalidSwapString(payload.swapstring.clone(), e.to_string()))?;
@@ -1782,8 +1784,11 @@ pub(crate) async fn maker_execute(
             .list_usable_channels()
             .iter()
             .filter(|details| {
-                match get_rgb_channel_info_optional(&details.channel_id, &ldk_data_dir_path, false)
-                {
+                match get_rgb_channel_info_optional(
+                    &details.channel_id,
+                    &state.static_state.ldk_data_dir,
+                    false,
+                ) {
                     _ if swap_info.is_from_btc() => true,
                     Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap_info.from_asset => {
                         true
@@ -1906,7 +1911,7 @@ pub(crate) async fn maker_execute(
 
         if swap_info.is_to_asset() {
             write_rgb_payment_info_file(
-                &ldk_data_dir_path,
+                &state.static_state.ldk_data_dir,
                 &swapstring.payment_hash,
                 swap_info.to_asset.unwrap(),
                 swap_info.qty_to,
@@ -1951,7 +1956,6 @@ pub(crate) async fn maker_init(
 ) -> Result<Json<MakerInitResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
-        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
 
         let from_asset = match &payload.from_asset {
             None => None,
@@ -1994,7 +1998,7 @@ pub(crate) async fn maker_init(
         if let Some(to_asset) = to_asset {
             let max_balance = get_max_local_rgb_amount(
                 to_asset,
-                &ldk_data_dir_path,
+                &state.static_state.ldk_data_dir,
                 unlocked_state.channel_manager.list_channels().iter(),
             );
             if swap_info.qty_to > max_balance {
@@ -2151,27 +2155,28 @@ pub(crate) async fn open_channel(
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 
         if let Some((contract_id, asset_amount)) = &colored_info {
-            let peer_data_path = format!(
-                "{}/channel_peer_data",
-                state.static_state.ldk_data_dir.clone()
-            );
-            let _ = disk::persist_channel_peer(
-                Path::new(&peer_data_path),
-                &payload.peer_pubkey_and_addr,
-            );
+            let peer_data_path = state.static_state.ldk_data_dir.join("channel_peer_data");
+            let _ = disk::persist_channel_peer(&peer_data_path, &payload.peer_pubkey_and_addr);
 
             let rgb_info = RgbInfo {
                 contract_id: *contract_id,
                 local_rgb_amount: *asset_amount,
                 remote_rgb_amount: 0,
             };
-            let ldk_data_dir_path = PathBuf::from(&state.static_state.ldk_data_dir);
             write_rgb_channel_info(
-                &get_rgb_channel_info_path(&temporary_channel_id, &ldk_data_dir_path, true),
+                &get_rgb_channel_info_path(
+                    &temporary_channel_id,
+                    &state.static_state.ldk_data_dir,
+                    true,
+                ),
                 &rgb_info,
             );
             write_rgb_channel_info(
-                &get_rgb_channel_info_path(&temporary_channel_id, &ldk_data_dir_path, false),
+                &get_rgb_channel_info_path(
+                    &temporary_channel_id,
+                    &state.static_state.ldk_data_dir,
+                    false,
+                ),
                 &rgb_info,
             );
         }
@@ -2210,7 +2215,7 @@ pub(crate) async fn restore(
         check_already_initialized(&mnemonic_path)?;
 
         restore_backup(
-            &payload.backup_path,
+            Path::new(&payload.backup_path),
             &payload.password,
             &state.static_state.storage_dir_path,
         )?;
@@ -2488,7 +2493,6 @@ pub(crate) async fn taker(
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
-        let ldk_data_dir_path = PathBuf::from(state.static_state.ldk_data_dir.clone());
         let swapstring = SwapString::from_str(&payload.swapstring)
             .map_err(|e| APIError::InvalidSwapString(payload.swapstring.clone(), e.to_string()))?;
 
@@ -2500,7 +2504,7 @@ pub(crate) async fn taker(
         if let Some(from_asset) = swapstring.swap_info.from_asset {
             let max_balance = get_max_local_rgb_amount(
                 from_asset,
-                &ldk_data_dir_path,
+                &state.static_state.ldk_data_dir,
                 unlocked_state.channel_manager.list_channels().iter(),
             );
             if swapstring.swap_info.qty_from > max_balance {

@@ -41,14 +41,13 @@ struct CypherSecrets {
 /// Scrypt is used for hashing and xchacha20poly1305 is used for encryption. A random salt for
 /// hashing and a random nonce for encrypting are randomly generated and included in the final
 /// backup file, along with the backup version
-pub fn do_backup(wallet_dir: PathBuf, backup_path: &str, password: &str) -> Result<(), APIError> {
+pub fn do_backup(wallet_dir: &Path, backup_file: &Path, password: &str) -> Result<(), APIError> {
     // setup
     tracing::info!("starting backup...");
-    let backup_file = PathBuf::from(&backup_path);
     if backup_file.exists() {
         Err(APIError::InvalidBackupPath)?;
     }
-    let tmp_base_path = _get_parent_path(&backup_file)?;
+    let tmp_base_path = _get_parent_path(backup_file)?;
     let files = _get_backup_paths(&tmp_base_path)?;
     let salt: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -65,7 +64,7 @@ pub fn do_backup(wallet_dir: PathBuf, backup_path: &str, password: &str) -> Resu
 
     // create zip archive of wallet data
     tracing::debug!("\nzipping {:?} to {:?}", &wallet_dir, &files.zip);
-    _zip_dir(&wallet_dir, &files.zip)?;
+    _zip_dir(wallet_dir, &files.zip)?;
 
     // encrypt the backup file
     tracing::debug!("\nencrypting {:?} to {:?}", &files.zip, &files.encrypted);
@@ -76,14 +75,18 @@ pub fn do_backup(wallet_dir: PathBuf, backup_path: &str, password: &str) -> Resu
     write(files.salt, salt)?;
     write(files.version, BACKUP_VERSION.to_string())?;
     tracing::debug!("\nzipping {:?} to {:?}", &files.tempdir, &backup_file);
-    _zip_dir(&PathBuf::from(files.tempdir.path()), &backup_file)?;
+    _zip_dir(files.tempdir.path(), backup_file)?;
 
     tracing::info!("backup completed");
     Ok(())
 }
 
 /// Restore a backup from the given file and password to the provided target directory.
-pub fn restore_backup(backup_path: &str, password: &str, target_dir: &str) -> Result<(), APIError> {
+pub fn restore_backup(
+    backup_path: &Path,
+    password: &str,
+    target_dir: &Path,
+) -> Result<(), APIError> {
     // setup
     tracing::info!("starting restore...");
     let backup_file = PathBuf::from(backup_path);
@@ -144,7 +147,7 @@ fn _get_parent_path(file: &Path) -> Result<PathBuf, APIError> {
     }
 }
 
-fn _zip_dir(path_in: &PathBuf, path_out: &PathBuf) -> Result<(), APIError> {
+fn _zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
     // setup
     let writer = File::create(path_out)?;
     let mut zip = zip::ZipWriter::new(writer);

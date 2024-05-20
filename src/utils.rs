@@ -25,6 +25,7 @@ use std::{
     fs,
     net::{SocketAddr, ToSocketAddrs},
     path::Path,
+    path::PathBuf,
     str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
     time::{Duration, SystemTime},
@@ -93,8 +94,8 @@ pub(crate) struct StaticState {
     pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
     pub(crate) ldk_announced_node_name: [u8; 32],
     pub(crate) network: Network,
-    pub(crate) storage_dir_path: String,
-    pub(crate) ldk_data_dir: String,
+    pub(crate) storage_dir_path: PathBuf,
+    pub(crate) ldk_data_dir: PathBuf,
     pub(crate) logger: Arc<FilesystemLogger>,
     pub(crate) electrum_url: String,
     pub(crate) proxy_endpoint: String,
@@ -160,8 +161,8 @@ impl Writeable for UserOnionMessageContents {
     }
 }
 
-pub(crate) fn check_already_initialized(mnemonic_path: &str) -> Result<(), APIError> {
-    if Path::new(&mnemonic_path).exists() {
+pub(crate) fn check_already_initialized(mnemonic_path: &Path) -> Result<(), APIError> {
+    if mnemonic_path.exists() {
         return Err(APIError::AlreadyInitialized);
     }
     Ok(())
@@ -178,7 +179,7 @@ pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> 
 
 pub(crate) fn check_password_validity(
     password: &str,
-    storage_dir_path: &str,
+    storage_dir_path: &Path,
 ) -> Result<Mnemonic, APIError> {
     let mnemonic_path = get_mnemonic_path(storage_dir_path);
     if let Ok(encrypted_mnemonic) = fs::read_to_string(mnemonic_path) {
@@ -192,23 +193,26 @@ pub(crate) fn check_password_validity(
     }
 }
 
-pub(crate) fn get_mnemonic_path(storage_dir_path: &str) -> String {
-    format!("{}/mnemonic", storage_dir_path)
+pub(crate) fn get_mnemonic_path(storage_dir_path: &Path) -> PathBuf {
+    storage_dir_path.join("mnemonic")
 }
 
 pub(crate) fn encrypt_and_save_mnemonic(
     password: String,
     mnemonic: String,
-    mnemonic_path: String,
+    mnemonic_path: &Path,
 ) -> Result<(), APIError> {
     let mcrypt = new_magic_crypt!(password, 256);
     let encrypted_mnemonic = mcrypt.encrypt_str_to_base64(mnemonic);
-    match fs::write(mnemonic_path.clone(), encrypted_mnemonic) {
+    match fs::write(mnemonic_path, encrypted_mnemonic) {
         Ok(()) => {
             tracing::info!("Created a new wallet");
             Ok(())
         }
-        Err(e) => Err(APIError::FailedKeysCreation(mnemonic_path, e.to_string())),
+        Err(e) => Err(APIError::FailedKeysCreation(
+            mnemonic_path.to_string_lossy().to_string(),
+            e.to_string(),
+        )),
     }
 }
 
@@ -344,7 +348,7 @@ pub(crate) fn parse_peer_info(
 
 pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, AppError> {
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
-    let ldk_data_dir = format!("{}/{LDK_DIR}", args.storage_dir_path);
+    let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
 
     // Initialize our bitcoind client.
@@ -394,14 +398,10 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
             return Err(AppError::UnsupportedBitcoinNetwork);
         }
     };
-    fs::write(
-        format!("{}/{ELECTRUM_URL_FNAME}", args.storage_dir_path),
-        electrum_url,
-    )
-    .expect("able to write");
+    fs::write(args.storage_dir_path.join(ELECTRUM_URL_FNAME), electrum_url).expect("able to write");
     let bitcoin_network = get_bitcoin_network(&network);
     fs::write(
-        format!("{}/{BITCOIN_NETWORK_FNAME}", args.storage_dir_path),
+        args.storage_dir_path.join(BITCOIN_NETWORK_FNAME),
         bitcoin_network.to_string(),
     )
     .expect("able to write");

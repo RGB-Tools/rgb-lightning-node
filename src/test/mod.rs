@@ -5,7 +5,7 @@ use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::net::{SocketAddr, TcpListener};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::sync::{Once, RwLock};
@@ -46,7 +46,7 @@ impl Default for LdkUserInfo {
             ldk_announced_listen_addr: vec![],
             ldk_announced_node_name: [0; 32],
             network: Network::Regtest,
-            storage_dir_path: s!("tmp/test_name/nodeN"),
+            storage_dir_path: PathBuf::from("tmp/test_name/nodeN"),
             daemon_listening_port: 3001,
             ldk_peer_listening_port: 9735,
         }
@@ -116,7 +116,7 @@ async fn start_daemon(node_test_dir: &str, node_peer_port: u16) -> SocketAddr {
     let node_address = listener.local_addr().unwrap();
     std::fs::create_dir_all(node_test_dir).unwrap();
     let args = LdkUserInfo {
-        storage_dir_path: node_test_dir.to_string(),
+        storage_dir_path: node_test_dir.into(),
         ldk_peer_listening_port: node_peer_port,
         ..Default::default()
     };

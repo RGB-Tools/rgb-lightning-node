@@ -46,7 +46,7 @@ pub(crate) struct LdkUserInfo {
     pub(crate) bitcoind_rpc_password: String,
     pub(crate) bitcoind_rpc_port: u16,
     pub(crate) bitcoind_rpc_host: String,
-    pub(crate) storage_dir_path: String,
+    pub(crate) storage_dir_path: PathBuf,
     pub(crate) daemon_listening_port: u16,
     pub(crate) ldk_peer_listening_port: u16,
     pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
@@ -90,8 +90,6 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
         )));
     };
 
-    let storage_dir_path = args.storage_directory_path.to_string_lossy().to_string();
-
     let daemon_listening_port = args.daemon_listening_port;
 
     let ldk_peer_listening_port = args.ldk_peer_listening_port;
@@ -131,7 +129,7 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
         bitcoind_rpc_password,
         bitcoind_rpc_host,
         bitcoind_rpc_port,
-        storage_dir_path,
+        storage_dir_path: args.storage_directory_path,
         daemon_listening_port,
         ldk_peer_listening_port,
         ldk_announced_listen_addr,
@@ -154,19 +152,16 @@ const BITCOIND_RPC_PASSWORD_KEY: &str = "RPC_PASSWORD";
 
 fn print_rpc_auth_help() {
     // Get the default data directory
-    let home_directory = home_dir()
-        .as_ref()
-        .and_then(|p| p.to_str())
-        .unwrap_or("$HOME")
-        .replace('\\', "/");
-    let data_dir = format!("{}/{}", home_directory, DEFAULT_BITCOIN_DATADIR);
+    let data_dir = home_dir()
+        .expect("home is defined")
+        .join(DEFAULT_BITCOIN_DATADIR);
     println!("To provide the bitcoind RPC username and password, you can either:");
     println!(
         "1. Provide the username and password as the first argument to this program in the format: \
         <bitcoind-rpc-username>:<bitcoind-rpc-password>@<bitcoind-rpc-host>:<bitcoind-rpc-port>"
     );
     println!("2. Provide <bitcoind-rpc-username>:<bitcoind-rpc-password> in a .cookie file in the default \
-        bitcoind data directory (automatically created by bitcoind on startup): `{}`", data_dir);
+        bitcoind data directory (automatically created by bitcoind on startup): `{}`", data_dir.to_string_lossy());
     println!(
         "3. Set the {} and {} environment variables",
         BITCOIND_RPC_USER_KEY, BITCOIND_RPC_PASSWORD_KEY

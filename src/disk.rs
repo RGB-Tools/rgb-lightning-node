@@ -9,7 +9,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::APIError;
@@ -27,11 +27,11 @@ pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
 pub(crate) const PENDING_SPENDABLE_OUTPUT_DIR: &str = "pending_spendable_outputs";
 
 pub(crate) struct FilesystemLogger {
-    data_dir: String,
+    data_dir: PathBuf,
 }
 impl FilesystemLogger {
-    pub(crate) fn new(data_dir: String) -> Self {
-        let logs_path = format!("{}/{}", data_dir, LOGS_DIR);
+    pub(crate) fn new(data_dir: PathBuf) -> Self {
+        let logs_path = data_dir.join(LOGS_DIR);
         fs::create_dir_all(logs_path.clone()).unwrap();
         Self {
             data_dir: logs_path,
@@ -52,7 +52,7 @@ impl Logger for FilesystemLogger {
             record.line,
             raw_log
         );
-        let logs_file_path = format!("{}/{LDK_LOGS_FILE}", self.data_dir.clone());
+        let logs_file_path = self.data_dir.join(LDK_LOGS_FILE);
         fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -74,7 +74,7 @@ pub(crate) fn read_channel_peer_data(
     path: &Path,
 ) -> Result<HashMap<PublicKey, SocketAddr>, APIError> {
     let mut peer_data = HashMap::new();
-    if !Path::new(&path).exists() {
+    if !path.exists() {
         return Ok(HashMap::new());
     }
     let file = File::open(path)?;

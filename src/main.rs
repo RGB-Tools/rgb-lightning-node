@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     let stdout_log = tracing_subscriber::fmt::layer();
 
     // file logger
-    let log_dir = format!("{}/{}", args.storage_dir_path, LOGS_DIR);
+    let log_dir = args.storage_dir_path.join(LOGS_DIR);
     let file_appender = tracing_appender::rolling::daily(&log_dir, "rln.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_log = tracing_subscriber::fmt::layer()

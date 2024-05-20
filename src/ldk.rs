@@ -346,10 +346,9 @@ pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
     Arc<FilesystemLogger>,
 >;
 
-fn _update_rgb_channel_amount(ldk_data_dir: &str, payment_hash: &PaymentHash, receiver: bool) {
-    let ldk_data_dir_path = PathBuf::from(ldk_data_dir);
+fn _update_rgb_channel_amount(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
     let payment_hash_str = hex_str(&payment_hash.0);
-    for entry in fs::read_dir(&ldk_data_dir_path).unwrap() {
+    for entry in fs::read_dir(ldk_data_dir).unwrap() {
         let file = entry.unwrap();
         let file_name = file.file_name();
         let file_name_str = file_name.to_string_lossy();
@@ -369,13 +368,7 @@ fn _update_rgb_channel_amount(ldk_data_dir: &str, payment_hash: &PaymentHash, re
             } else {
                 (rgb_payment_info.amount, 0)
             };
-            update_rgb_channel_amount(
-                &channel_id_str,
-                offered,
-                received,
-                &ldk_data_dir_path,
-                false,
-            );
+            update_rgb_channel_amount(&channel_id_str, offered, received, ldk_data_dir, false);
             break;
         }
     }
@@ -453,7 +446,9 @@ async fn handle_ldk_events(
             let funding_tx = psbt.clone().extract_tx();
             let funding_txid = funding_tx.txid().to_string();
 
-            let psbt_path = format!("{}/psbt_{funding_txid}", static_state.ldk_data_dir);
+            let psbt_path = static_state
+                .ldk_data_dir
+                .join(format!("psbt_{funding_txid}"));
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
             if is_colored {
@@ -668,7 +663,6 @@ async fn handle_ldk_events(
             inbound_amount_forwarded_rgb,
             payment_hash,
         } => {
-            let ldk_data_dir_path = Path::new(&static_state.ldk_data_dir);
             let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
             let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
@@ -677,7 +671,7 @@ async fn handle_ldk_events(
                     &next_channel_id_str,
                     outbound_amount_forwarded_rgb,
                     0,
-                    ldk_data_dir_path,
+                    &static_state.ldk_data_dir,
                     false,
                 );
             }
@@ -686,7 +680,7 @@ async fn handle_ldk_events(
                     &prev_channel_id_str,
                     0,
                     inbound_amount_forwarded_rgb,
-                    ldk_data_dir_path,
+                    &static_state.ldk_data_dir,
                     false,
                 );
             }
@@ -807,9 +801,11 @@ async fn handle_ldk_events(
             );
 
             let funding_txid = funding_txo.txid.to_string();
-            let psbt_path = format!("{}/psbt_{funding_txid}", static_state.ldk_data_dir);
+            let psbt_path = static_state
+                .ldk_data_dir
+                .join(format!("psbt_{funding_txid}"));
 
-            if Path::new(&psbt_path).exists() {
+            if psbt_path.exists() {
                 let psbt_str = fs::read_to_string(psbt_path).unwrap();
 
                 let state_copy = unlocked_state.clone();
@@ -825,9 +821,10 @@ async fn handle_ldk_events(
                 .unwrap();
             } else {
                 // acceptor
-                let consignment_path =
-                    format!("{}/consignment_{funding_txid}", static_state.ldk_data_dir);
-                if !Path::new(&consignment_path).exists() {
+                let consignment_path = static_state
+                    .ldk_data_dir
+                    .join(format!("consignment_{funding_txid}"));
+                if !consignment_path.exists() {
                     return;
                 }
                 let consignment = Bindle::<RgbTransfer>::load(consignment_path)
@@ -835,7 +832,7 @@ async fn handle_ldk_events(
                 let contract_id = consignment.contract_id();
                 let schema_id = consignment.schema_id().to_string();
                 let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
-                let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
+                let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
 
                 match unlocked_state.rgb_save_new_asset(&mut runtime, &asset_schema, contract_id) {
                     Ok(_) => {}
@@ -1050,8 +1047,10 @@ async fn _spend_outputs(
         let txid = outpoint.txid;
         let witness_txid = RgbTxid::from_str(&txid.to_string()).unwrap();
 
-        let transfer_info_path = format!("{}/{txid}_transfer_info", static_state.ldk_data_dir);
-        if !Path::new(&transfer_info_path).exists() {
+        let transfer_info_path = static_state
+            .ldk_data_dir
+            .join(format!("{txid}_transfer_info"));
+        if !transfer_info_path.exists() {
             vanilla_output_descriptors.push(*outp);
             continue;
         };
@@ -1073,7 +1072,7 @@ async fn _spend_outputs(
         let script_buf = ScriptBuf::from_hex(&script_buf_str).unwrap();
         let bdk_script = BdkScript::from(script_buf.clone().into_bytes());
 
-        let mut runtime = get_rgb_runtime(Path::new(&static_state.ldk_data_dir));
+        let mut runtime = get_rgb_runtime(&static_state.ldk_data_dir);
 
         runtime
             .runtime
@@ -1269,7 +1268,9 @@ async fn _spend_outputs(
         broadcast_tx(&tx, static_state.electrum_url.clone());
 
         let closing_txid = tx.txid().to_string();
-        let consignment_path = format!("{}/consignment_{closing_txid}", static_state.ldk_data_dir);
+        let consignment_path = static_state
+            .ldk_data_dir
+            .join(format!("consignment_{closing_txid}"));
         consignment
             .save(&consignment_path)
             .expect("successful save");
@@ -1279,7 +1280,7 @@ async fn _spend_outputs(
             proxy_ref,
             &proxy_url_copy,
             script_buf_str,
-            consignment_path.into(),
+            consignment_path,
             closing_txid,
             Some(vout),
         )
@@ -1374,14 +1375,12 @@ async fn periodic_sweep(
 }
 
 async fn sweep(unlocked_state: Arc<UnlockedAppState>, static_state: Arc<StaticState>) {
-    let pending_spendables_dir = format!(
-        "{}/{}",
-        static_state.ldk_data_dir, PENDING_SPENDABLE_OUTPUT_DIR
-    );
-    let processing_spendables_dir =
-        format!("{}/processing_spendable_outputs", static_state.ldk_data_dir);
+    let pending_spendables_dir = static_state.ldk_data_dir.join(PENDING_SPENDABLE_OUTPUT_DIR);
+    let processing_spendables_dir = static_state
+        .ldk_data_dir
+        .join("processing_spendable_outputs");
     let spendable_outputs = "spendable_outputs";
-    let spendables_dir = format!("{}/{}", static_state.ldk_data_dir, spendable_outputs);
+    let spendables_dir = static_state.ldk_data_dir.join(spendable_outputs);
 
     // shouldn't be needed as lock/shutdown wait for the task to exit
     if let Ok(dir_iter) = fs::read_dir(&pending_spendables_dir) {
@@ -1520,7 +1519,7 @@ pub(crate) async fn start_ldk(
     ));
 
     // Initialize Persistence
-    let fs_store = Arc::new(FilesystemStore::new(ldk_data_dir.clone().into()));
+    let fs_store = Arc::new(FilesystemStore::new(ldk_data_dir.clone()));
     let persister = Arc::new(MonitorUpdatingPersister::new(
         Arc::clone(&fs_store),
         Arc::clone(&logger),
@@ -1550,16 +1549,16 @@ pub(crate) async fn start_ldk(
         .expect("Failed to fetch best block header and best block");
 
     // Initialize routing ProbabilisticScorer
-    let network_graph_path = format!("{}/network_graph", ldk_data_dir.clone());
+    let network_graph_path = ldk_data_dir.join("network_graph");
     let network_graph = Arc::new(disk::read_network(
-        Path::new(&network_graph_path),
+        &network_graph_path,
         network,
         logger.clone(),
     ));
 
-    let scorer_path = format!("{}/scorer", ldk_data_dir.clone());
+    let scorer_path = ldk_data_dir.join("scorer");
     let scorer = Arc::new(RwLock::new(disk::read_scorer(
-        Path::new(&scorer_path),
+        &scorer_path,
         Arc::clone(&network_graph),
         Arc::clone(&logger),
     )));
@@ -1585,7 +1584,7 @@ pub(crate) async fn start_ldk(
     user_config.manually_accept_inbound_channels = true;
     let mut restarting_node = true;
     let (channel_manager_blockhash, channel_manager) = {
-        if let Ok(mut f) = fs::File::open(format!("{}/manager", ldk_data_dir.clone())) {
+        if let Ok(mut f) = fs::File::open(ldk_data_dir.join("manager")) {
             let mut channel_monitor_mut_references = Vec::new();
             for (_, channel_monitor) in channelmonitors.iter_mut() {
                 channel_monitor_mut_references.push(channel_monitor);
@@ -1771,12 +1770,12 @@ pub(crate) async fn start_ldk(
         }
     });
 
-    let inbound_payments = Arc::new(Mutex::new(disk::read_inbound_payment_info(Path::new(
-        &format!("{}/{}", ldk_data_dir, INBOUND_PAYMENTS_FNAME),
-    ))));
-    let outbound_payments = Arc::new(Mutex::new(disk::read_outbound_payment_info(Path::new(
-        &format!("{}/{}", ldk_data_dir, OUTBOUND_PAYMENTS_FNAME),
-    ))));
+    let inbound_payments = Arc::new(Mutex::new(disk::read_inbound_payment_info(
+        &ldk_data_dir.join(INBOUND_PAYMENTS_FNAME),
+    )));
+    let outbound_payments = Arc::new(Mutex::new(disk::read_outbound_payment_info(
+        &ldk_data_dir.join(OUTBOUND_PAYMENTS_FNAME),
+    )));
 
     let xkey: ExtendedKey = mnemonic
         .clone()
@@ -1784,7 +1783,11 @@ pub(crate) async fn start_ldk(
         .expect("a valid key should have been provided");
     let xpub = xkey.into_xpub(network, &secp);
     let pubkey = xpub.to_string();
-    let data_dir = static_state.storage_dir_path.clone();
+    let data_dir = static_state
+        .storage_dir_path
+        .clone()
+        .to_string_lossy()
+        .to_string();
     let mut rgb_wallet = tokio::task::spawn_blocking(move || {
         RgbLibWallet::new(WalletData {
             data_dir,
@@ -1803,10 +1806,7 @@ pub(crate) async fn start_ldk(
         .go_online(false, electrum_url.clone())
         .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
     fs::write(
-        format!(
-            "{}/{WALLET_FINGERPRINT_FNAME}",
-            static_state.storage_dir_path
-        ),
+        static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
         xpub.fingerprint().to_string(),
     )
     .expect("able to write");
@@ -1827,14 +1827,12 @@ pub(crate) async fn start_ldk(
     // Persist ChannelManager and NetworkGraph
     let persister = Arc::new(FilesystemStore::new(ldk_data_dir_path.clone()));
 
-    let maker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(Path::new(&format!(
-        "{}/{}",
-        ldk_data_dir, MAKER_SWAPS_FNAME
-    )))));
-    let taker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(Path::new(&format!(
-        "{}/{}",
-        ldk_data_dir, TAKER_SWAPS_FNAME
-    )))));
+    let maker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
+        &ldk_data_dir.join(MAKER_SWAPS_FNAME),
+    )));
+    let taker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
+        &ldk_data_dir.join(TAKER_SWAPS_FNAME),
+    )));
 
     let unlocked_state = Arc::new(UnlockedAppState {
         channel_manager: Arc::clone(&channel_manager),
@@ -1903,14 +1901,14 @@ pub(crate) async fn start_ldk(
     // Regularly reconnect to channel peers.
     let connect_cm = Arc::clone(&channel_manager);
     let connect_pm = Arc::clone(&peer_manager);
-    let peer_data_path = format!("{}/channel_peer_data", ldk_data_dir.clone());
+    let peer_data_path = ldk_data_dir.join("channel_peer_data");
     let stop_connect = Arc::clone(&stop_processing);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            match disk::read_channel_peer_data(Path::new(&peer_data_path)) {
+            match disk::read_channel_peer_data(&peer_data_path) {
                 Ok(info) => {
                     let peers = connect_pm.get_peer_node_ids();
                     for node_id in connect_cm
