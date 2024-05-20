@@ -38,6 +38,17 @@ async fn swap_roundtrip_buy_same_channel() {
     )
     .await;
 
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    let chan_1_12_before = channels_1_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_2_12_before = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+
     println!("\nsetup swap");
     let maker_addr = node1_addr;
     let taker_addr = node2_addr;
@@ -119,6 +130,25 @@ async fn swap_roundtrip_buy_same_channel() {
     assert!(payments_maker.is_empty());
     let payments_taker = list_payments(taker_addr).await;
     assert!(payments_taker.is_empty());
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    let chan_1_12 = channels_1
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_2_12 = channels_2
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    assert_eq!(
+        chan_1_12.local_balance_msat,
+        chan_1_12_before.local_balance_msat + qty_from
+    );
+    assert_eq!(
+        chan_2_12.local_balance_msat,
+        chan_2_12_before.local_balance_msat - qty_from
+    );
 
     println!("\nclose channels");
     close_channel(node1_addr, &channel_12.channel_id, &node2_pubkey, false).await;

@@ -1,3 +1,5 @@
+use self::routes::HTLC_MIN_MSAT;
+
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/swap_roundtrip_multihop_buy/";
@@ -84,6 +86,42 @@ async fn swap_roundtrip_multihop_buy() {
     )
     .await;
 
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    let channels_3_before = list_channels(node3_addr).await;
+    let chan_1_12_before = channels_1_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_1_21_before = channels_1_before
+        .iter()
+        .find(|c| c.channel_id == channel_21.channel_id)
+        .unwrap();
+    let chan_2_12_before = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_2_23_before = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_2_32_before = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_32.channel_id)
+        .unwrap();
+    let chan_2_21_before = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_21.channel_id)
+        .unwrap();
+    let chan_3_23_before = channels_3_before
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_3_32_before = channels_3_before
+        .iter()
+        .find(|c| c.channel_id == channel_32.channel_id)
+        .unwrap();
+
     println!("\nsetup swap");
     let maker_addr = node1_addr;
     let taker_addr = node3_addr;
@@ -168,6 +206,76 @@ async fn swap_roundtrip_multihop_buy() {
     assert!(payments_maker.is_empty());
     let payments_taker = list_payments(taker_addr).await;
     assert!(payments_taker.is_empty());
+
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    let channels_3_before = list_channels(node3_addr).await;
+    let chan_1_12 = channels_1_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_1_21 = channels_1_before
+        .iter()
+        .find(|c| c.channel_id == channel_21.channel_id)
+        .unwrap();
+    let chan_2_12 = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_12.channel_id)
+        .unwrap();
+    let chan_2_23 = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_2_32 = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_32.channel_id)
+        .unwrap();
+    let chan_2_21 = channels_2_before
+        .iter()
+        .find(|c| c.channel_id == channel_21.channel_id)
+        .unwrap();
+    let chan_3_23 = channels_3_before
+        .iter()
+        .find(|c| c.channel_id == channel_23.channel_id)
+        .unwrap();
+    let chan_3_32 = channels_3_before
+        .iter()
+        .find(|c| c.channel_id == channel_32.channel_id)
+        .unwrap();
+    let btc_leg_diff = HTLC_MIN_MSAT + qty_from;
+    let fees = 1000;
+    assert_eq!(
+        chan_1_12.local_balance_msat,
+        chan_1_12_before.local_balance_msat - HTLC_MIN_MSAT - (fees * 2)
+    );
+    assert_eq!(
+        chan_2_12.local_balance_msat,
+        chan_2_12_before.local_balance_msat + HTLC_MIN_MSAT + (fees * 2)
+    );
+    assert_eq!(
+        chan_2_23.local_balance_msat,
+        chan_2_23_before.local_balance_msat - HTLC_MIN_MSAT - fees
+    );
+    assert_eq!(
+        chan_3_23.local_balance_msat,
+        chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT + fees
+    );
+    assert_eq!(
+        chan_3_32.local_balance_msat,
+        chan_3_32_before.local_balance_msat - btc_leg_diff - fees
+    );
+    assert_eq!(
+        chan_2_32.local_balance_msat,
+        chan_2_32_before.local_balance_msat + btc_leg_diff + fees
+    );
+    assert_eq!(
+        chan_2_21.local_balance_msat,
+        chan_2_21_before.local_balance_msat - btc_leg_diff
+    );
+    assert_eq!(
+        chan_1_21.local_balance_msat,
+        chan_1_21_before.local_balance_msat + btc_leg_diff
+    );
 
     println!("\nclose channels");
     close_channel(node1_addr, &channel_12.channel_id, &node2_pubkey, false).await;
