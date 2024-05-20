@@ -210,7 +210,7 @@ async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
         .unwrap();
 }
 
-async fn btc_balance(node_address: SocketAddr) -> u64 {
+async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
     let res = reqwest::Client::new()
         .get(format!("http://{}/btcbalance", node_address))
         .send()
@@ -221,8 +221,6 @@ async fn btc_balance(node_address: SocketAddr) -> u64 {
         .json::<BtcBalanceResponse>()
         .await
         .unwrap()
-        .vanilla
-        .spendable
 }
 
 async fn check_payment_status(
