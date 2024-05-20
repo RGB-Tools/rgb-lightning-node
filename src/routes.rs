@@ -475,6 +475,10 @@ pub(crate) struct MakerExecuteRequest {
     pub(crate) taker_pubkey: String,
 }
 
+// "from" and "to" are seen from the taker's perspective, so:
+// - "from" is what the taker will send and the maker will receive
+// - "to" is what the taker will receive and the maker will send
+// qty_from and qty_to are in msat when the asset is BTC
 #[derive(Deserialize, Serialize)]
 pub(crate) struct MakerInitRequest {
     pub(crate) qty_from: u64,
