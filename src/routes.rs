@@ -409,9 +409,9 @@ pub(crate) struct ListAssetsRequest {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListAssetsResponse {
-    pub(crate) nia: Vec<AssetNIA>,
-    pub(crate) uda: Vec<AssetUDA>,
-    pub(crate) cfa: Vec<AssetCFA>,
+    pub(crate) nia: Option<Vec<AssetNIA>>,
+    pub(crate) uda: Option<Vec<AssetUDA>>,
+    pub(crate) cfa: Option<Vec<AssetCFA>>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1324,53 +1324,68 @@ pub(crate) async fn list_assets(
             .collect(),
     )?;
 
-    let mut nia = vec![];
-    for asset in rgb_assets.nia.unwrap() {
-        nia.push(AssetNIA {
-            asset_id: asset.asset_id,
-            asset_iface: asset.asset_iface.into(),
-            ticker: asset.ticker,
-            name: asset.name,
-            details: asset.details,
-            precision: asset.precision,
-            issued_supply: asset.issued_supply,
-            timestamp: asset.timestamp,
-            added_at: asset.added_at,
-            balance: asset.balance.into(),
-            media: asset.media.map(|m| m.into()),
-        })
-    }
-    let mut uda = vec![];
-    for asset in rgb_assets.uda.unwrap() {
-        uda.push(AssetUDA {
-            asset_id: asset.asset_id,
-            asset_iface: asset.asset_iface.into(),
-            ticker: asset.ticker,
-            name: asset.name,
-            details: asset.details,
-            precision: asset.precision,
-            issued_supply: asset.issued_supply,
-            timestamp: asset.timestamp,
-            added_at: asset.added_at,
-            balance: asset.balance.into(),
-            token: asset.token.map(|t| t.into()),
-        })
-    }
-    let mut cfa = vec![];
-    for asset in rgb_assets.cfa.unwrap() {
-        cfa.push(AssetCFA {
-            asset_id: asset.asset_id,
-            asset_iface: asset.asset_iface.into(),
-            name: asset.name,
-            details: asset.details,
-            precision: asset.precision,
-            issued_supply: asset.issued_supply,
-            timestamp: asset.timestamp,
-            added_at: asset.added_at,
-            balance: asset.balance.into(),
-            media: asset.media.map(|m| m.into()),
-        })
-    }
+    let nia = if let Some(assets) = rgb_assets.nia {
+        let mut nia = vec![];
+        for asset in assets {
+            nia.push(AssetNIA {
+                asset_id: asset.asset_id,
+                asset_iface: asset.asset_iface.into(),
+                ticker: asset.ticker,
+                name: asset.name,
+                details: asset.details,
+                precision: asset.precision,
+                issued_supply: asset.issued_supply,
+                timestamp: asset.timestamp,
+                added_at: asset.added_at,
+                balance: asset.balance.into(),
+                media: asset.media.map(|m| m.into()),
+            })
+        }
+        Some(nia)
+    } else {
+        None
+    };
+    let uda = if let Some(assets) = rgb_assets.uda {
+        let mut uda = vec![];
+        for asset in assets {
+            uda.push(AssetUDA {
+                asset_id: asset.asset_id,
+                asset_iface: asset.asset_iface.into(),
+                ticker: asset.ticker,
+                name: asset.name,
+                details: asset.details,
+                precision: asset.precision,
+                issued_supply: asset.issued_supply,
+                timestamp: asset.timestamp,
+                added_at: asset.added_at,
+                balance: asset.balance.into(),
+                token: asset.token.map(|t| t.into()),
+            })
+        }
+        Some(uda)
+    } else {
+        None
+    };
+    let cfa = if let Some(assets) = rgb_assets.cfa {
+        let mut cfa = vec![];
+        for asset in assets {
+            cfa.push(AssetCFA {
+                asset_id: asset.asset_id,
+                asset_iface: asset.asset_iface.into(),
+                name: asset.name,
+                details: asset.details,
+                precision: asset.precision,
+                issued_supply: asset.issued_supply,
+                timestamp: asset.timestamp,
+                added_at: asset.added_at,
+                balance: asset.balance.into(),
+                media: asset.media.map(|m| m.into()),
+            })
+        }
+        Some(cfa)
+    } else {
+        None
+    };
 
     Ok(Json(ListAssetsResponse { nia, uda, cfa }))
 }
