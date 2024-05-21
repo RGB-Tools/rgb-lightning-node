@@ -1,3 +1,5 @@
+use self::routes::HTLC_MIN_MSAT;
+
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/multi_hop/";
@@ -76,33 +78,32 @@ async fn multi_hop() {
     assert_eq!(balance_3.offchain_outbound, 0);
     assert_eq!(balance_3.offchain_inbound, 300);
     // check channel RGB amounts
-    let chan_1 = list_channels(node1_addr).await;
-    let chan_2 = list_channels(node2_addr).await;
-    let chan_3 = list_channels(node3_addr).await;
-    let chan_12 = chan_1
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    let channels_3_before = list_channels(node3_addr).await;
+    dbg!(&channels_1_before);
+    dbg!(&channels_2_before);
+    dbg!(&channels_3_before);
+    assert_eq!(channels_1_before.len(), 1);
+    assert_eq!(channels_3_before.len(), 1);
+    let chan_1_12_before = channels_1_before.first().unwrap();
+    let chan_2_12_before = channels_2_before
         .iter()
         .find(|c| c.channel_id == channel_12.channel_id)
         .unwrap();
-    let chan_21 = chan_2
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_23 = chan_2
+    let chan_2_23_before = channels_2_before
         .iter()
         .find(|c| c.channel_id == channel_23.channel_id)
         .unwrap();
-    let chan_32 = chan_3
-        .iter()
-        .find(|c| c.channel_id == channel_23.channel_id)
-        .unwrap();
-    assert_eq!(chan_12.asset_local_amount, Some(500));
-    assert_eq!(chan_12.asset_remote_amount, Some(0));
-    assert_eq!(chan_21.asset_local_amount, Some(0));
-    assert_eq!(chan_21.asset_remote_amount, Some(500));
-    assert_eq!(chan_23.asset_local_amount, Some(300));
-    assert_eq!(chan_23.asset_remote_amount, Some(0));
-    assert_eq!(chan_32.asset_local_amount, Some(0));
-    assert_eq!(chan_32.asset_remote_amount, Some(300));
+    let chan_3_23_before = channels_3_before.first().unwrap();
+    assert_eq!(chan_1_12_before.asset_local_amount, Some(500));
+    assert_eq!(chan_1_12_before.asset_remote_amount, Some(0));
+    assert_eq!(chan_2_12_before.asset_local_amount, Some(0));
+    assert_eq!(chan_2_12_before.asset_remote_amount, Some(500));
+    assert_eq!(chan_2_23_before.asset_local_amount, Some(300));
+    assert_eq!(chan_2_23_before.asset_remote_amount, Some(0));
+    assert_eq!(chan_3_23_before.asset_local_amount, Some(0));
+    assert_eq!(chan_3_23_before.asset_remote_amount, Some(300));
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
@@ -120,33 +121,29 @@ async fn multi_hop() {
     assert_eq!(balance_3.offchain_outbound, 50);
     assert_eq!(balance_3.offchain_inbound, 250);
     // check channel RGB amounts
-    let chan_1 = list_channels(node1_addr).await;
-    let chan_2 = list_channels(node2_addr).await;
-    let chan_3 = list_channels(node3_addr).await;
-    let chan_12 = chan_1
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    let channels_3 = list_channels(node3_addr).await;
+    assert_eq!(channels_1.len(), 1);
+    assert_eq!(channels_3.len(), 1);
+    let chan_1_12 = channels_1.first().unwrap();
+    let chan_2_12 = channels_2
         .iter()
         .find(|c| c.channel_id == channel_12.channel_id)
         .unwrap();
-    let chan_21 = chan_2
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_23 = chan_2
+    let chan_2_23 = channels_2
         .iter()
         .find(|c| c.channel_id == channel_23.channel_id)
         .unwrap();
-    let chan_32 = chan_3
-        .iter()
-        .find(|c| c.channel_id == channel_23.channel_id)
-        .unwrap();
-    assert_eq!(chan_12.asset_local_amount, Some(450));
-    assert_eq!(chan_12.asset_remote_amount, Some(50));
-    assert_eq!(chan_21.asset_local_amount, Some(50));
-    assert_eq!(chan_21.asset_remote_amount, Some(450));
-    assert_eq!(chan_23.asset_local_amount, Some(250));
-    assert_eq!(chan_23.asset_remote_amount, Some(50));
-    assert_eq!(chan_32.asset_local_amount, Some(50));
-    assert_eq!(chan_32.asset_remote_amount, Some(250));
+    let chan_3_23 = channels_3.first().unwrap();
+    assert_eq!(chan_1_12.asset_local_amount, Some(450));
+    assert_eq!(chan_1_12.asset_remote_amount, Some(50));
+    assert_eq!(chan_2_12.asset_local_amount, Some(50));
+    assert_eq!(chan_2_12.asset_remote_amount, Some(450));
+    assert_eq!(chan_2_23.asset_local_amount, Some(250));
+    assert_eq!(chan_2_23.asset_remote_amount, Some(50));
+    assert_eq!(chan_3_23.asset_local_amount, Some(50));
+    assert_eq!(chan_3_23.asset_remote_amount, Some(250));
 
     println!("restart all nodes");
     shutdown(&[node1_addr, node2_addr, node3_addr]).await;
@@ -166,33 +163,49 @@ async fn multi_hop() {
     assert_eq!(balance_3.offchain_outbound, 50);
     assert_eq!(balance_3.offchain_inbound, 250);
     // check channel RGB amounts
-    let chan_1 = list_channels(node1_addr).await;
-    let chan_2 = list_channels(node2_addr).await;
-    let chan_3 = list_channels(node3_addr).await;
-    let chan_12 = chan_1
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    let channels_3 = list_channels(node3_addr).await;
+    dbg!(&channels_1);
+    dbg!(&channels_2);
+    dbg!(&channels_3);
+    assert_eq!(channels_1.len(), 1);
+    assert_eq!(channels_3.len(), 1);
+    let chan_1_12 = channels_1.first().unwrap();
+    let chan_2_12 = channels_2
         .iter()
         .find(|c| c.channel_id == channel_12.channel_id)
         .unwrap();
-    let chan_21 = chan_2
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_23 = chan_2
+    let chan_2_23 = channels_2
         .iter()
         .find(|c| c.channel_id == channel_23.channel_id)
         .unwrap();
-    let chan_32 = chan_3
-        .iter()
-        .find(|c| c.channel_id == channel_23.channel_id)
-        .unwrap();
-    assert_eq!(chan_12.asset_local_amount, Some(450));
-    assert_eq!(chan_12.asset_remote_amount, Some(50));
-    assert_eq!(chan_21.asset_local_amount, Some(50));
-    assert_eq!(chan_21.asset_remote_amount, Some(450));
-    assert_eq!(chan_23.asset_local_amount, Some(250));
-    assert_eq!(chan_23.asset_remote_amount, Some(50));
-    assert_eq!(chan_32.asset_local_amount, Some(50));
-    assert_eq!(chan_32.asset_remote_amount, Some(250));
+    let chan_3_23 = channels_3.first().unwrap();
+    assert_eq!(chan_1_12.asset_local_amount, Some(450));
+    assert_eq!(chan_1_12.asset_remote_amount, Some(50));
+    assert_eq!(chan_2_12.asset_local_amount, Some(50));
+    assert_eq!(chan_2_12.asset_remote_amount, Some(450));
+    assert_eq!(chan_2_23.asset_local_amount, Some(250));
+    assert_eq!(chan_2_23.asset_remote_amount, Some(50));
+    assert_eq!(chan_3_23.asset_local_amount, Some(50));
+    assert_eq!(chan_3_23.asset_remote_amount, Some(250));
+    let fees = 1000;
+    assert_eq!(
+        chan_1_12.local_balance_msat,
+        chan_1_12_before.local_balance_msat - HTLC_MIN_MSAT - fees
+    );
+    assert_eq!(
+        chan_2_12.local_balance_msat,
+        chan_2_12_before.local_balance_msat + HTLC_MIN_MSAT + fees
+    );
+    assert_eq!(
+        chan_2_23.local_balance_msat,
+        chan_2_23_before.local_balance_msat - HTLC_MIN_MSAT
+    );
+    assert_eq!(
+        chan_3_23.local_balance_msat,
+        chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT
+    );
 
     close_channel(node2_addr, &channel_12.channel_id, &node1_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 550).await;

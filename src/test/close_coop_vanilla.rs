@@ -27,9 +27,18 @@ async fn close_coop_vanilla() {
 
     let initial_balance = 99677060;
 
-    assert_eq!(btc_balance(node1_addr).await.vanilla.spendable, initial_balance);
-    assert_eq!(btc_balance(node2_addr).await.vanilla.spendable, initial_balance);
-    assert_eq!(btc_balance(node3_addr).await.vanilla.spendable, initial_balance);
+    assert_eq!(
+        btc_balance(node1_addr).await.vanilla.spendable,
+        initial_balance
+    );
+    assert_eq!(
+        btc_balance(node2_addr).await.vanilla.spendable,
+        initial_balance
+    );
+    assert_eq!(
+        btc_balance(node3_addr).await.vanilla.spendable,
+        initial_balance
+    );
 
     let node1_info = node_info(node1_addr).await;
     let node2_info = node_info(node2_addr).await;

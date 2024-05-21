@@ -39,8 +39,15 @@ async fn vanilla_payment_on_rgb_channel() {
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
-    let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, Some(5000000), None, None, 900).await;
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    assert_eq!(channels_1_before.len(), 1);
+    assert_eq!(channels_2_before.len(), 1);
+    let chan_1_before = channels_1_before.first().unwrap();
+    let chan_2_before = channels_2_before.first().unwrap();
+
+    let amount = 5000000;
+    let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, Some(amount), None, None, 900).await;
     send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -58,6 +65,21 @@ async fn vanilla_payment_on_rgb_channel() {
         .unwrap();
     assert_eq!(payment.asset_id, None);
     assert_eq!(payment.asset_amount, None);
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 1);
+    assert_eq!(channels_2.len(), 1);
+    let chan_1 = channels_1.first().unwrap();
+    let chan_2 = channels_2.first().unwrap();
+    assert_eq!(
+        chan_1.local_balance_msat,
+        chan_1_before.local_balance_msat - amount
+    );
+    assert_eq!(
+        chan_2.local_balance_msat,
+        chan_2_before.local_balance_msat + amount
+    );
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 1000).await;

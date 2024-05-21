@@ -41,6 +41,13 @@ async fn payment() {
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    assert_eq!(channels_1_before.len(), 1);
+    assert_eq!(channels_2_before.len(), 1);
+    let chan_1_before = channels_1_before.first().unwrap();
+    let chan_2_before = channels_2_before.first().unwrap();
+
     let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
         ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -62,6 +69,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
     let payments = list_payments(node2_addr).await;
     let payment = payments
         .iter()
@@ -69,6 +77,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
@@ -90,6 +99,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
     let payments = list_payments(node2_addr).await;
     let payment = payments
         .iter()
@@ -97,6 +107,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -110,6 +121,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
     let payments = list_payments(node2_addr).await;
     let payment = payments
         .iter()
@@ -117,6 +129,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -130,6 +143,7 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
     let payments = list_payments(node2_addr).await;
     let payment = payments
         .iter()
@@ -137,6 +151,16 @@ async fn payment() {
         .unwrap();
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 1);
+    assert_eq!(channels_2.len(), 1);
+    let chan_1 = channels_1.first().unwrap();
+    let chan_2 = channels_2.first().unwrap();
+    assert_eq!(chan_1.local_balance_msat, chan_1_before.local_balance_msat);
+    assert_eq!(chan_2.local_balance_msat, chan_2_before.local_balance_msat);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 950).await;
