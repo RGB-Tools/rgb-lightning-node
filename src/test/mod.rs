@@ -13,12 +13,13 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetNIA, BackupRequest,
-    BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
-    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
+    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
+    BackupRequest, BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest,
+    CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
     DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
-    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetNIARequest,
-    IssueAssetNIAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
+    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
+    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
     ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
     ListPeersResponse, ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest,
     MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse,
@@ -407,6 +408,29 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
         .status
 }
 
+async fn issue_asset_cfa(node_address: SocketAddr) -> AssetCFA {
+    println!("issuing CFA asset on node {node_address}");
+    let payload = IssueAssetCFARequest {
+        amounts: vec![2000],
+        name: s!("Collectible"),
+        details: None,
+        precision: 0,
+        file_path: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/issueassetcfa", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<IssueAssetCFAResponse>()
+        .await
+        .unwrap()
+        .asset
+}
+
 async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
     println!("issuing NIA asset on node {node_address}");
     let payload = IssueAssetNIARequest {
@@ -424,6 +448,30 @@ async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
     _check_response_is_ok(res)
         .await
         .json::<IssueAssetNIAResponse>()
+        .await
+        .unwrap()
+        .asset
+}
+
+async fn issue_asset_uda(node_address: SocketAddr) -> AssetUDA {
+    println!("issuing UDA asset on node {node_address}");
+    let payload = IssueAssetUDARequest {
+        ticker: s!("UNI"),
+        name: s!("Unique"),
+        details: None,
+        precision: 0,
+        media_file_path: None,
+        attachments_file_paths: vec![],
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/issueassetuda", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<IssueAssetUDAResponse>()
         .await
         .unwrap()
         .asset
@@ -1274,6 +1322,7 @@ mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod invoice;
+mod issue;
 mod lock_unlock;
 mod multi_hop;
 mod multi_open_close;
