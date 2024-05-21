@@ -21,7 +21,7 @@ use lightning::rgb_utils::{
 use rgb_core::Operation;
 use rgb_lib::utils::RgbRuntime;
 use rgb_lib::wallet::{
-    AssetNIA, Assets, Balance, BtcBalance, Online, ReceiveData, Recipient,
+    AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Online, ReceiveData, Recipient,
     Transaction as RgbLibTransaction, Transfer, Unspent,
 };
 use rgb_lib::{
@@ -129,6 +129,24 @@ impl UnlockedAppState {
         self.get_rgb_wallet().get_wallet_dir()
     }
 
+    pub(crate) fn rgb_issue_asset_cfa(
+        &self,
+        name: String,
+        details: Option<String>,
+        precision: u8,
+        amounts: Vec<u64>,
+        file_path: Option<String>,
+    ) -> Result<AssetCFA, RgbLibError> {
+        self.get_rgb_wallet().issue_asset_cfa(
+            self.rgb_online.clone(),
+            name,
+            details,
+            precision,
+            amounts,
+            file_path,
+        )
+    }
+
     pub(crate) fn rgb_issue_asset_nia(
         &self,
         ticker: String,
@@ -142,6 +160,26 @@ impl UnlockedAppState {
             name,
             precision,
             amounts,
+        )
+    }
+
+    pub(crate) fn rgb_issue_asset_uda(
+        &self,
+        ticker: String,
+        name: String,
+        details: Option<String>,
+        precision: u8,
+        media_file_path: Option<String>,
+        attachments_file_paths: Vec<String>,
+    ) -> Result<AssetUDA, RgbLibError> {
+        self.get_rgb_wallet().issue_asset_uda(
+            self.rgb_online.clone(),
+            ticker,
+            name,
+            details,
+            precision,
+            media_file_path,
+            attachments_file_paths,
         )
     }
 

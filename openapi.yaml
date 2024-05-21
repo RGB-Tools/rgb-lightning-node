@@ -254,24 +254,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InvoiceStatusResponse'
-  /issueasset:
+  /issueassetcfa:
     post:
       tags:
         - RGB
-      summary: Issue an RGB asset
-      description: Issue an RGB asset
+      summary: Issue an RGB CFA asset
+      description: Issue an RGB CFA asset
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/IssueAssetRequest'
+              $ref: '#/components/schemas/IssueAssetCFARequest'
       responses:
         '200':
           description: Successful operation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IssueAssetResponse'
+                $ref: '#/components/schemas/IssueAssetCFAResponse'
+  /issueassetnia:
+    post:
+      tags:
+        - RGB
+      summary: Issue an RGB NIA asset
+      description: Issue an RGB NIA asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueAssetNIARequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueAssetNIAResponse'
+  /issueassetuda:
+    post:
+      tags:
+        - RGB
+      summary: Issue an RGB UDA asset
+      description: Issue an RGB UDA asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueAssetUDARequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueAssetUDAResponse'
   /keysend:
     post:
       tags:
@@ -1081,14 +1117,39 @@ components:
       properties:
         status:
           $ref: '#/components/schemas/InvoiceStatus'
-    IssueAssetRequest:
+    IssueAssetCFARequest:
       type: object
       properties:
         amounts:
           type: array
           items:
             type: integer
-            example: 1000
+            example: [ 1000, 600 ]
+        name:
+          type: string
+          example: Tether
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        file_path:
+          type: string
+          example: /path/to/media
+    IssueAssetCFAResponse:
+      type: object
+      properties:
+        asset:
+          $ref: '#/components/schemas/AssetCFA'
+    IssueAssetNIARequest:
+      type: object
+      properties:
+        amounts:
+          type: array
+          items:
+            type: integer
+            example: [ 1000, 600 ]
         ticker:
           type: string
           example: USDT
@@ -1098,12 +1159,39 @@ components:
         precision:
           type: integer
           example: 0
-    IssueAssetResponse:
+    IssueAssetNIAResponse:
       type: object
       properties:
-        asset_id:
+        asset:
+          $ref: '#/components/schemas/AssetNIA'
+    IssueAssetUDARequest:
+      type: object
+      properties:
+        ticker:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: UNI
+        name:
+          type: string
+          example: Unique
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        media_file_path:
+          type: string
+          example: /path/to/media
+        attachments_file_paths:
+          type: array
+          items:
+            type: string
+            example: [ /path/to/attachment0, /path/to/attachment1 ]
+    IssueAssetUDAResponse:
+      type: object
+      properties:
+        asset:
+          $ref: '#/components/schemas/AssetUDA'
     KeysendRequest:
       type: object
       properties:
@@ -1137,7 +1225,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssetSchema'
-          example: [ "Nia", "Uda", "Cfa" ]
+          example: [ Nia, Uda, Cfa ]
     ListAssetsResponse:
       type: object
       properties:
@@ -1280,10 +1368,10 @@ components:
       properties:
         file_path:
           type: string
-          example: "/path/to/media"
+          example: /path/to/media
         mime:
           type: string
-          example: "text/plain"
+          example: text/plain
     NetworkInfoResponse:
       type: object
       properties:
@@ -1563,7 +1651,8 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/Media'
           example:
-            0: { file_path: "path/to/media", mime: "text/plain" }
+            0: { file_path: path/to/attachment0, mime: text/plain }
+            1: { file_path: path/to/attachment1, mime: image/png }
         reserves:
           type: boolean
           example: false

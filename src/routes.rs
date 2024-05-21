@@ -34,7 +34,8 @@ use lightning_invoice::payment::pay_invoice;
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use rgb_lib::wallet::{
-    AssetIface as RgbLibAssetIface, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
+    AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
+    AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
     Media as RgbLibMedia, Recipient, RecipientData, TokenLight as RgbLibTokenLight,
 };
 use rgb_lib::{
@@ -119,6 +120,23 @@ pub(crate) struct AssetCFA {
     pub(crate) media: Option<Media>,
 }
 
+impl From<RgbLibAssetCFA> for AssetCFA {
+    fn from(value: RgbLibAssetCFA) -> Self {
+        Self {
+            asset_id: value.asset_id,
+            asset_iface: value.asset_iface.into(),
+            name: value.name,
+            details: value.details,
+            precision: value.precision,
+            issued_supply: value.issued_supply,
+            timestamp: value.timestamp,
+            added_at: value.added_at,
+            balance: value.balance.into(),
+            media: value.media.map(|m| m.into()),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum AssetIface {
     RGB20,
@@ -151,6 +169,24 @@ pub(crate) struct AssetNIA {
     pub(crate) media: Option<Media>,
 }
 
+impl From<RgbLibAssetNIA> for AssetNIA {
+    fn from(value: RgbLibAssetNIA) -> Self {
+        Self {
+            asset_id: value.asset_id,
+            asset_iface: value.asset_iface.into(),
+            ticker: value.ticker,
+            name: value.name,
+            details: value.details,
+            precision: value.precision,
+            issued_supply: value.issued_supply,
+            timestamp: value.timestamp,
+            added_at: value.added_at,
+            balance: value.balance.into(),
+            media: value.media.map(|m| m.into()),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) enum AssetSchema {
     Nia,
@@ -181,6 +217,24 @@ pub(crate) struct AssetUDA {
     pub(crate) added_at: i64,
     pub(crate) balance: BtcBalance,
     pub(crate) token: Option<TokenLight>,
+}
+
+impl From<RgbLibAssetUDA> for AssetUDA {
+    fn from(value: RgbLibAssetUDA) -> Self {
+        Self {
+            asset_id: value.asset_id,
+            asset_iface: value.asset_iface.into(),
+            ticker: value.ticker,
+            name: value.name,
+            details: value.details,
+            precision: value.precision,
+            issued_supply: value.issued_supply,
+            timestamp: value.timestamp,
+            added_at: value.added_at,
+            balance: value.balance.into(),
+            token: value.token.map(|t| t.into()),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -375,7 +429,21 @@ pub(crate) struct InvoiceStatusResponse {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct IssueAssetRequest {
+pub(crate) struct IssueAssetCFARequest {
+    pub(crate) amounts: Vec<u64>,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) file_path: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetCFAResponse {
+    pub(crate) asset: AssetCFA,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetNIARequest {
     pub(crate) amounts: Vec<u64>,
     pub(crate) ticker: String,
     pub(crate) name: String,
@@ -383,8 +451,23 @@ pub(crate) struct IssueAssetRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct IssueAssetResponse {
-    pub(crate) asset_id: String,
+pub(crate) struct IssueAssetNIAResponse {
+    pub(crate) asset: AssetNIA,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetUDARequest {
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) media_file_path: Option<String>,
+    pub(crate) attachments_file_paths: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetUDAResponse {
+    pub(crate) asset: AssetUDA,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1198,10 +1281,32 @@ pub(crate) async fn invoice_status(
     Ok(Json(InvoiceStatusResponse { status }))
 }
 
-pub(crate) async fn issue_asset(
+pub(crate) async fn issue_asset_cfa(
     State(state): State<Arc<AppState>>,
-    WithRejection(Json(payload), _): WithRejection<Json<IssueAssetRequest>, APIError>,
-) -> Result<Json<IssueAssetResponse>, APIError> {
+    WithRejection(Json(payload), _): WithRejection<Json<IssueAssetCFARequest>, APIError>,
+) -> Result<Json<IssueAssetCFAResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        let asset = unlocked_state.rgb_issue_asset_cfa(
+            payload.name,
+            payload.details,
+            payload.precision,
+            payload.amounts,
+            payload.file_path,
+        )?;
+
+        Ok(Json(IssueAssetCFAResponse {
+            asset: asset.into(),
+        }))
+    })
+    .await
+}
+
+pub(crate) async fn issue_asset_nia(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<IssueAssetNIARequest>, APIError>,
+) -> Result<Json<IssueAssetNIAResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
@@ -1212,8 +1317,31 @@ pub(crate) async fn issue_asset(
             payload.amounts,
         )?;
 
-        Ok(Json(IssueAssetResponse {
-            asset_id: asset.asset_id,
+        Ok(Json(IssueAssetNIAResponse {
+            asset: asset.into(),
+        }))
+    })
+    .await
+}
+
+pub(crate) async fn issue_asset_uda(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<IssueAssetUDARequest>, APIError>,
+) -> Result<Json<IssueAssetUDAResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        let asset = unlocked_state.rgb_issue_asset_uda(
+            payload.ticker,
+            payload.name,
+            payload.details,
+            payload.precision,
+            payload.media_file_path,
+            payload.attachments_file_paths,
+        )?;
+
+        Ok(Json(IssueAssetUDAResponse {
+            asset: asset.into(),
         }))
     })
     .await
@@ -1324,68 +1452,15 @@ pub(crate) async fn list_assets(
             .collect(),
     )?;
 
-    let nia = if let Some(assets) = rgb_assets.nia {
-        let mut nia = vec![];
-        for asset in assets {
-            nia.push(AssetNIA {
-                asset_id: asset.asset_id,
-                asset_iface: asset.asset_iface.into(),
-                ticker: asset.ticker,
-                name: asset.name,
-                details: asset.details,
-                precision: asset.precision,
-                issued_supply: asset.issued_supply,
-                timestamp: asset.timestamp,
-                added_at: asset.added_at,
-                balance: asset.balance.into(),
-                media: asset.media.map(|m| m.into()),
-            })
-        }
-        Some(nia)
-    } else {
-        None
-    };
-    let uda = if let Some(assets) = rgb_assets.uda {
-        let mut uda = vec![];
-        for asset in assets {
-            uda.push(AssetUDA {
-                asset_id: asset.asset_id,
-                asset_iface: asset.asset_iface.into(),
-                ticker: asset.ticker,
-                name: asset.name,
-                details: asset.details,
-                precision: asset.precision,
-                issued_supply: asset.issued_supply,
-                timestamp: asset.timestamp,
-                added_at: asset.added_at,
-                balance: asset.balance.into(),
-                token: asset.token.map(|t| t.into()),
-            })
-        }
-        Some(uda)
-    } else {
-        None
-    };
-    let cfa = if let Some(assets) = rgb_assets.cfa {
-        let mut cfa = vec![];
-        for asset in assets {
-            cfa.push(AssetCFA {
-                asset_id: asset.asset_id,
-                asset_iface: asset.asset_iface.into(),
-                name: asset.name,
-                details: asset.details,
-                precision: asset.precision,
-                issued_supply: asset.issued_supply,
-                timestamp: asset.timestamp,
-                added_at: asset.added_at,
-                balance: asset.balance.into(),
-                media: asset.media.map(|m| m.into()),
-            })
-        }
-        Some(cfa)
-    } else {
-        None
-    };
+    let nia = rgb_assets
+        .nia
+        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
+    let uda = rgb_assets
+        .uda
+        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
+    let cfa = rgb_assets
+        .cfa
+        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
 
     Ok(Json(ListAssetsResponse { nia, uda, cfa }))
 }

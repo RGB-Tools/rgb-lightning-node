@@ -17,7 +17,7 @@ use crate::routes::{
     Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
     DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
-    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetRequest, IssueAssetResponse,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
     KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest,
     ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
     ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
@@ -407,24 +407,25 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
 }
 
 async fn issue_asset(node_address: SocketAddr) -> String {
-    println!("issuing asset on node {node_address}");
-    let payload = IssueAssetRequest {
+    println!("issuing NIA asset on node {node_address}");
+    let payload = IssueAssetNIARequest {
         amounts: vec![1000],
         ticker: s!("USDT"),
         name: s!("Tether"),
         precision: 0,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/issueasset", node_address))
+        .post(format!("http://{}/issueassetnia", node_address))
         .json(&payload)
         .send()
         .await
         .unwrap();
     _check_response_is_ok(res)
         .await
-        .json::<IssueAssetResponse>()
+        .json::<IssueAssetNIAResponse>()
         .await
         .unwrap()
+        .asset
         .asset_id
 }
 
