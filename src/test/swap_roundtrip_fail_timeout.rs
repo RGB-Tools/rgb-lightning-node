@@ -17,7 +17,7 @@ async fn swap_fail_timeout() {
 
     fund_and_create_utxos(node1_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;

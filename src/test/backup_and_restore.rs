@@ -20,7 +20,7 @@ async fn backup_and_restore() {
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;

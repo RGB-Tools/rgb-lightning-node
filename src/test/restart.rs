@@ -29,7 +29,7 @@ async fn restart() {
     fund_and_create_utxos(node2_addr).await;
     fund_and_create_utxos(node3_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
     println!("2 - restart 1+2");

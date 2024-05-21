@@ -13,17 +13,18 @@ use time::OffsetDateTime;
 use tracing_test::traced_test;
 
 use crate::routes::{
-    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, BackupRequest, BtcBalanceResponse,
-    Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
-    DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
-    DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
-    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
-    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest,
-    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
-    ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
-    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, UnlockRequest, Unspent,
+    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetNIA, BackupRequest,
+    BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
+    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
+    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
+    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetNIARequest,
+    IssueAssetNIAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
+    ListPeersResponse, ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest,
+    MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse,
+    Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest,
+    SendAssetResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
+    UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -406,7 +407,7 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
         .status
 }
 
-async fn issue_asset(node_address: SocketAddr) -> String {
+async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
     println!("issuing NIA asset on node {node_address}");
     let payload = IssueAssetNIARequest {
         amounts: vec![1000],
@@ -426,7 +427,6 @@ async fn issue_asset(node_address: SocketAddr) -> String {
         .await
         .unwrap()
         .asset
-        .asset_id
 }
 
 async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {

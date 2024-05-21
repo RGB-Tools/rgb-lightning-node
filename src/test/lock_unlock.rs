@@ -20,7 +20,7 @@ async fn lock_unlock() {
 
     fund_and_create_utxos(node1_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
     println!("2 - lock+unlock");

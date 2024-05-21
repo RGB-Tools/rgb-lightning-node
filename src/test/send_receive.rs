@@ -20,7 +20,7 @@ async fn send_receive() {
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 400, recipient_id).await;

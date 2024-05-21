@@ -24,7 +24,7 @@ async fn swap_roundtrip_sell() {
     fund_and_create_utxos(node2_addr).await;
     fund_and_create_utxos(node3_addr).await;
 
-    let asset_id = issue_asset(node2_addr).await;
+    let asset_id = issue_asset_nia(node2_addr).await.asset_id;
 
     let node1_info = node_info(node1_addr).await;
     let node1_pubkey = node1_info.pubkey;

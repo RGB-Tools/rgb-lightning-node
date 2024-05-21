@@ -28,8 +28,8 @@ async fn swap_roundtrip_multihop_asset_asset() {
     fund_and_create_utxos(node3_addr).await;
     fund_and_create_utxos(node4_addr).await;
 
-    let asset_id_1 = issue_asset(node1_addr).await;
-    let asset_id_2 = issue_asset(node3_addr).await;
+    let asset_id_1 = issue_asset_nia(node1_addr).await.asset_id;
+    let asset_id_2 = issue_asset_nia(node3_addr).await.asset_id;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id_1, 400, recipient_id).await;

@@ -19,7 +19,7 @@ async fn swap_fail_amount_taker() {
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
 
-    let asset_id = issue_asset(node2_addr).await;
+    let asset_id = issue_asset_nia(node2_addr).await.asset_id;
 
     let maker_init_response =
         maker_init(node1_addr, 1000, Some(&asset_id), 360000, None, 5000).await;

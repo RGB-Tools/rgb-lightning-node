@@ -32,7 +32,7 @@ async fn close_coop_standard() {
     assert_eq!(assets.nia.unwrap().len(), 0);
     assert_eq!(assets.uda.unwrap().len(), 0);
     assert_eq!(assets.cfa.unwrap().len(), 0);
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
     let assets = list_assets(node1_addr).await;
     assert_eq!(assets.nia.unwrap().len(), 1);
     assert_eq!(assets.uda.unwrap().len(), 0);

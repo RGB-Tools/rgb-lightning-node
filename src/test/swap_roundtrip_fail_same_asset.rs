@@ -15,7 +15,7 @@ async fn swap_roundtrip_fail_same_asset() {
 
     fund_and_create_utxos(node1_addr).await;
 
-    let asset_id = issue_asset(node1_addr).await;
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     maker_init(node1_addr, 1, Some(&asset_id), 1, Some(&asset_id), 3600).await;
 }
