@@ -230,6 +230,7 @@ async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
 }
 
 async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
+    println!("getting BTC balance for node {node_address}");
     let res = reqwest::Client::new()
         .get(format!("http://{}/btcbalance", node_address))
         .send()
@@ -702,6 +703,7 @@ async fn keysend_with_ln_balance(
 }
 
 async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
+    println!("listing swaps for node {node_address}");
     let res = reqwest::Client::new()
         .get(format!("http://{}/listswaps", node_address))
         .send()
@@ -716,6 +718,7 @@ async fn maker_execute(
     payment_secret: String,
     taker_pubkey: String,
 ) {
+    println!("executing swap {swapstring} from node {node_address}");
     let payload = MakerExecuteRequest {
         swapstring,
         payment_secret,
@@ -741,6 +744,10 @@ async fn maker_init(
     to_asset: Option<&str>,
     timeout_sec: u32,
 ) -> MakerInitResponse {
+    println!(
+        "initializing swap from {qty_from} of {from_asset:?} \
+        to {qty_to} of {to_asset:?} on node {node_address}"
+    );
     let payload = MakerInitRequest {
         qty_from,
         qty_to,
@@ -776,6 +783,7 @@ async fn network_info(node_address: SocketAddr) -> NetworkInfoResponse {
 }
 
 async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
+    println!("getting node info for {node_address}");
     let res = reqwest::Client::new()
         .get(format!("http://{}/nodeinfo", node_address))
         .send()
@@ -1131,6 +1139,7 @@ async fn send_payment_with_status(
 }
 
 async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
+    println!("taking swap {swapstring} on node {node_address}");
     let payload = TakerRequest { swapstring };
     let res = reqwest::Client::new()
         .post(format!("http://{}/taker", node_address))
