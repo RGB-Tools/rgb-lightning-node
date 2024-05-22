@@ -1,4 +1,4 @@
-use crate::routes::AssetIface;
+use crate::routes::{AssetIface, BitcoinNetwork};
 
 use super::*;
 
@@ -16,6 +16,10 @@ async fn send_receive() {
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
     let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    let net_info = network_info(node1_addr).await;
+    assert_eq!(net_info.network, BitcoinNetwork::Regtest);
+    let height_1 = net_info.height;
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
@@ -62,4 +66,8 @@ async fn send_receive() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 700);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 300);
+
+    // check network info reports the increased height
+    let net_info = network_info(node1_addr).await;
+    assert_eq!(net_info.height, height_1 + 7); // 4x from funding (2 each) + 3x from transfers)
 }

@@ -23,10 +23,10 @@ use crate::routes::{
     KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
     ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
     ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsResponse,
-    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest,
-    OpenChannelResponse, Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
-    SendAssetRequest, SendAssetResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus,
-    TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
+    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -750,6 +750,20 @@ async fn maker_init(
     _check_response_is_ok(res)
         .await
         .json::<MakerInitResponse>()
+        .await
+        .unwrap()
+}
+
+async fn network_info(node_address: SocketAddr) -> NetworkInfoResponse {
+    println!("getting network info for node {node_address}");
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/networkinfo", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<NetworkInfoResponse>()
         .await
         .unwrap()
 }

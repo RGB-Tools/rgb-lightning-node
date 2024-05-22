@@ -243,7 +243,7 @@ pub(crate) struct BackupRequest {
     pub(crate) password: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum BitcoinNetwork {
     Mainnet,
     Testnet,
