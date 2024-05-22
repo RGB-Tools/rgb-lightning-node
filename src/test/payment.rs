@@ -1,4 +1,4 @@
-use crate::routes::{BitcoinNetwork, TransactionType};
+use crate::routes::{BitcoinNetwork, TransactionType, TransferKind, TransferStatus};
 
 use super::*;
 
@@ -196,4 +196,36 @@ async fn payment() {
     assert_eq!(tx_send.transaction_type, TransactionType::RgbSend);
     assert!(tx_utxos.fee.is_some());
     assert!(tx_utxos.confirmation_time.is_some());
+
+    let transfers = list_transfers(node1_addr, &asset_id).await;
+    let xfer_1 = transfers.iter().find(|t| t.idx == 1).unwrap();
+    assert_eq!(xfer_1.status, TransferStatus::Settled);
+    assert_eq!(xfer_1.kind, TransferKind::Issuance);
+    assert_eq!(xfer_1.amount, 1000);
+    assert!(xfer_1.txid.is_none());
+    assert!(xfer_1.recipient_id.is_none());
+    assert!(xfer_1.receive_utxo.is_none());
+    assert!(xfer_1.change_utxo.is_none());
+    assert!(xfer_1.expiration.is_none());
+    assert!(xfer_1.transport_endpoints.is_empty());
+    let xfer_2 = transfers.iter().find(|t| t.idx == 2).unwrap();
+    assert_eq!(xfer_2.status, TransferStatus::Settled);
+    assert_eq!(xfer_2.kind, TransferKind::Send);
+    assert_eq!(xfer_2.amount, 600);
+    assert!(xfer_2.txid.is_some());
+    assert!(xfer_2.recipient_id.is_some());
+    assert!(xfer_2.receive_utxo.is_none());
+    assert!(xfer_2.change_utxo.is_some());
+    assert!(xfer_2.expiration.is_some());
+    assert!(!xfer_2.transport_endpoints.is_empty());
+    let xfer_3 = transfers.iter().find(|t| t.idx == 3).unwrap();
+    assert_eq!(xfer_3.status, TransferStatus::Settled);
+    assert_eq!(xfer_3.kind, TransferKind::ReceiveWitness);
+    assert_eq!(xfer_3.amount, 550);
+    assert!(xfer_3.txid.is_some());
+    assert!(xfer_3.recipient_id.is_some());
+    assert!(xfer_3.receive_utxo.is_some());
+    assert!(xfer_3.change_utxo.is_none());
+    assert!(xfer_3.expiration.is_some());
+    assert!(!xfer_3.transport_endpoints.is_empty());
 }

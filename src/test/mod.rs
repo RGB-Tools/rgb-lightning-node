@@ -22,11 +22,11 @@ use crate::routes::{
     IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
     KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
     ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
-    ListTransactionsResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse,
-    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, Transaction, UnlockRequest,
-    Unspent,
+    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsResponse,
+    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
+    SendAssetRequest, SendAssetResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus,
+    TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -510,6 +510,25 @@ async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
         .await
         .unwrap()
         .transactions
+}
+
+async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfer> {
+    println!("listing transfers for asset {asset_id} on node {node_address}");
+    let payload = ListTransfersRequest {
+        asset_id: asset_id.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/listtransfers", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<ListTransfersResponse>()
+        .await
+        .unwrap()
+        .transfers
 }
 
 async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {

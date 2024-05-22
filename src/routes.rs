@@ -820,7 +820,7 @@ pub(crate) struct Transfer {
     pub(crate) transport_endpoints: Vec<TransferTransportEndpoint>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransferKind {
     Issuance,
     ReceiveBlind,
@@ -828,7 +828,7 @@ pub(crate) enum TransferKind {
     Send,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransferStatus {
     WaitingCounterparty,
     WaitingConfirmations,
