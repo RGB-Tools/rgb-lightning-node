@@ -14,18 +14,18 @@ use tracing_test::traced_test;
 
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
-    BackupRequest, BtcBalanceResponse, Channel, CloseChannelRequest, ConnectPeerRequest,
-    CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, HTLCStatus, InitRequest,
-    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
-    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
-    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
-    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
-    ListPeersResponse, ListSwapsResponse, ListUnspentsResponse, MakerExecuteRequest,
-    MakerInitRequest, MakerInitResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse,
-    Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest,
-    SendAssetResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
-    UnlockRequest, Unspent,
+    BackupRequest, BtcBalanceResponse, ChangePasswordRequest, Channel, CloseChannelRequest,
+    ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
+    DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse,
+    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
+    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
+    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
+    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
+    SendPaymentResponse, SwapStatus, TakerRequest, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -222,6 +222,25 @@ async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
         .json::<BtcBalanceResponse>()
         .await
         .unwrap()
+}
+
+async fn change_password(node_address: SocketAddr, old_password: &str, new_password: &str) {
+    println!("changing password for node {node_address}");
+    let payload = ChangePasswordRequest {
+        old_password: old_password.to_string(),
+        new_password: new_password.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/changepassword", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn check_payment_status(
@@ -1323,7 +1342,7 @@ mod close_force_standard;
 mod concurrent_btc_payments;
 mod invoice;
 mod issue;
-mod lock_unlock;
+mod lock_unlock_changepassword;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
