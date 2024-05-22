@@ -796,7 +796,7 @@ pub(crate) struct Transaction {
     pub(crate) confirmation_time: Option<BlockTime>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransactionType {
     RgbSend,
     Drain,

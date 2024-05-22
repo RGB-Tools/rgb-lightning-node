@@ -1,4 +1,4 @@
-use crate::routes::BitcoinNetwork;
+use crate::routes::{BitcoinNetwork, TransactionType};
 
 use super::*;
 
@@ -183,4 +183,17 @@ async fn payment() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 25);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 25);
     assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 950);
+
+    let transactions = list_transactions(node1_addr).await;
+    let tx_user = transactions
+        .iter()
+        .find(|t| t.received == 100000000)
+        .unwrap();
+    let tx_utxos = transactions.iter().find(|t| t.sent == 100000000).unwrap();
+    let tx_send = transactions.iter().find(|t| t.sent == 128000).unwrap();
+    assert_eq!(tx_user.transaction_type, TransactionType::User);
+    assert_eq!(tx_utxos.transaction_type, TransactionType::CreateUtxos);
+    assert_eq!(tx_send.transaction_type, TransactionType::RgbSend);
+    assert!(tx_utxos.fee.is_some());
+    assert!(tx_utxos.confirmation_time.is_some());
 }
