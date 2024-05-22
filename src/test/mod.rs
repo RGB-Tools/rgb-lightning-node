@@ -12,6 +12,7 @@ use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
 use tracing_test::traced_test;
 
+use crate::ldk::FEE_RATE;
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
     BackupRequest, BtcBalanceResponse, ChangePasswordRequest, Channel, CloseChannelRequest,
@@ -25,8 +26,9 @@ use crate::routes::{
     ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsResponse,
     MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
     NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendPaymentRequest,
-    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
+    Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::PROXY_ENDPOINT_REGTEST;
 
@@ -169,6 +171,21 @@ async fn start_node(
 
     println!("node on peer port {node_peer_port} started with address {node_address:?}");
     (node_address, password)
+}
+
+async fn address(node_address: SocketAddr) -> String {
+    println!("getting address for node {node_address}");
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/address", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<AddressResponse>()
+        .await
+        .unwrap()
+        .address
 }
 
 async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalanceResponse {
@@ -374,19 +391,9 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
 
 async fn fund_and_create_utxos(node_address: SocketAddr) {
     println!("funding wallet and creating UTXOs for node {node_address}");
-    let res = reqwest::Client::new()
-        .post(format!("http://{}/address", node_address))
-        .send()
-        .await
-        .unwrap();
-    let address = _check_response_is_ok(res)
-        .await
-        .json::<AddressResponse>()
-        .await
-        .unwrap()
-        .address;
+    let addr = address(node_address).await;
 
-    fund_wallet(address.to_string());
+    fund_wallet(addr);
 
     mine(false);
 
@@ -1048,6 +1055,27 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, blind
         .json::<SendAssetResponse>()
         .await
         .unwrap();
+}
+
+async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> String {
+    println!("sending {amount} on-chain BTC from node {node_address} to address {address}");
+    let payload = SendBtcRequest {
+        amount,
+        address: address.to_string(),
+        fee_rate: FEE_RATE,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/sendbtc", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<SendBtcResponse>()
+        .await
+        .unwrap()
+        .txid
 }
 
 async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {

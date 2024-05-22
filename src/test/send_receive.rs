@@ -67,6 +67,10 @@ async fn send_receive() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 700);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 300);
 
+    // send some BTC
+    let addr = address(node2_addr).await;
+    send_btc(node1_addr, 1000, &addr).await;
+
     // check network info reports the increased height
     let net_info = network_info(node1_addr).await;
     assert_eq!(net_info.height, height_1 + 7); // 4x from funding (2 each) + 3x from transfers)
