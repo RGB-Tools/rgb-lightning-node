@@ -33,6 +33,19 @@ async fn multi_hop() {
     let node3_info = node_info(node3_addr).await;
     let node3_pubkey = node3_info.pubkey;
 
+    assert_eq!(node1_info.num_channels, 0);
+    assert_eq!(node1_info.num_usable_channels, 0);
+    assert_eq!(node1_info.local_balance_msat, 0);
+    assert_eq!(node1_info.num_peers, 0);
+    assert_eq!(node2_info.num_channels, 0);
+    assert_eq!(node2_info.num_usable_channels, 0);
+    assert_eq!(node2_info.local_balance_msat, 0);
+    assert_eq!(node2_info.num_peers, 0);
+    assert_eq!(node3_info.num_channels, 0);
+    assert_eq!(node3_info.num_usable_channels, 0);
+    assert_eq!(node3_info.local_balance_msat, 0);
+    assert_eq!(node3_info.num_peers, 0);
+
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 400, recipient_id).await;
     mine(false);
@@ -81,9 +94,6 @@ async fn multi_hop() {
     let channels_1_before = list_channels(node1_addr).await;
     let channels_2_before = list_channels(node2_addr).await;
     let channels_3_before = list_channels(node3_addr).await;
-    dbg!(&channels_1_before);
-    dbg!(&channels_2_before);
-    dbg!(&channels_3_before);
     assert_eq!(channels_1_before.len(), 1);
     assert_eq!(channels_3_before.len(), 1);
     let chan_1_12_before = channels_1_before.first().unwrap();
@@ -104,6 +114,22 @@ async fn multi_hop() {
     assert_eq!(chan_2_23_before.asset_remote_amount, Some(0));
     assert_eq!(chan_3_23_before.asset_local_amount, Some(0));
     assert_eq!(chan_3_23_before.asset_remote_amount, Some(300));
+    // check node info
+    let node1_info = node_info(node1_addr).await;
+    let node2_info = node_info(node2_addr).await;
+    let node3_info = node_info(node3_addr).await;
+    assert_eq!(node1_info.num_channels, 1);
+    assert_eq!(node1_info.num_usable_channels, 1);
+    assert_eq!(node1_info.local_balance_msat, 96500000); // capacity - push
+    assert_eq!(node1_info.num_peers, 1);
+    assert_eq!(node2_info.num_channels, 2);
+    assert_eq!(node2_info.num_usable_channels, 2);
+    assert_eq!(node2_info.local_balance_msat, 100000000); // pushes cancel out
+    assert_eq!(node2_info.num_peers, 2);
+    assert_eq!(node3_info.num_channels, 1);
+    assert_eq!(node3_info.num_usable_channels, 1);
+    assert_eq!(node3_info.local_balance_msat, 3500000); // push
+    assert_eq!(node3_info.num_peers, 1);
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
@@ -166,9 +192,6 @@ async fn multi_hop() {
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;
     let channels_3 = list_channels(node3_addr).await;
-    dbg!(&channels_1);
-    dbg!(&channels_2);
-    dbg!(&channels_3);
     assert_eq!(channels_1.len(), 1);
     assert_eq!(channels_3.len(), 1);
     let chan_1_12 = channels_1.first().unwrap();
@@ -206,6 +229,22 @@ async fn multi_hop() {
         chan_3_23.local_balance_msat,
         chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT
     );
+    // check node info
+    let node1_info = node_info(node1_addr).await;
+    let node2_info = node_info(node2_addr).await;
+    let node3_info = node_info(node3_addr).await;
+    assert_eq!(node1_info.num_channels, 1);
+    assert_eq!(node1_info.num_usable_channels, 1);
+    assert_eq!(node1_info.local_balance_msat, 93499000); // - payment - routing fee
+    assert_eq!(node1_info.num_peers, 1);
+    assert_eq!(node2_info.num_channels, 2);
+    assert_eq!(node2_info.num_usable_channels, 2);
+    assert_eq!(node2_info.local_balance_msat, 100001000); // + routing fee
+    assert_eq!(node2_info.num_peers, 2);
+    assert_eq!(node3_info.num_channels, 1);
+    assert_eq!(node3_info.num_usable_channels, 1);
+    assert_eq!(node3_info.local_balance_msat, 6500000); // + payment
+    assert_eq!(node3_info.num_peers, 1);
 
     close_channel(node2_addr, &channel_12.channel_id, &node1_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 550).await;
@@ -239,4 +278,26 @@ async fn multi_hop() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 350);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 625);
     assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 25);
+
+    let node1_info = node_info(node1_addr).await;
+    let node2_info = node_info(node2_addr).await;
+    let node3_info = node_info(node3_addr).await;
+    assert_eq!(node1_info.num_channels, 0);
+    assert_eq!(node1_info.num_usable_channels, 0);
+    assert_eq!(node1_info.local_balance_msat, 0);
+    assert_eq!(node1_info.num_peers, 1);
+    assert_eq!(node2_info.num_channels, 0);
+    assert_eq!(node2_info.num_usable_channels, 0);
+    assert_eq!(node2_info.local_balance_msat, 0);
+    assert_eq!(node2_info.num_peers, 2);
+    assert_eq!(node3_info.num_channels, 0);
+    assert_eq!(node3_info.num_usable_channels, 0);
+    assert_eq!(node3_info.local_balance_msat, 0);
+    assert_eq!(node3_info.num_peers, 1);
+
+    disconnect_peer(node1_addr, &node2_info.pubkey).await;
+    let node1_info = node_info(node1_addr).await;
+    let node2_info = node_info(node2_addr).await;
+    assert_eq!(node1_info.num_peers, 0);
+    assert_eq!(node2_info.num_peers, 1);
 }
