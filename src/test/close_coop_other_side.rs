@@ -24,10 +24,8 @@ async fn close_coop_other_side() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let node1_info = node_info(node1_addr).await;
-    let node1_pubkey = node1_info.pubkey;
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
+    let node1_pubkey = node_info(node1_addr).await.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let channel = open_channel(
         node1_addr,

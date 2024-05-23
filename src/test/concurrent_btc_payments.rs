@@ -26,10 +26,8 @@ async fn concurrent_btc_payments() {
     fund_and_create_utxos(node3_addr).await;
     fund_and_create_utxos(node4_addr).await;
 
-    let node1_info = node_info(node1_addr).await;
-    let node1_pubkey = node1_info.pubkey;
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
+    let node1_pubkey = node_info(node1_addr).await.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let capacity_sat = 100000;
     let push_msat = 0;

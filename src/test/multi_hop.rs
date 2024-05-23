@@ -27,10 +27,11 @@ async fn multi_hop() {
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let node1_info = node_info(node1_addr).await;
-    let node1_pubkey = node1_info.pubkey;
     let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
     let node3_info = node_info(node3_addr).await;
+
+    let node1_pubkey = node1_info.pubkey;
+    let node2_pubkey = node2_info.pubkey;
     let node3_pubkey = node3_info.pubkey;
 
     assert_eq!(node1_info.num_channels, 0);

@@ -21,8 +21,7 @@ async fn backup_and_restore() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let channel = open_channel(
         node1_addr,
@@ -42,8 +41,7 @@ async fn backup_and_restore() {
     wait_for_balance(node1_addr, &asset_id, 900).await;
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
-    let node1_info = node_info(node1_addr).await;
-    let node1_pubkey = node1_info.pubkey;
+    let node1_pubkey = node_info(node1_addr).await.pubkey;
 
     lock(node1_addr).await;
 

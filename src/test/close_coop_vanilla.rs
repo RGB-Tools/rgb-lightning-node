@@ -40,10 +40,8 @@ async fn close_coop_vanilla() {
         initial_balance
     );
 
-    let node1_info = node_info(node1_addr).await;
-    let node2_info = node_info(node2_addr).await;
-    let node1_pubkey = node1_info.pubkey;
-    let node2_pubkey = node2_info.pubkey;
+    let node1_pubkey = node_info(node1_addr).await.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let peers = list_peers(node1_addr).await;
     assert!(!peers.iter().any(|p| p.pubkey == node2_pubkey));

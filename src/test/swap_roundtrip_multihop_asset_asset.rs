@@ -47,12 +47,9 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node2_addr).await;
     assert_eq!(asset_balance_spendable(node3_addr, &asset_id_2).await, 600);
 
-    let node1_info = node_info(node1_addr).await;
-    let node1_pubkey = node1_info.pubkey;
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
-    let node3_info = node_info(node3_addr).await;
-    let node3_pubkey = node3_info.pubkey;
+    let node1_pubkey = node_info(node1_addr).await.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+    let node3_pubkey = node_info(node3_addr).await.pubkey;
 
     let channel_12 = open_channel(
         node1_addr,

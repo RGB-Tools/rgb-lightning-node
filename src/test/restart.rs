@@ -38,8 +38,7 @@ async fn restart() {
     let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
 
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let channel = open_channel(
         node1_addr,

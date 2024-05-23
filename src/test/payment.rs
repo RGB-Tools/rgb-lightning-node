@@ -26,8 +26,7 @@ async fn payment() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let channel = open_channel(
         node1_addr,

@@ -31,10 +31,8 @@ async fn refuse_high_fees() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let node2_info = node_info(node2_addr).await;
-    let node2_pubkey = node2_info.pubkey;
-    let node3_info = node_info(node3_addr).await;
-    let node3_pubkey = node3_info.pubkey;
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+    let node3_pubkey = node_info(node3_addr).await.pubkey;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 400, recipient_id).await;
