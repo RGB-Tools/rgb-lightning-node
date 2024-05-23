@@ -138,15 +138,15 @@ async fn start_daemon(node_test_dir: &str, node_peer_port: u16) -> SocketAddr {
 }
 
 async fn start_node(
-    node_test_dir: String,
+    node_test_dir: &str,
     node_peer_port: u16,
     keep_node_dir: bool,
 ) -> (SocketAddr, String) {
     println!("starting node with peer port {node_peer_port}");
     if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
-        std::fs::remove_dir_all(node_test_dir.clone()).unwrap();
+        std::fs::remove_dir_all(node_test_dir).unwrap();
     }
-    let node_address = start_daemon(&node_test_dir, node_peer_port).await;
+    let node_address = start_daemon(node_test_dir, node_peer_port).await;
 
     let password = format!("{node_test_dir}.{node_peer_port}");
 

@@ -14,8 +14,8 @@ async fn send_receive() {
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
-    let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
-    let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
 
     let net_info = network_info(node1_addr).await;
     assert_eq!(net_info.network, BitcoinNetwork::Regtest);

@@ -10,7 +10,7 @@ async fn invoice() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
-    let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
 
     fund_and_create_utxos(node1_addr).await;
 

@@ -18,10 +18,10 @@ async fn swap_roundtrip_multihop_sell() {
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
     let test_dir_node3 = format!("{TEST_DIR_BASE}node3");
     let test_dir_node4 = format!("{TEST_DIR_BASE}node4");
-    let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, false).await;
-    let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, false).await;
-    let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, false).await;
-    let (node4_addr, _) = start_node(test_dir_node4, NODE4_PEER_PORT, false).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+    let (node3_addr, _) = start_node(&test_dir_node3, NODE3_PEER_PORT, false).await;
+    let (node4_addr, _) = start_node(&test_dir_node4, NODE4_PEER_PORT, false).await;
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
@@ -177,9 +177,9 @@ async fn swap_roundtrip_multihop_sell() {
 
     println!("\nrestart nodes");
     shutdown(&[node1_addr, node2_addr, node3_addr]).await;
-    let (node1_addr, _) = start_node(test_dir_node1.clone(), NODE1_PEER_PORT, true).await;
-    let (node2_addr, _) = start_node(test_dir_node2.clone(), NODE2_PEER_PORT, true).await;
-    let (node3_addr, _) = start_node(test_dir_node3.clone(), NODE3_PEER_PORT, true).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
+    let (node3_addr, _) = start_node(&test_dir_node3, NODE3_PEER_PORT, true).await;
     let maker_addr = node3_addr;
     let taker_addr = node1_addr;
 

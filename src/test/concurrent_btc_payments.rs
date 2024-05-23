@@ -16,10 +16,10 @@ async fn concurrent_btc_payments() {
     let test_dir_node2 = format!("{TEST_DIR_BASE}node2");
     let test_dir_node3 = format!("{TEST_DIR_BASE}node3");
     let test_dir_node4 = format!("{TEST_DIR_BASE}node4");
-    let (node1_addr, _) = start_node(test_dir_node1, NODE1_PEER_PORT, false).await;
-    let (node2_addr, _) = start_node(test_dir_node2, NODE2_PEER_PORT, false).await;
-    let (node3_addr, _) = start_node(test_dir_node3, NODE3_PEER_PORT, false).await;
-    let (node4_addr, _) = start_node(test_dir_node4, NODE4_PEER_PORT, false).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+    let (node3_addr, _) = start_node(&test_dir_node3, NODE3_PEER_PORT, false).await;
+    let (node4_addr, _) = start_node(&test_dir_node4, NODE4_PEER_PORT, false).await;
 
     fund_and_create_utxos(node1_addr).await;
     fund_and_create_utxos(node2_addr).await;
