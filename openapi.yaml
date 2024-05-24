@@ -327,7 +327,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/KeysendResponse'
   /listassets:
-    get:
+    post:
       tags:
         - RGB
       summary: List assets

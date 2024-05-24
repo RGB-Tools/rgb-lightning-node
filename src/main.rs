@@ -98,7 +98,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/issueassetnia", post(issue_asset_nia))
         .route("/issueassetuda", post(issue_asset_uda))
         .route("/keysend", post(keysend))
-        .route("/listassets", get(list_assets))
+        .route("/listassets", post(list_assets))
         .route("/listchannels", get(list_channels))
         .route("/listpayments", get(list_payments))
         .route("/listpeers", get(list_peers))

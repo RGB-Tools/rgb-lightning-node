@@ -630,7 +630,7 @@ async fn list_assets(node_address: SocketAddr) -> ListAssetsResponse {
         filter_asset_schemas: vec![],
     };
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listassets", node_address))
+        .post(format!("http://{}/listassets", node_address))
         .json(&payload)
         .send()
         .await

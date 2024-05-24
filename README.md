@@ -161,7 +161,7 @@ The node currently exposes the following APIs:
 - `/issueassetnia` (POST)
 - `/issueassetuda` (POST)
 - `/keysend` (POST)
-- `/listassets` (GET)
+- `/listassets` (POST)
 - `/listchannels` (GET)
 - `/listpayments` (GET)
 - `/listpeers` (GET)
