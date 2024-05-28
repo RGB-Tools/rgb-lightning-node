@@ -359,7 +359,7 @@ fn _update_rgb_channel_amount(ldk_data_dir: &Path, payment_hash: &PaymentHash, r
             let rgb_payment_info = parse_rgb_payment_info(&file.path());
             let channel_id_str = file_name_str_no_ext.replace(&payment_hash_str, "");
 
-            if !rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
+            if rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
                 continue;
             }
 

@@ -1382,7 +1382,7 @@ pub(crate) async fn keysend(
                     &payment_hash,
                     contract_id,
                     rgb_amount,
-                    true,
+                    false,
                     false,
                 );
             }
@@ -2005,7 +2005,7 @@ pub(crate) async fn maker_execute(
                 &swapstring.payment_hash,
                 swap_info.to_asset.unwrap(),
                 swap_info.qty_to,
-                false,
+                true,
                 false,
             );
         }
@@ -2489,7 +2489,7 @@ pub(crate) async fn send_payment(
                 &payment_hash,
                 rgb_contract_id,
                 rgb_amount,
-                true,
+                false,
                 false,
             ),
             (None, None) => {}
