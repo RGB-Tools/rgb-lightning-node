@@ -1,0 +1,22 @@
+name: Run tests
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Tests
+        run: cargo test
