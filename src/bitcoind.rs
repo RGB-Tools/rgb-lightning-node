@@ -149,7 +149,7 @@ impl BitcoindClient {
         );
         fees.insert(
             ConfirmationTarget::NonAnchorChannelFee,
-            AtomicU32::new(MIN_FEERATE),
+            AtomicU32::new(2000),
         );
         fees.insert(
             ConfirmationTarget::ChannelCloseMinimum,
@@ -242,7 +242,7 @@ impl BitcoindClient {
                 fees.get(&ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee)
                     .unwrap()
                     .store(
-                        std::cmp::max(25 * 250, high_prio_estimate),
+                        std::cmp::max(25 * 250, high_prio_estimate * 10),
                         Ordering::Release,
                     );
                 fees.get(&ConfirmationTarget::MinAllowedAnchorChannelRemoteFee)
