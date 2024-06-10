@@ -1,7 +1,6 @@
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::hash_types::{BlockHash, Txid};
-use bitcoin::hashes::hex::FromHex;
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::log_error;
 use lightning::util::logger::Logger;
@@ -11,6 +10,7 @@ use lightning_block_sync::rpc::RpcClient;
 use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSource};
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,7 +81,7 @@ impl TryInto<BlockchainInfo> for JsonResponse {
     fn try_into(self) -> std::io::Result<BlockchainInfo> {
         Ok(BlockchainInfo {
             latest_height: self.0["blocks"].as_u64().unwrap() as usize,
-            latest_blockhash: BlockHash::from_hex(self.0["bestblockhash"].as_str().unwrap())
+            latest_blockhash: BlockHash::from_str(self.0["bestblockhash"].as_str().unwrap())
                 .unwrap(),
             chain: self.0["chain"].as_str().unwrap().to_string(),
         })
@@ -132,10 +132,6 @@ impl BitcoindClient {
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
         fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
         fees.insert(
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee,
-            AtomicU32::new(25 * 250),
-        );
-        fees.insert(
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             AtomicU32::new(MIN_FEERATE),
         );
@@ -153,6 +149,10 @@ impl BitcoindClient {
         );
         fees.insert(
             ConfirmationTarget::ChannelCloseMinimum,
+            AtomicU32::new(MIN_FEERATE),
+        );
+        fees.insert(
+            ConfirmationTarget::OutputSpendingFee,
             AtomicU32::new(MIN_FEERATE),
         );
 
@@ -239,12 +239,6 @@ impl BitcoindClient {
                 fees.get(&ConfirmationTarget::OnChainSweep)
                     .unwrap()
                     .store(high_prio_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee)
-                    .unwrap()
-                    .store(
-                        std::cmp::max(25 * 250, high_prio_estimate * 10),
-                        Ordering::Release,
-                    );
                 fees.get(&ConfirmationTarget::MinAllowedAnchorChannelRemoteFee)
                     .unwrap()
                     .store(mempoolmin_estimate, Ordering::Release);
@@ -260,6 +254,9 @@ impl BitcoindClient {
                 fees.get(&ConfirmationTarget::ChannelCloseMinimum)
                     .unwrap()
                     .store(background_estimate, Ordering::Release);
+                fees.get(&ConfirmationTarget::OutputSpendingFee)
+                    .unwrap()
+                    .store(mempoolmin_estimate + 100, Ordering::Release);
 
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }

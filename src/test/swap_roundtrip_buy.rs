@@ -128,6 +128,8 @@ async fn swap_roundtrip_buy() {
     let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
     let maker_addr = node1_addr;
     let taker_addr = node2_addr;
+    wait_for_usable_channels(node1_addr, 2).await;
+    wait_for_usable_channels(node2_addr, 2).await;
 
     println!("\ncheck off-chain balances and payments after nodes have restarted");
     let balance_1 = asset_balance(node1_addr, &asset_id).await;

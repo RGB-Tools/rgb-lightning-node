@@ -1091,7 +1091,10 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
 
 async fn _send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
     println!("sending LN payment for invoice {invoice} from node {node_address}");
-    let payload = SendPaymentRequest { invoice };
+    let payload = SendPaymentRequest {
+        invoice,
+        amt_msat: None,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node_address))
         .json(&payload)
@@ -1127,7 +1130,8 @@ async fn send_payment_with_ln_balance(
         bolt11_invoice.rgb_amount(),
         initial_ln_balance_rgb,
         counterparty_initial_ln_balance_rgb,
-        &res.payment_hash,
+        // TODO: remove unwrap once RGB offers are enabled
+        &res.payment_hash.unwrap(),
     )
     .await;
 }
@@ -1138,7 +1142,13 @@ async fn send_payment_with_status(
     expected_status: HTLCStatus,
 ) -> Payment {
     let send_payment = _send_payment_raw(node_address, invoice).await;
-    _wait_for_ln_payment(node_address, &send_payment.payment_hash, expected_status).await
+    _wait_for_ln_payment(
+        node_address,
+        // TODO: remove unwrap once RGB offers are enabled
+        &send_payment.payment_hash.unwrap(),
+        expected_status,
+    )
+    .await
 }
 
 async fn shutdown(node_sockets: &[SocketAddr]) {
@@ -1215,12 +1225,14 @@ async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_bal
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if asset_balance_spendable(node_address, asset_id).await == expected_balance {
+        let balance = asset_balance_spendable(node_address, asset_id).await;
+        if balance == expected_balance {
             break;
         }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
-            panic!("balance is not becoming the expected one");
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
+            panic!("balance ({balance}) is not becoming the expected one ({expected_balance})");
         }
+        refresh_transfers(node_address).await;
     }
 }
 
@@ -1239,6 +1251,24 @@ async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
             panic!("balance ({balance}) is not becoming the expected one ({expected_balance})");
         }
+    }
+}
+
+async fn wait_for_usable_channels(node_address: SocketAddr, expected_num_usable_channels: usize) {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let node_info = node_info(node_address).await;
+        let num_usable_channels = node_info.num_usable_channels;
+        if num_usable_channels == expected_num_usable_channels {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!(
+                "num of usable channels ({num_usable_channels:?}) is not becoming the expected \
+                one ({expected_num_usable_channels:?})"
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 

@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::APIError;
-use crate::ldk::{InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, SwapMap};
+use crate::ldk::{
+    InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, OutputSpenderTxes, SwapMap,
+};
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
 pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
@@ -21,10 +23,10 @@ pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 
+pub(crate) const OUTPUT_SPENDER_TXES: &str = "output_spender_txes";
+
 pub(crate) const MAKER_SWAPS_FNAME: &str = "maker_swaps";
 pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
-
-pub(crate) const PENDING_SPENDABLE_OUTPUT_DIR: &str = "pending_spendable_outputs";
 
 pub(crate) struct FilesystemLogger {
     data_dir: PathBuf,
@@ -39,7 +41,7 @@ impl FilesystemLogger {
     }
 }
 impl Logger for FilesystemLogger {
-    fn log(&self, record: &Record) {
+    fn log(&self, record: Record) {
         let raw_log = record.args.to_string();
         let log = format!(
             "{} {:<5} [{}:{}] {}\n",
@@ -123,6 +125,15 @@ pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStor
     OutboundPaymentInfoStorage {
         payments: HashMap::new(),
     }
+}
+
+pub(crate) fn read_output_spender_txes(path: &Path) -> OutputSpenderTxes {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = OutputSpenderTxes::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    HashMap::new()
 }
 
 pub(crate) fn read_swaps_info(path: &Path) -> SwapMap {

@@ -230,20 +230,21 @@ async fn multi_hop() {
         chan_3_23.local_balance_msat,
         chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT
     );
+    // wait for usable channels
+    wait_for_usable_channels(node1_addr, 1).await;
+    wait_for_usable_channels(node2_addr, 2).await;
+    wait_for_usable_channels(node3_addr, 1).await;
     // check node info
     let node1_info = node_info(node1_addr).await;
     let node2_info = node_info(node2_addr).await;
     let node3_info = node_info(node3_addr).await;
     assert_eq!(node1_info.num_channels, 1);
-    assert_eq!(node1_info.num_usable_channels, 1);
     assert_eq!(node1_info.local_balance_msat, 93499000); // - payment - routing fee
     assert_eq!(node1_info.num_peers, 1);
     assert_eq!(node2_info.num_channels, 2);
-    assert_eq!(node2_info.num_usable_channels, 2);
     assert_eq!(node2_info.local_balance_msat, 100001000); // + routing fee
     assert_eq!(node2_info.num_peers, 2);
     assert_eq!(node3_info.num_channels, 1);
-    assert_eq!(node3_info.num_usable_channels, 1);
     assert_eq!(node3_info.local_balance_msat, 6500000); // + payment
     assert_eq!(node3_info.num_peers, 1);
 

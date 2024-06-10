@@ -186,13 +186,4 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     stop_ldk(app_state.clone()).await;
-
-    tracing::debug!("Waiting for periodic sweep to have stopped...");
-    let periodic_sweep = app_state.get_periodic_sweep().await;
-    if let Some(ps) = periodic_sweep.as_ref() {
-        while !ps.is_finished() {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
-    tracing::debug!("Periodic sweep has stopped");
 }

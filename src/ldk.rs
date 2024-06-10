@@ -1,11 +1,12 @@
 use amplify::map;
+use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::network::constants::Network;
+use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::{psbt::Psbt, Script as BdkScript};
-use bitcoin::{BlockHash, LockTime, PackedLockTime};
+use bitcoin::{BlockHash, TxOut};
 use bitcoin_bech32::WitnessProgram;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
-use lightning::chain::{Filter, Watch};
+use lightning::chain::{BestBlock, Filter, Watch};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose};
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
@@ -14,7 +15,7 @@ use lightning::ln::channelmanager::{
 };
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
 use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
-use lightning::onion_message::{DefaultMessageRouter, SimpleArcOnionMessenger};
+use lightning::onion_message::messenger::{DefaultMessageRouter, SimpleArcOnionMessenger};
 use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
     update_rgb_channel_amount, STATIC_BLINDING, WALLET_ACCOUNT_XPUB_FNAME,
@@ -24,10 +25,16 @@ use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
-use lightning::sign::{EntropySource, InMemorySigner, KeysManager, SpendableOutputDescriptor};
+use lightning::sign::{
+    EntropySource, InMemorySigner, KeysManager, OutputSpender, SpendableOutputDescriptor,
+};
 use lightning::util::config::UserConfig;
-use lightning::util::persist::{KVStore, MonitorUpdatingPersister};
-use lightning::util::ser::{Readable, ReadableArgs, WithoutLength, Writeable};
+use lightning::util::persist::{
+    KVStore, MonitorUpdatingPersister, OUTPUT_SWEEPER_PERSISTENCE_KEY,
+    OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+};
+use lightning::util::ser::{ReadableArgs, Writeable};
+use lightning::util::sweep as ldk_sweep;
 use lightning::{chain, impl_writeable_tlv_based};
 use lightning_background_processor::{process_events_async, GossipSync};
 use lightning_block_sync::init;
@@ -37,26 +44,29 @@ use lightning_block_sync::UnboundedCache;
 use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::fs_store::FilesystemStore;
 use rand::{thread_rng, Rng, RngCore};
+use rgb_lib::wallet::AssetIface;
 use rgb_lib::{
     bdk::keys::{bip39::Mnemonic, DerivableKey, ExtendedKey},
     bitcoin::{
         bip32::{ChildNumber, ExtendedPrivKey},
         psbt::PartiallySignedTransaction as RgbLibPsbt,
         secp256k1::Secp256k1 as Secp256k1_30,
-        Address, ScriptBuf,
+        ScriptBuf,
     },
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
-        DatabaseType, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData, WitnessData,
+        rust_only::{AssetColoringInfo, ColoringInfo},
+        DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
+        WitnessData,
     },
-    AssetSchema, FileContent, RgbTransfer,
+    AssetSchema, ContractId, FileContent, RgbTransfer,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{Read, Seek, SeekFrom};
+use std::net::ToSocketAddrs;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -64,21 +74,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime};
 use time::OffsetDateTime;
+use tokio::runtime::Handle;
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
+use crate::disk::FilesystemLogger;
 use crate::disk::{
-    self, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, TAKER_SWAPS_FNAME,
+    self, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES,
+    TAKER_SWAPS_FNAME,
 };
-use crate::disk::{FilesystemLogger, PENDING_SPENDABLE_OUTPUT_DIR};
 use crate::error::APIError;
-use crate::rgb::{
-    get_bitcoin_network, get_coloring_info, get_rgb_channel_info_optional, RgbLibWalletWrapper,
-};
-use crate::routes::{HTLCStatus, SwapStatus};
+use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::routes::{HTLCStatus, SwapStatus, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
-use crate::utils::{do_connect_peer, hex_str, AppState, StaticState, UnlockedAppState};
+use crate::utils::{
+    connect_peer_if_necessary, do_connect_peer, hex_str, AppState, StaticState, UnlockedAppState,
+};
 
 pub(crate) const FEE_RATE: f32 = 7.0;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
@@ -302,11 +314,6 @@ pub(crate) type GossipVerifier = lightning_block_sync::gossip::GossipVerifier<
     lightning_block_sync::gossip::TokioSpawner,
     Arc<lightning_block_sync::rpc::RpcClient>,
     Arc<FilesystemLogger>,
-    SocketDescriptor,
-    Arc<ChannelManager>,
-    Arc<OnionMessenger>,
-    IgnoringMessageHandler,
-    Arc<KeysManager>,
 >;
 
 pub(crate) type PeerManager = SimpleArcPeerManager<
@@ -323,6 +330,7 @@ pub(crate) type Scorer = ProbabilisticScorer<Arc<NetworkGraph>, Arc<FilesystemLo
 pub(crate) type Router = DefaultRouter<
     Arc<NetworkGraph>,
     Arc<FilesystemLogger>,
+    Arc<KeysManager>,
     Arc<RwLock<Scorer>>,
     ProbabilisticScoringFeeParameters,
     Scorer,
@@ -341,6 +349,26 @@ pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
     Arc<Wallet<Arc<RgbLibWalletWrapper>, Arc<FilesystemLogger>>>,
     Arc<KeysManager>,
     Arc<FilesystemLogger>,
+>;
+
+pub(crate) type OutputSpenderTxes = HashMap<u64, bitcoin::Transaction>;
+
+pub(crate) struct RgbOutputSpender {
+    static_state: Arc<StaticState>,
+    rgb_wallet_wrapper: Arc<RgbLibWalletWrapper>,
+    keys_manager: Arc<KeysManager>,
+    fs_store: Arc<FilesystemStore>,
+    txes: Arc<Mutex<OutputSpenderTxes>>,
+}
+
+pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
+    Arc<BitcoindClient>,
+    Arc<RgbLibWalletWrapper>,
+    Arc<BitcoindClient>,
+    Arc<dyn Filter + Send + Sync>,
+    Arc<FilesystemStore>,
+    Arc<FilesystemLogger>,
+    Arc<RgbOutputSpender>,
 >;
 
 fn _update_rgb_channel_amount(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
@@ -385,12 +413,13 @@ async fn handle_ldk_events(
             ..
         } => {
             let addr = WitnessProgram::from_scriptpubkey(
-                &output_script[..],
+                output_script.as_bytes(),
                 match static_state.network {
                     Network::Bitcoin => bitcoin_bech32::constants::Network::Bitcoin,
                     Network::Testnet => bitcoin_bech32::constants::Network::Testnet,
                     Network::Regtest => bitcoin_bech32::constants::Network::Regtest,
                     Network::Signet => bitcoin_bech32::constants::Network::Signet,
+                    _ => unimplemented!("unsupported network"),
                 },
             )
             .expect("Lightning funding tx should always be to a SegWit output");
@@ -409,10 +438,8 @@ async fn handle_ldk_events(
                 let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
 
-                let recipient_id = recipient_id_from_script_buf(
-                    script_buf,
-                    get_bitcoin_network(&static_state.network),
-                );
+                let recipient_id =
+                    recipient_id_from_script_buf(script_buf, static_state.network.into());
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
@@ -514,7 +541,13 @@ async fn handle_ldk_events(
                 amount_msat,
             );
             let payment_preimage = match purpose {
-                PaymentPurpose::InvoicePayment {
+                PaymentPurpose::Bolt11InvoicePayment {
+                    payment_preimage, ..
+                } => payment_preimage,
+                PaymentPurpose::Bolt12OfferPayment {
+                    payment_preimage, ..
+                } => payment_preimage,
+                PaymentPurpose::Bolt12RefundPayment {
                     payment_preimage, ..
                 } => payment_preimage,
                 PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
@@ -537,7 +570,17 @@ async fn handle_ldk_events(
                 amount_msat,
             );
             let (payment_preimage, payment_secret) = match purpose {
-                PaymentPurpose::InvoicePayment {
+                PaymentPurpose::Bolt11InvoicePayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => (payment_preimage, Some(payment_secret)),
+                PaymentPurpose::Bolt12OfferPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => (payment_preimage, Some(payment_secret)),
+                PaymentPurpose::Bolt12RefundPayment {
                     payment_preimage,
                     payment_secret,
                     ..
@@ -662,9 +705,12 @@ async fn handle_ldk_events(
         Event::PaymentForwarded {
             prev_channel_id,
             next_channel_id,
-            fee_earned_msat,
+            total_fee_earned_msat,
             claim_from_onchain_tx,
             outbound_amount_forwarded_msat,
+            skimmed_fee_msat: _,
+            prev_user_channel_id: _,
+            next_user_channel_id: _,
             outbound_amount_forwarded_rgb,
             inbound_amount_forwarded_rgb,
             payment_hash,
@@ -742,7 +788,7 @@ async fn handle_ldk_events(
             } else {
                 "?".to_string()
             };
-            if let Some(fee_earned) = fee_earned_msat {
+            if let Some(fee_earned) = total_fee_earned_msat {
                 tracing::info!(
                     "EVENT: Forwarded payment for {} msat{}{}, earning {} msat {}",
                     amt_args,
@@ -773,26 +819,14 @@ async fn handle_ldk_events(
         }
         Event::SpendableOutputs {
             outputs,
-            channel_id: _,
+            channel_id,
         } => {
-            // SpendableOutputDescriptors, of which outputs is a vec of, are critical to keep track
-            // of! While a `StaticOutput` descriptor is just an output to a static, well-known key,
-            // other descriptors are not currently ever regenerated for you by LDK. Once we return
-            // from this method, the descriptor will be gone, and you may lose track of some funds.
-            //
-            // Here we simply persist them to disk, with a background task running which will try
-            // to spend them regularly (possibly duplicatively/RBF'ing them). These can just be
-            // treated as normal funds where possible - they are only spendable by us and there is
-            // no rush to claim them.
-            for output in outputs {
-                let key = hex_str(&unlocked_state.keys_manager.get_secure_random_bytes());
-                // Note that if the type here changes our read code needs to change as well.
-                let output: SpendableOutputDescriptor = output;
-                unlocked_state
-                    .fs_store
-                    .write(PENDING_SPENDABLE_OUTPUT_DIR, "", &key, &output.encode())
-                    .unwrap();
-            }
+            tracing::info!("EVENT: tracking {} spendable outputs", outputs.len(),);
+
+            unlocked_state
+                .output_sweeper
+                .track_spendable_outputs(outputs, channel_id, false, None)
+                .unwrap();
         }
         Event::ChannelPending {
             channel_id,
@@ -871,6 +905,7 @@ async fn handle_ldk_events(
             user_channel_id: _,
             counterparty_node_id,
             channel_capacity_sats: _,
+            channel_funding_txo: _,
         } => {
             tracing::info!(
                 "EVENT: Channel {} with counterparty {} closed due to: {:?}",
@@ -1009,341 +1044,222 @@ async fn handle_ldk_events(
                 .expect("Forward should be valid");
         }
         Event::BumpTransaction(event) => unlocked_state.bump_tx_event_handler.handle_event(&event),
+        Event::ConnectionNeeded { node_id, addresses } => {
+            tokio::spawn(async move {
+                for address in addresses {
+                    if let Ok(sockaddrs) = address.to_socket_addrs() {
+                        for addr in sockaddrs {
+                            let pm = Arc::clone(&unlocked_state.peer_manager);
+                            if connect_peer_if_necessary(node_id, addr, pm).await.is_ok() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 
-async fn _spend_outputs(
-    outputs: &[SpendableOutputDescriptor],
-    unlocked_state: Arc<UnlockedAppState>,
-    static_state: Arc<StaticState>,
-) {
-    let secp_ctx = Secp256k1::new();
-    let output_descriptors = &outputs.iter().collect::<Vec<_>>();
-    let tx_feerate = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
-
-    // We set nLockTime to the current height to discourage fee sniping.
-    // Occasionally randomly pick a nLockTime even further back, so
-    // that transactions that are delayed after signing for whatever reason,
-    // e.g. high-latency mix networks and some CoinJoin implementations, have
-    // better privacy.
-    // Logic copied from core: https://github.com/bitcoin/bitcoin/blob/1d4846a8443be901b8a5deb0e357481af22838d0/src/wallet/spend.cpp#L936
-    let mut cur_height = unlocked_state.channel_manager.current_best_block().height();
-    // 10% of the time
-    if thread_rng().gen_range(0..10) == 0 {
-        // subtract random number between 0 and 100
-        cur_height = cur_height.saturating_sub(thread_rng().gen_range(0..100));
-    }
-    let lock_time: PackedLockTime =
-        LockTime::from_height(cur_height).map_or(PackedLockTime::ZERO, |l| l.into());
-
-    let mut vanilla_output_descriptors = vec![];
-    let mut need_rgb_refresh = false;
-
-    for outp in output_descriptors {
-        let outpoint = match outp {
-            SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => descriptor.outpoint,
-            SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => descriptor.outpoint,
-            SpendableOutputDescriptor::StaticOutput {
-                ref outpoint,
-                output: _,
-            } => *outpoint,
-        };
-
-        let txid = outpoint.txid;
-
-        let transfer_info_path = static_state
-            .ldk_data_dir
-            .join(format!("{txid}_transfer_info"));
-        if !transfer_info_path.exists() {
-            vanilla_output_descriptors.push(*outp);
-            continue;
-        };
-
-        let transfer_info = read_rgb_transfer_info(&transfer_info_path);
-        if transfer_info.rgb_amount == 0 {
-            vanilla_output_descriptors.push(*outp);
-            continue;
+impl OutputSpender for RgbOutputSpender {
+    fn spend_spendable_outputs<C: bitcoin::secp256k1::Signing>(
+        &self,
+        descriptors: &[&SpendableOutputDescriptor],
+        outputs: Vec<TxOut>,
+        change_destination_script: ScriptBuf,
+        feerate_sat_per_1000_weight: u32,
+        locktime: Option<LockTime>,
+        secp_ctx: &Secp256k1<C>,
+    ) -> Result<bitcoin::Transaction, ()> {
+        let mut hasher = DefaultHasher::new();
+        descriptors.hash(&mut hasher);
+        let descriptors_hash = hasher.finish();
+        let mut txes = self.txes.lock().unwrap();
+        if let Some(tx) = txes.get(&descriptors_hash) {
+            return Ok(tx.clone());
         }
 
-        need_rgb_refresh = true;
+        let mut vout = 0;
+        let mut vanilla_descriptor = true;
 
-        let contract_id = transfer_info.contract_id;
+        let mut txouts = outputs.clone();
+        let mut asset_info: HashMap<ContractId, (u32, u64, String, Vec<Outpoint>)> = map![];
 
-        let receive_data = unlocked_state
-            .rgb_witness_receive(vec![static_state.proxy_endpoint.clone()])
-            .unwrap();
-        let recipient_id = receive_data.recipient_id;
+        for outp in descriptors {
+            let outpoint = match outp {
+                SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => descriptor.outpoint,
+                SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => descriptor.outpoint,
+                SpendableOutputDescriptor::StaticOutput { ref outpoint, .. } => *outpoint,
+            };
 
-        let script_buf = script_buf_from_recipient_id(recipient_id.clone()).unwrap();
-        let bdk_script = BdkScript::from(script_buf.clone().into_bytes());
+            let txid = outpoint.txid;
 
-        unlocked_state
-            .rgb_consume_fascia(transfer_info.fascia.clone())
-            .unwrap();
+            let transfer_info_path = self
+                .static_state
+                .ldk_data_dir
+                .join(format!("{txid}_transfer_info"));
+            if !transfer_info_path.exists() {
+                continue;
+            };
+            let transfer_info = read_rgb_transfer_info(&transfer_info_path);
+            if transfer_info.rgb_amount == 0 {
+                continue;
+            }
 
-        let amt_rgb = transfer_info.rgb_amount;
+            vanilla_descriptor = false;
 
-        let descriptors = &[*outp];
+            let contract_id = transfer_info.contract_id;
 
+            let mut new_asset = false;
+            let recipient_id = if let Some((_, _, recipient_id, _)) = asset_info.get(&contract_id) {
+                recipient_id.clone()
+            } else {
+                new_asset = true;
+                let receive_data = self
+                    .rgb_wallet_wrapper
+                    .witness_receive(vec![self.static_state.proxy_endpoint.clone()])
+                    .unwrap();
+                let script_pubkey = script_buf_from_recipient_id(receive_data.recipient_id.clone())
+                    .unwrap()
+                    .unwrap();
+                txouts.push(TxOut {
+                    value: DUST_LIMIT_MSAT / 1000,
+                    script_pubkey,
+                });
+                receive_data.recipient_id
+            };
+
+            self.rgb_wallet_wrapper
+                .consume_fascia(transfer_info.fascia.clone())
+                .unwrap();
+
+            let amt_rgb = transfer_info.rgb_amount;
+
+            let input_outpoint = Outpoint {
+                txid: outpoint.txid.to_string(),
+                vout: outpoint.index.into(),
+            };
+            asset_info
+                .entry(contract_id)
+                .and_modify(|(_, a, _, i)| {
+                    *a += amt_rgb;
+                    i.push(input_outpoint.clone());
+                })
+                .or_insert_with(|| (vout, amt_rgb, recipient_id, vec![input_outpoint.clone()]));
+
+            if new_asset {
+                vout += 1;
+            }
+        }
+
+        if vanilla_descriptor {
+            return self.keys_manager.spend_spendable_outputs(
+                descriptors.as_ref(),
+                txouts,
+                change_destination_script,
+                feerate_sat_per_1000_weight,
+                locktime,
+                secp_ctx,
+            );
+        }
+
+        let feerate_sat_per_1000_weight = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
         let (psbt, _expected_max_weight) =
             SpendableOutputDescriptor::create_spendable_outputs_psbt(
+                secp_ctx,
                 descriptors,
-                vec![],
-                bdk_script,
-                tx_feerate,
-                Some(lock_time),
+                txouts,
+                change_destination_script,
+                feerate_sat_per_1000_weight,
+                locktime,
             )
             .unwrap();
 
-        let vout = 0;
-        let coloring_info =
-            get_coloring_info(contract_id, &psbt.clone().extract_tx(), amt_rgb, vout);
+        let mut asset_info_map = map![];
+        for (contract_id, (vout, amt_rgb, _, input_outpoints)) in asset_info.clone() {
+            asset_info_map.insert(
+                contract_id,
+                AssetColoringInfo {
+                    iface: AssetIface::RGB20,
+                    output_map: HashMap::from_iter([(vout, amt_rgb)]),
+                    input_outpoints,
+                    static_blinding: None,
+                },
+            );
+        }
+
+        let coloring_info = ColoringInfo {
+            asset_info_map,
+            static_blinding: None,
+        };
+
         let mut psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
-        let consignment = unlocked_state
-            .rgb_color_psbt_and_consume(&mut psbt, coloring_info)
+        let consignments = self
+            .rgb_wallet_wrapper
+            .color_psbt_and_consume(&mut psbt, coloring_info)
             .unwrap();
+
         let mut psbt = Psbt::from_str(&psbt.to_string()).expect("valid transaction");
 
-        psbt = unlocked_state
+        psbt = self
             .keys_manager
-            .sign_spendable_outputs_psbt(descriptors, psbt, &secp_ctx)
+            .sign_spendable_outputs_psbt(descriptors, psbt, secp_ctx)
             .unwrap();
 
-        let psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
-        let tx = unlocked_state.rgb_broadcast_tx(psbt.extract_tx()).unwrap();
+        let spending_tx = psbt.extract_tx();
 
-        let closing_txid = tx.txid().to_string();
-        let consignment_path = static_state
-            .ldk_data_dir
-            .join(format!("consignment_{closing_txid}"));
-        consignment
-            .save_file(&consignment_path)
-            .expect("successful save");
-        let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
-            .unwrap()
-            .endpoint;
-        let unlocked_state_copy = unlocked_state.clone();
-        let res = tokio::task::spawn_blocking(move || {
-            unlocked_state_copy.rgb_post_consignment(
-                &proxy_url,
-                recipient_id,
-                &consignment_path,
-                closing_txid,
-                Some(vout),
-            )
-        })
-        .await
-        .unwrap();
+        let closing_txid = spending_tx.txid().to_string();
 
-        if res.is_err() {
-            tracing::error!("cannot post consignment");
-            return;
-        }
-    }
+        let handle = Handle::current();
+        let _ = handle.enter();
 
-    if !vanilla_output_descriptors.is_empty() {
-        let address_str = unlocked_state.rgb_get_address().unwrap();
-        let address = Address::from_str(&address_str).unwrap().assume_checked();
-        let script_buf = address.script_pubkey();
-        let bdk_script = BdkScript::from(script_buf.into_bytes());
+        for consignment in consignments {
+            let contract_id = consignment.contract_id();
 
-        if let Ok(spending_tx) = unlocked_state.keys_manager.spend_spendable_outputs(
-            vanilla_output_descriptors.as_ref(),
-            vec![],
-            bdk_script,
-            tx_feerate,
-            Some(lock_time),
-            &Secp256k1::new(),
-        ) {
-            // Note that, most likely, we've already sweeped this set of outputs
-            // and they're already confirmed on-chain, so this broadcast will fail.
-            let spending_tx = rgb_lib::bitcoin::consensus::encode::deserialize(
-                &bitcoin::consensus::encode::serialize(&spending_tx),
-            )
-            .unwrap();
+            let (vout, _, recipient_id, _) = asset_info[&contract_id].clone();
 
-            unlocked_state.rgb_broadcast_tx(spending_tx).unwrap();
-        } else {
-            tracing::error!("Failed to sweep spendable outputs! This may indicate the outputs are dust. Will try again in a day.");
-        }
-    }
-
-    if need_rgb_refresh {
-        tokio::task::spawn_blocking(move || {
-            unlocked_state.rgb_refresh().unwrap();
-            unlocked_state.rgb_refresh().unwrap()
-        })
-        .await
-        .unwrap();
-    }
-}
-
-/// If we have any pending claimable outputs, we should slowly sweep them to our BDK
-/// wallet. We technically don't need to do this - they're ours to spend when we want and can just
-/// use them to build new transactions instead, but we cannot feed them direclty into BDK's
-/// wallet so we have to sweep.
-async fn periodic_sweep(
-    unlocked_state: Arc<UnlockedAppState>,
-    static_state: Arc<StaticState>,
-    stop_processing: Arc<AtomicBool>,
-) {
-    // Regularly claim outputs which are exclusively spendable by us and send them to BDK.
-    // Note that if you more tightly integrate your wallet with LDK you may not need to do this -
-    // these outputs can just be treated as normal outputs during coin selection.
-
-    // We batch together claims of all spendable outputs generated each day, however only after
-    // batching any claims of spendable outputs which were generated prior to restart. On a mobile
-    // device we likely won't ever be online for more than a minute, so we have to ensure we sweep
-    // any pending claims on startup, but for an always-online node you may wish to sweep even less
-    // frequently than this (or move the interval await to the top of the loop)!
-    //
-    // There is no particular rush here, we just have to ensure funds are availably by the time we
-    // need to send funds.
-
-    let interval_check_secs = 1;
-    #[cfg(test)]
-    let interval_sweep_secs = 5;
-    #[cfg(not(test))]
-    let interval_sweep_secs = 60 * 60 * 24;
-
-    let mut interval = tokio::time::interval(Duration::from_secs(interval_check_secs));
-    let mut start = OffsetDateTime::now_utc();
-    // frequently check if we need to stop, only sweep once every `interval_sweep_secs`
-    loop {
-        interval.tick().await; // Note that the first tick completes immediately
-
-        // check if we need to stop
-        if stop_processing.load(Ordering::Acquire) {
-            tracing::debug!("stopping periodic sweep");
-            return;
-        }
-
-        // sweep if it's time to
-        let now = OffsetDateTime::now_utc();
-        if now - start > Duration::from_secs(interval_sweep_secs) {
-            tracing::debug!("running periodic sweep");
-            sweep(unlocked_state.clone(), static_state.clone()).await;
-            tracing::debug!("periodic sweep complete");
-            start = OffsetDateTime::now_utc(); // reset offset start
-        }
-    }
-}
-
-async fn sweep(unlocked_state: Arc<UnlockedAppState>, static_state: Arc<StaticState>) {
-    let pending_spendables_dir = static_state.ldk_data_dir.join(PENDING_SPENDABLE_OUTPUT_DIR);
-    let processing_spendables_dir = static_state
-        .ldk_data_dir
-        .join("processing_spendable_outputs");
-    let spendable_outputs = "spendable_outputs";
-    let spendables_dir = static_state.ldk_data_dir.join(spendable_outputs);
-    let processed_outputs = static_state.ldk_data_dir.join("processed_outputs");
-    fs::create_dir_all(&processed_outputs).unwrap();
-
-    // shouldn't be needed as lock/shutdown wait for the task to exit
-    if let Ok(dir_iter) = fs::read_dir(&pending_spendables_dir) {
-        // Move any spendable descriptors from pending folder so that we don't have any
-        // races with new files being added.
-        for file_res in dir_iter {
-            let file = file_res.unwrap();
-            // Only move a file if its a 32-byte-hex'd filename, otherwise it might be a
-            // temporary file.
-            if file.file_name().len() == 64 {
-                fs::create_dir_all(&processing_spendables_dir).unwrap();
-                let mut holding_path = PathBuf::new();
-                holding_path.push(&processing_spendables_dir);
-                holding_path.push(&file.file_name());
-                fs::rename(file.path(), holding_path).unwrap();
-            }
-        }
-        // Now concatenate all the pending files we moved into one file in the
-        // `spendable_outputs` directory and drop the processing directory.
-        let mut outputs = Vec::new();
-        if let Ok(processing_iter) = fs::read_dir(&processing_spendables_dir) {
-            for file_res in processing_iter {
-                outputs.append(&mut fs::read(file_res.unwrap().path()).unwrap());
-            }
-        }
-        if !outputs.is_empty() {
-            let key = hex_str(
-                &Arc::clone(&unlocked_state)
-                    .keys_manager
-                    .get_secure_random_bytes(),
-            );
-            unlocked_state
-                .persister
-                .write(
-                    spendable_outputs,
-                    "",
-                    &key,
-                    &WithoutLength(&outputs).encode(),
+            let consignment_path = self
+                .static_state
+                .ldk_data_dir
+                .join(format!("consignment_{}", closing_txid.clone()));
+            consignment
+                .save_file(&consignment_path)
+                .expect("successful save");
+            let proxy_url = TransportEndpoint::new(self.static_state.proxy_endpoint.clone())
+                .unwrap()
+                .endpoint;
+            let rgb_wallet_wrapper_copy = self.rgb_wallet_wrapper.clone();
+            let closing_txid_copy = closing_txid.clone();
+            let consignment_path_copy = consignment_path.clone();
+            let res = futures::executor::block_on(tokio::task::spawn_blocking(move || {
+                rgb_wallet_wrapper_copy.post_consignment(
+                    &proxy_url,
+                    recipient_id,
+                    &consignment_path_copy,
+                    closing_txid_copy,
+                    Some(vout),
                 )
-                .unwrap();
-            fs::remove_dir_all(&processing_spendables_dir).unwrap();
-        }
-    }
-    // Iterate over all the sets of spendable outputs in `spendables_dir` and try to claim
-    // them.
-    // Note that here we try to claim each set of spendable outputs over and over again
-    // forever, even long after its been claimed. While this isn't an issue per se, in practice
-    // you may wish to track when the claiming transaction has confirmed and remove the
-    // spendable outputs set. You may also wish to merge groups of unspent spendable outputs to
-    // combine batches.
-    if let Ok(dir_iter) = fs::read_dir(&spendables_dir) {
-        for file_res in dir_iter {
-            let mut outputs: Vec<SpendableOutputDescriptor> = Vec::new();
-            let file_path = file_res.unwrap().path();
-            let mut file = fs::File::open(&file_path).unwrap();
-            loop {
-                // Check if there are any bytes left to read, and if so read a descriptor.
-                match file.read_exact(&mut [0; 1]) {
-                    Ok(_) => {
-                        file.seek(SeekFrom::Current(-1)).unwrap();
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => panic!("{:?}", e),
-                }
-                let output: SpendableOutputDescriptor = Readable::read(&mut file).unwrap();
-                let mut output_hash = DefaultHasher::new();
-                output.hash(&mut output_hash);
-                let output_fname = output_hash.finish().to_string();
-                let output_path = Path::new(&processed_outputs).join(output_fname);
-                if !output_path.exists() {
-                    outputs.push(output);
-                }
+            }));
+            if res.is_err() {
+                tracing::error!("cannot post consignment: {res:?}");
+                return Err(());
             }
-
-            _spend_outputs(
-                &outputs,
-                Arc::clone(&unlocked_state),
-                Arc::clone(&static_state),
-            )
-            .await;
-
-            for output in outputs {
-                let mut output_hash = DefaultHasher::new();
-                output.hash(&mut output_hash);
-                let output_fname = output_hash.finish().to_string();
-                let output_path = Path::new(&processed_outputs).join(output_fname);
-                fs::File::create(output_path).unwrap();
-            }
-
-            // TODO: Removing file for now but should be addressed properly in the future.
-            fs::remove_file(file_path).unwrap();
+            fs::remove_file(&consignment_path).unwrap();
         }
+
+        txes.insert(descriptors_hash, spending_tx.clone());
+        self.fs_store
+            .write("", "", OUTPUT_SPENDER_TXES, &txes.encode())
+            .unwrap();
+
+        Ok(spending_tx)
     }
 }
 
 pub(crate) async fn start_ldk(
     app_state: Arc<AppState>,
     mnemonic: Mnemonic,
-) -> Result<
-    (
-        LdkBackgroundServices,
-        Arc<UnlockedAppState>,
-        tokio::task::JoinHandle<()>,
-    ),
-    APIError,
-> {
+) -> Result<(LdkBackgroundServices, Arc<UnlockedAppState>), APIError> {
     let static_state = &app_state.static_state;
 
     let bitcoind_client = static_state.bitcoind_client.clone();
@@ -1355,7 +1271,6 @@ pub(crate) async fn start_ldk(
     let ldk_announced_listen_addr = static_state.ldk_announced_listen_addr.clone();
     let ldk_announced_node_name = static_state.ldk_announced_node_name;
     let indexer_url = static_state.indexer_url.clone();
-    let bitcoin_network = get_bitcoin_network(&network);
 
     // Initialize the FeeEstimator
     // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
@@ -1374,7 +1289,7 @@ pub(crate) async fn start_ldk(
         .into_extended_key()
         .expect("a valid key should have been provided");
     let master_xprv = &xkey
-        .into_xprv(bitcoin_network.into())
+        .into_xprv(network)
         .expect("should be possible to get an extended private key");
     let xprv: ExtendedPrivKey = master_xprv
         .ckd_priv(&Secp256k1_30::new(), ChildNumber::Hardened { index: 535 })
@@ -1440,7 +1355,7 @@ pub(crate) async fn start_ldk(
     let router = Arc::new(DefaultRouter::new(
         network_graph.clone(),
         logger.clone(),
-        keys_manager.get_secure_random_bytes(),
+        keys_manager.clone(),
         scorer.clone(),
         scoring_fee_params,
     ));
@@ -1480,7 +1395,7 @@ pub(crate) async fn start_ldk(
             restarting_node = false;
 
             let polled_best_block = polled_chain_tip.to_best_block();
-            let polled_best_block_hash = polled_best_block.block_hash();
+            let polled_best_block_hash = polled_best_block.block_hash;
             let chain_params = ChainParameters {
                 network,
                 best_block: polled_best_block,
@@ -1503,14 +1418,110 @@ pub(crate) async fn start_ldk(
         }
     };
 
-    // Sync ChannelMonitors and ChannelManager to chain tip
+    // Prepare the RGB wallet
+    let mnemonic_str = mnemonic.to_string();
+    let bitcoin_network = network.into();
+    let account_xpub = get_account_xpub(bitcoin_network, &mnemonic_str).unwrap();
+    let data_dir = static_state
+        .storage_dir_path
+        .clone()
+        .to_string_lossy()
+        .to_string();
+    let mut rgb_wallet = tokio::task::spawn_blocking(move || {
+        RgbLibWallet::new(WalletData {
+            data_dir,
+            bitcoin_network,
+            database_type: DatabaseType::Sqlite,
+            max_allocations_per_utxo: 1,
+            pubkey: account_xpub.to_string(),
+            mnemonic: Some(mnemonic.to_string()),
+            vanilla_keychain: None,
+        })
+        .expect("valid rgb-lib wallet")
+    })
+    .await
+    .unwrap();
+    let rgb_online = rgb_wallet
+        .go_online(false, indexer_url.clone())
+        .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
+    fs::write(
+        static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
+        account_xpub.fingerprint().to_string(),
+    )
+    .expect("able to write");
+    fs::write(
+        static_state
+            .storage_dir_path
+            .join(WALLET_ACCOUNT_XPUB_FNAME),
+        account_xpub.to_string(),
+    )
+    .expect("able to write");
+
+    let rgb_wallet_wrapper = Arc::new(RgbLibWalletWrapper::new(
+        Arc::new(Mutex::new(rgb_wallet)),
+        rgb_online.clone(),
+    ));
+
+    // Initialize the OutputSweeper.
+    let txes = Arc::new(Mutex::new(disk::read_output_spender_txes(
+        &ldk_data_dir.join(OUTPUT_SPENDER_TXES),
+    )));
+    let rgb_output_spender = Arc::new(RgbOutputSpender {
+        static_state: static_state.clone(),
+        rgb_wallet_wrapper: rgb_wallet_wrapper.clone(),
+        keys_manager: keys_manager.clone(),
+        fs_store: fs_store.clone(),
+        txes,
+    });
+    let (sweeper_best_block, output_sweeper) = match fs_store.read(
+        OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
+        OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+        OUTPUT_SWEEPER_PERSISTENCE_KEY,
+    ) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let sweeper = OutputSweeper::new(
+                channel_manager.current_best_block(),
+                broadcaster.clone(),
+                fee_estimator.clone(),
+                None,
+                rgb_output_spender,
+                rgb_wallet_wrapper.clone(),
+                fs_store.clone(),
+                logger.clone(),
+            );
+            (channel_manager.current_best_block(), sweeper)
+        }
+        Ok(mut bytes) => {
+            let read_args = (
+                broadcaster.clone(),
+                fee_estimator.clone(),
+                None,
+                rgb_output_spender.clone(),
+                rgb_wallet_wrapper.clone(),
+                fs_store.clone(),
+                logger.clone(),
+            );
+            let mut reader = std::io::Cursor::new(&mut bytes);
+            <(BestBlock, OutputSweeper)>::read(&mut reader, read_args)
+                .expect("Failed to deserialize OutputSweeper")
+        }
+        Err(e) => panic!("Failed to read OutputSweeper with {}", e),
+    };
+
+    // Sync ChannelMonitors, ChannelManager and OutputSweeper to chain tip
     let mut chain_listener_channel_monitors = Vec::new();
     let mut cache = UnboundedCache::new();
     let chain_tip = if restarting_node {
-        let mut chain_listeners = vec![(
-            channel_manager_blockhash,
-            &channel_manager as &(dyn chain::Listen + Send + Sync),
-        )];
+        let mut chain_listeners = vec![
+            (
+                channel_manager_blockhash,
+                &channel_manager as &(dyn chain::Listen + Send + Sync),
+            ),
+            (
+                sweeper_best_block.block_hash,
+                &output_sweeper as &(dyn chain::Listen + Send + Sync),
+            ),
+        ];
 
         for (blockhash, channel_monitor) in channelmonitors.drain(..) {
             let outpoint = channel_monitor.get_funding_txo().0;
@@ -1568,7 +1579,11 @@ pub(crate) async fn start_ldk(
         Arc::clone(&keys_manager),
         Arc::clone(&keys_manager),
         Arc::clone(&logger),
-        Arc::new(DefaultMessageRouter {}),
+        Arc::clone(&channel_manager),
+        Arc::new(DefaultMessageRouter::new(
+            Arc::clone(&network_graph),
+            Arc::clone(&keys_manager),
+        )),
         Arc::clone(&channel_manager),
         IgnoringMessageHandler {},
     ));
@@ -1629,14 +1644,23 @@ pub(crate) async fn start_ldk(
     });
 
     // Connect and Disconnect Blocks
+    let output_sweeper: Arc<OutputSweeper> = Arc::new(output_sweeper);
     let channel_manager_listener = channel_manager.clone();
     let chain_monitor_listener = chain_monitor.clone();
+    let output_sweeper_listener = output_sweeper.clone();
     let bitcoind_block_source = bitcoind_client.clone();
+    let stop_listen = Arc::clone(&stop_processing);
     tokio::spawn(async move {
         let chain_poller = poll::ChainPoller::new(bitcoind_block_source.as_ref(), network);
-        let chain_listener = (chain_monitor_listener, channel_manager_listener);
+        let chain_listener = (
+            chain_monitor_listener,
+            &(channel_manager_listener, output_sweeper_listener),
+        );
         let mut spv_client = SpvClient::new(chain_tip, chain_poller, &mut cache, &chain_listener);
         loop {
+            if stop_listen.load(Ordering::Acquire) {
+                return;
+            }
             spv_client.poll_best_tip().await.unwrap();
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -1649,52 +1673,9 @@ pub(crate) async fn start_ldk(
         &ldk_data_dir.join(OUTBOUND_PAYMENTS_FNAME),
     )));
 
-    let mnemonic_str = mnemonic.to_string();
-    let account_xpub = get_account_xpub(bitcoin_network, &mnemonic_str).unwrap();
-    let data_dir = static_state
-        .storage_dir_path
-        .clone()
-        .to_string_lossy()
-        .to_string();
-    let mut rgb_wallet = tokio::task::spawn_blocking(move || {
-        RgbLibWallet::new(WalletData {
-            data_dir,
-            bitcoin_network,
-            database_type: DatabaseType::Sqlite,
-            max_allocations_per_utxo: 1,
-            pubkey: account_xpub.to_string(),
-            mnemonic: Some(mnemonic.to_string()),
-            vanilla_keychain: None,
-        })
-        .expect("valid rgb-lib wallet")
-    })
-    .await
-    .unwrap();
-    let rgb_online = rgb_wallet
-        .go_online(false, indexer_url.clone())
-        .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
-    fs::write(
-        static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
-        account_xpub.fingerprint().to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_FNAME),
-        account_xpub.to_string(),
-    )
-    .expect("able to write");
-
-    let rgb_wallet = Arc::new(Mutex::new(rgb_wallet));
-    let rgb_wallet_wrapper = Arc::new(RgbLibWalletWrapper::new(
-        Arc::clone(&rgb_wallet),
-        rgb_online.clone(),
-    ));
-
     let bump_tx_event_handler = Arc::new(BumpTransactionEventHandler::new(
         Arc::clone(&broadcaster),
-        Arc::new(Wallet::new(rgb_wallet_wrapper, Arc::clone(&logger))),
+        Arc::new(Wallet::new(rgb_wallet_wrapper.clone(), Arc::clone(&logger))),
         Arc::clone(&keys_manager),
         Arc::clone(&logger),
     ));
@@ -1718,13 +1699,12 @@ pub(crate) async fn start_ldk(
         outbound_payments,
         peer_manager: Arc::clone(&peer_manager),
         fs_store: Arc::clone(&fs_store),
-        persister: Arc::clone(&persister),
         bump_tx_event_handler,
-        rgb_wallet,
-        rgb_online,
+        rgb_wallet_wrapper,
         maker_swaps,
         taker_swaps,
         router: Arc::clone(&router),
+        output_sweeper: Arc::clone(&output_sweeper),
     });
 
     let recent_payments_payment_ids = channel_manager
@@ -1771,6 +1751,13 @@ pub(crate) async fn start_ldk(
             })
         },
         false,
+        || {
+            Some(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap(),
+            )
+        },
     ));
 
     // Regularly reconnect to channel peers.
@@ -1785,12 +1772,11 @@ pub(crate) async fn start_ldk(
             interval.tick().await;
             match disk::read_channel_peer_data(&peer_data_path) {
                 Ok(info) => {
-                    let peers = connect_pm.get_peer_node_ids();
                     for node_id in connect_cm
                         .list_channels()
                         .iter()
                         .map(|chan| chan.counterparty.node_id)
-                        .filter(|id| !peers.iter().any(|(pk, _)| id == pk))
+                        .filter(|id| connect_pm.peer_by_node_id(id).is_none())
                     {
                         if stop_connect.load(Ordering::Acquire) {
                             return;
@@ -1837,12 +1823,6 @@ pub(crate) async fn start_ldk(
         }
     });
 
-    let periodic_sweep = tokio::spawn(periodic_sweep(
-        Arc::clone(&unlocked_state),
-        Arc::clone(static_state),
-        Arc::clone(&stop_processing),
-    ));
-
     tracing::info!("LDK logs are available at <your-supplied-ldk-data-dir-path>/.ldk/logs");
     tracing::info!("Local Node ID is {}", channel_manager.get_our_node_id());
 
@@ -1854,7 +1834,6 @@ pub(crate) async fn start_ldk(
             background_processor: Some(background_processor),
         },
         unlocked_state,
-        periodic_sweep,
     ))
 }
 

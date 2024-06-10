@@ -10,17 +10,13 @@ use lightning::routing::router::{
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
 };
 use lightning::{
-    onion_message::OnionMessageContents,
+    onion_message::packet::OnionMessageContents,
     sign::KeysManager,
     util::ser::{Writeable, Writer},
 };
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use rgb_lib::{
-    bdk::keys::bip39::Mnemonic,
-    wallet::{Online, Wallet as RgbLibWallet},
-    ContractId,
-};
+use rgb_lib::{bdk::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
 use std::{
     fmt::Write,
     fs,
@@ -32,11 +28,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::ldk::Router;
-use crate::rgb::get_rgb_channel_info_optional;
+use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::LdkUserInfo,
@@ -45,9 +40,9 @@ use crate::{
     error::{APIError, AppError},
     ldk::{
         BumpTxEventHandler, ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices,
-        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, PeerManager, SwapMap,
+        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, OutputSweeper, PeerManager,
+        SwapMap,
     },
-    rgb::get_bitcoin_network,
 };
 
 pub(crate) const LDK_DIR: &str = ".ldk";
@@ -64,7 +59,6 @@ pub(crate) struct AppState {
     pub(crate) unlocked_app_state: Arc<TokioMutex<Option<Arc<UnlockedAppState>>>>,
     pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
     pub(crate) changing_state: Mutex<bool>,
-    pub(crate) periodic_sweep: Arc<TokioMutex<Option<JoinHandle<()>>>>,
 }
 
 impl AppState {
@@ -80,10 +74,6 @@ impl AppState {
         &self,
     ) -> TokioMutexGuard<Option<Arc<UnlockedAppState>>> {
         self.unlocked_app_state.lock().await
-    }
-
-    pub(crate) async fn get_periodic_sweep(&self) -> TokioMutexGuard<Option<JoinHandle<()>>> {
-        self.periodic_sweep.lock().await
     }
 }
 
@@ -109,13 +99,12 @@ pub(crate) struct UnlockedAppState {
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
     pub(crate) fs_store: Arc<FilesystemStore>,
-    pub(crate) persister: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) taker_swaps: Arc<Mutex<SwapMap>>,
-    pub(crate) rgb_wallet: Arc<Mutex<RgbLibWallet>>,
-    pub(crate) rgb_online: Online,
+    pub(crate) rgb_wallet_wrapper: Arc<RgbLibWalletWrapper>,
     pub(crate) router: Arc<Router>,
+    pub(crate) output_sweeper: Arc<OutputSweeper>,
 }
 
 impl UnlockedAppState {
@@ -134,12 +123,9 @@ impl UnlockedAppState {
     pub(crate) fn get_taker_swaps(&self) -> MutexGuard<SwapMap> {
         self.taker_swaps.lock().unwrap()
     }
-
-    pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {
-        self.rgb_wallet.lock().unwrap()
-    }
 }
 
+#[derive(Debug)]
 pub(crate) struct UserOnionMessageContents {
     pub(crate) tlv_type: u64,
     pub(crate) data: Vec<u8>,
@@ -217,8 +203,8 @@ pub(crate) async fn connect_peer_if_necessary(
     peer_addr: SocketAddr,
     peer_manager: Arc<PeerManager>,
 ) -> Result<(), APIError> {
-    for (node_pubkey, _) in peer_manager.get_peer_node_ids() {
-        if node_pubkey == pubkey {
+    for peer_details in peer_manager.list_peers() {
+        if peer_details.counterparty_node_id == pubkey {
             return Ok(());
         }
     }
@@ -240,11 +226,7 @@ pub(crate) async fn do_connect_peer(
                     _ = &mut connection_closed_future => return Err(APIError::FailedPeerConnection),
                     _ = tokio::time::sleep(Duration::from_millis(10)) => {},
                 };
-                if peer_manager
-                    .get_peer_node_ids()
-                    .iter()
-                    .any(|(id, _)| *id == pubkey)
-                {
+                if peer_manager.peer_by_node_id(&pubkey).is_some() {
                     return Ok(());
                 }
             }
@@ -373,6 +355,7 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
             bitcoin::Network::Testnet => "test",
             bitcoin::Network::Regtest => "regtest",
             bitcoin::Network::Signet => "signet",
+            _ => unimplemented!("unsupported network"),
         }
     {
         return Err(AppError::InvalidBitcoinNetwork(network, bitcoind_chain));
@@ -387,7 +370,7 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         }
     };
     fs::write(args.storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
-    let bitcoin_network = get_bitcoin_network(&network);
+    let bitcoin_network: BitcoinNetwork = network.into();
     fs::write(
         args.storage_dir_path.join(BITCOIN_NETWORK_FNAME),
         bitcoin_network.to_string(),
@@ -415,7 +398,6 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
         unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
-        periodic_sweep: Arc::new(TokioMutex::new(None)),
     }))
 }
 
@@ -467,6 +449,7 @@ pub(crate) fn get_route(
         max_path_count: 1,
         max_channel_saturation_power_of_half: 2,
         previously_failed_channels: vec![],
+        previously_failed_blinded_path_idxs: vec![],
     };
     let route = router.find_route(
         &start,

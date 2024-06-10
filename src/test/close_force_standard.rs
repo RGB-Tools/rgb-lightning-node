@@ -42,6 +42,10 @@ async fn close_force_standard() {
     keysend(node1_addr, &node2_pubkey, None, Some(&asset_id), Some(150)).await;
     keysend(node2_addr, &node1_pubkey, None, Some(&asset_id), Some(50)).await;
 
+    // this sleep prevents non-deterministic issue where force close broadcasts an old commitment
+    // TX (one that still has an HTLC output)
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, true).await;
     wait_for_balance(node1_addr, &asset_id, 900).await;
     wait_for_balance(node2_addr, &asset_id, 100).await;

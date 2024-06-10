@@ -76,6 +76,7 @@ async fn concurrent_btc_payments() {
     // send payments
     let payload_1 = SendPaymentRequest {
         invoice: invoice_1.clone(),
+        amt_msat: None,
     };
     let res_1 = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node3_addr))
@@ -88,6 +89,7 @@ async fn concurrent_btc_payments() {
         .unwrap();
     let payload_2 = SendPaymentRequest {
         invoice: invoice_2.clone(),
+        amt_msat: None,
     };
     let res_2 = reqwest::Client::new()
         .post(format!("http://{}/sendpayment", node4_addr))
@@ -108,9 +110,13 @@ async fn concurrent_btc_payments() {
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if check_payment_status(node3_addr, &res_1.payment_hash, HTLCStatus::Succeeded)
-            .await
-            .is_some()
+        if check_payment_status(
+            node3_addr,
+            &res_1.payment_hash.clone().unwrap(),
+            HTLCStatus::Succeeded,
+        )
+        .await
+        .is_some()
         {
             break;
         }
@@ -121,9 +127,13 @@ async fn concurrent_btc_payments() {
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if check_payment_status(node4_addr, &res_2.payment_hash, HTLCStatus::Succeeded)
-            .await
-            .is_some()
+        if check_payment_status(
+            node4_addr,
+            &res_2.payment_hash.clone().unwrap(),
+            HTLCStatus::Succeeded,
+        )
+        .await
+        .is_some()
         {
             break;
         }

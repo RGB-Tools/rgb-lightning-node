@@ -49,6 +49,8 @@ async fn swap_roundtrip_sell() {
         Some(&asset_id),
     )
     .await;
+    wait_for_usable_channels(node1_addr, 2).await;
+    wait_for_usable_channels(node2_addr, 2).await;
 
     let channels_1_before = list_channels(node1_addr).await;
     let channels_2_before = list_channels(node2_addr).await;

@@ -671,7 +671,6 @@ version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
 dependencies = [
- "base64 0.13.1",
  "bech32 0.9.1",
  "bitcoin_hashes 0.11.0",
  "secp256k1 0.24.3",
@@ -2448,11 +2447,11 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.0.118"
+version = "0.0.123"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "futures",
- "hex",
+ "hex-conservative",
  "musig2",
  "rgb-lib",
  "serde",
@@ -2462,21 +2461,22 @@ dependencies = [
 
 [[package]]
 name = "lightning-background-processor"
-version = "0.0.118"
+version = "0.0.123"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
- "lightning-rapid-gossip-sync 0.0.118",
+ "lightning-rapid-gossip-sync 0.0.123",
 ]
 
 [[package]]
 name = "lightning-block-sync"
-version = "0.0.118"
+version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e7710047d038a03fce32ac72b00c6ad79438053d3e8520cc7be97019660a694"
+checksum = "61e1e70fa351daccede0c366cf16320b16a3e42b05ae3c7ec9c0df6b5d3a3e18"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "chunked_transfer",
+ "hex-conservative",
  "lightning",
  "serde_json",
  "tokio",
@@ -2484,52 +2484,50 @@ dependencies = [
 
 [[package]]
 name = "lightning-invoice"
-version = "0.26.0"
+version = "0.31.0"
 dependencies = [
  "bech32 0.9.1",
- "bitcoin 0.29.2",
- "bitcoin_hashes 0.11.0",
+ "bitcoin 0.30.2",
  "lightning",
- "num-traits",
  "rgb-lib",
- "secp256k1 0.24.3",
+ "secp256k1 0.27.0",
 ]
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.0.118"
+version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86ee02c5a817b46a5fd6de4b2e196b58ae0e6eca5f3b8a6f0b0cd67bd9485ecc"
+checksum = "f9e6a4d49c50a1344916d080dc8c012ce3a778cdd45de8def75350b2b40fe018"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
  "tokio",
 ]
 
 [[package]]
 name = "lightning-persister"
-version = "0.0.118"
+version = "0.0.123"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
  "windows-sys 0.48.0",
 ]
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.0.118"
+version = "0.0.123"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
 ]
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.0.118"
+version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac66654c7593a16277cd9f1b7a078729318cad5cee2fe8948a2df4f756decb73"
+checksum = "9d861b0f0cd5f8fe8c63760023c4fd4fd32c384881b41780b62ced2a8a619f91"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "lightning",
 ]
 
@@ -2713,9 +2711,9 @@ checksum = "f2b8f3a258db515d5e91a904ce4ae3f73e091149b90cadbdb93d210bee07f63b"
 [[package]]
 name = "musig2"
 version = "0.1.0"
-source = "git+https://github.com/arik-so/rust-musig2?rev=27797d7#27797d78cf64e8974e38d7f31ebb11e455015a9e"
+source = "git+https://github.com/arik-so/rust-musig2?rev=cff11e3#cff11e3b1af1691f721a120dc6acb921afa31f89"
 dependencies = [
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
 ]
 
 [[package]]
@@ -3499,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-lib"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9910fd1d0124a61f0af806cb4e96350576993181e4d7c949c0b878d471bd4a3"
+checksum = "d6cbfd03aa5ab0d6e1eb9e681ed99cb5eca4cbd13a012fa01f9b3501697a4e27"
 dependencies = [
  "amplify",
  "base64 0.22.1",
@@ -3567,7 +3565,7 @@ dependencies = [
  "baid58",
  "base64 0.13.1",
  "bech32 0.8.1",
- "bitcoin 0.29.2",
+ "bitcoin 0.30.2",
  "bitcoin-bech32",
  "chacha20poly1305",
  "chrono",
@@ -3576,6 +3574,7 @@ dependencies = [
  "dirs",
  "electrum-client 0.19.0",
  "futures",
+ "hex-conservative",
  "hyper 0.14.28",
  "libc",
  "lightning",
@@ -3584,7 +3583,7 @@ dependencies = [
  "lightning-invoice",
  "lightning-net-tokio",
  "lightning-persister",
- "lightning-rapid-gossip-sync 0.0.118 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightning-rapid-gossip-sync 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)",
  "magic-crypt",
  "mime",
  "miniscript 8.0.2",
