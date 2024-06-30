@@ -91,6 +91,9 @@ pub enum APIError {
     #[error("Invalid invoice: {0}")]
     InvalidInvoice(String),
 
+    #[error("Invalid media digest")]
+    InvalidMediaDigest,
+
     #[error("Invalid name: {0}")]
     InvalidName(String),
 
@@ -208,6 +211,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath
             | APIError::InvalidChannelID
+            | APIError::InvalidMediaDigest
             | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidName(_)

@@ -54,7 +54,11 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use tokio::sync::MutexGuard as TokioMutexGuard;
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, BufReader},
+    sync::MutexGuard as TokioMutexGuard,
+};
 
 use crate::backup::{do_backup, restore_backup};
 use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
@@ -389,6 +393,16 @@ pub(crate) struct DisconnectPeerRequest {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct EmptyResponse {}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetAssetMediaRequest {
+    pub(crate) digest: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetAssetMediaResponse {
+    pub(crate) bytes_hex: String,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
@@ -1238,6 +1252,25 @@ pub(crate) async fn disconnect_peer(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+pub(crate) async fn get_asset_media(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetAssetMediaRequest>, APIError>,
+) -> Result<Json<GetAssetMediaResponse>, APIError> {
+    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+    let file_path = unlocked_state.rgb_get_media_dir().join(&payload.digest);
+    if !file_path.exists() {
+        return Err(APIError::InvalidMediaDigest);
+    }
+
+    let mut buf_reader = BufReader::new(File::open(file_path).await?);
+    let mut file_bytes = Vec::new();
+    buf_reader.read_to_end(&mut file_bytes).await?;
+    let bytes_hex = hex_str(&file_bytes);
+
+    Ok(Json(GetAssetMediaResponse { bytes_hex }))
 }
 
 pub(crate) async fn init(
