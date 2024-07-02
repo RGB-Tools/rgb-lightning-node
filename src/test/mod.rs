@@ -1407,6 +1407,10 @@ fn wait_electrs_sync() {
 
 pub(crate) fn initialize() {
     INIT.call_once(|| {
+        if std::env::var("SKIP_INIT").is_ok() {
+            println!("skipping services initialization");
+            return;
+        }
         println!("starting test services...");
         let output = Command::new("./regtest.sh")
             .args(["start"])
