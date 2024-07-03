@@ -350,6 +350,7 @@ pub(crate) struct ConnectPeerRequest {
 pub(crate) struct CreateUtxosRequest {
     pub(crate) up_to: bool,
     pub(crate) num: Option<u8>,
+    pub(crate) size: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1152,7 +1153,7 @@ pub(crate) async fn create_utxos(
         unlocked_state.rgb_create_utxos(
             payload.up_to,
             payload.num.unwrap_or(UTXO_NUM),
-            UTXO_SIZE_SAT,
+            payload.size.unwrap_or(UTXO_SIZE_SAT),
             FEE_RATE,
         )?;
         tracing::debug!("UTXO creation complete");

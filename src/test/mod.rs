@@ -413,6 +413,7 @@ async fn fund_and_create_utxos(node_address: SocketAddr) {
     let payload = CreateUtxosRequest {
         up_to: false,
         num: Some(10),
+        size: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/createutxos", node_address))

@@ -151,7 +151,7 @@ paths:
       tags:
         - RGB
       summary: Create UTXOs
-      description: Create a fixed number of UTXOs to be used for RGB operations
+      description: Create UTXOs to be used for RGB operations
       requestBody:
         content:
           application/json:
@@ -1026,6 +1026,9 @@ components:
         num:
           type: integer
           example: 4
+        size:
+          type: integer
+          example: 32500
     DecodeLNInvoiceRequest:
       type: object
       properties:
