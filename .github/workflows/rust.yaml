@@ -34,7 +34,7 @@ jobs:
         with:
           components: rustfmt
       - name: Format
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
 
   test:
     runs-on: ubuntu-latest
