@@ -599,6 +599,7 @@ pub(crate) struct MakerInitResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct Media {
     pub(crate) file_path: String,
+    pub(crate) digest: String,
     pub(crate) mime: String,
 }
 
@@ -606,6 +607,7 @@ impl From<RgbLibMedia> for Media {
     fn from(value: RgbLibMedia) -> Self {
         Self {
             file_path: value.file_path,
+            digest: value.digest,
             mime: value.mime,
         }
     }

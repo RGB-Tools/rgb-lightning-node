@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
+use tokio::io::AsyncReadExt;
 use tracing_test::traced_test;
 
 use crate::error::APIErrorResponse;
@@ -18,19 +19,19 @@ use crate::routes::{
     BackupRequest, BtcBalanceResponse, ChangePasswordRequest, Channel, CloseChannelRequest,
     ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
     DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse,
-    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
-    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
-    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
-    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
-    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
-    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsResponse,
-    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
-    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer, RestoreRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
-    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
-    Transaction, Transfer, UnlockRequest, Unspent,
+    GetAssetMediaRequest, GetAssetMediaResponse, HTLCStatus, InitRequest, InitResponse,
+    InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
+    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
+    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
+    ListPeersResponse, ListSwapsResponse, ListTransactionsResponse, ListTransfersRequest,
+    ListTransfersResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
+    SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
+    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
 };
-use crate::utils::PROXY_ENDPOINT_REGTEST;
+use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
 
 use super::*;
 
@@ -348,6 +349,37 @@ async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &s
         .unwrap();
 }
 
+async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, size: Option<u32>) {
+    println!(
+        "creating{}{} UTXOs{} for node {node_address}",
+        if up_to { " up to" } else { "" },
+        if num.is_some() {
+            format!(" {}", num.unwrap())
+        } else {
+            s!("")
+        },
+        if size.is_some() {
+            format!(" of size {}", size.unwrap())
+        } else {
+            s!("")
+        },
+    );
+
+    let num = if num.is_some() { num } else { Some(10) };
+    let payload = CreateUtxosRequest { up_to, num, size };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/createutxos", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+}
+
 async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNInvoiceResponse {
     println!("decoding LN invoice {invoice} for node {node_address}");
     let payload = DecodeLNInvoiceRequest {
@@ -403,31 +435,33 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
 }
 
 async fn fund_and_create_utxos(node_address: SocketAddr) {
-    println!("funding wallet and creating UTXOs for node {node_address}");
+    println!("funding wallet for node {node_address}");
     let addr = address(node_address).await;
 
     _fund_wallet(addr);
-
     mine(false);
 
-    let payload = CreateUtxosRequest {
-        up_to: false,
-        num: Some(10),
-        size: None,
+    create_utxos(node_address, false, Some(10), None).await;
+    mine(false);
+}
+
+async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
+    println!("requesting media for digest {digest} from node {node_address}");
+    let payload = GetAssetMediaRequest {
+        digest: digest.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/createutxos", node_address))
+        .post(format!("http://{}/getassetmedia", node_address))
         .json(&payload)
         .send()
         .await
         .unwrap();
     _check_response_is_ok(res)
         .await
-        .json::<EmptyResponse>()
+        .json::<GetAssetMediaResponse>()
         .await
-        .unwrap();
-
-    mine(false);
+        .unwrap()
+        .bytes_hex
 }
 
 async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatus {
@@ -449,14 +483,14 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
         .status
 }
 
-async fn issue_asset_cfa(node_address: SocketAddr) -> AssetCFA {
+async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> AssetCFA {
     println!("issuing CFA asset on node {node_address}");
     let payload = IssueAssetCFARequest {
         amounts: vec![2000],
         name: s!("Collectible"),
         details: None,
         precision: 0,
-        file_path: None,
+        file_path: file_path.map(|fp| fp.to_string()),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/issueassetcfa", node_address))
@@ -494,14 +528,14 @@ async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
         .asset
 }
 
-async fn issue_asset_uda(node_address: SocketAddr) -> AssetUDA {
+async fn issue_asset_uda(node_address: SocketAddr, file_path: Option<&str>) -> AssetUDA {
     println!("issuing UDA asset on node {node_address}");
     let payload = IssueAssetUDARequest {
         ticker: s!("UNI"),
         name: s!("Unique"),
         details: None,
         precision: 0,
-        media_file_path: None,
+        media_file_path: file_path.map(|fp| fp.to_string()),
         attachments_file_paths: vec![],
     };
     let res = reqwest::Client::new()
