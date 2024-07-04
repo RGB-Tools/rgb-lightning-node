@@ -10,18 +10,25 @@ use crate::{routes::SwapStatus, utils::hex_str_to_vec};
 pub(crate) struct SwapData {
     pub(crate) swap_info: SwapInfo,
     pub(crate) status: SwapStatus,
+    pub(crate) initiated_at: Option<u64>,
 }
 
 impl_writeable_tlv_based!(SwapData, {
     (0, swap_info, required),
     (1, status, required),
+    (2, initiated_at, option),
 });
 
 impl SwapData {
-    pub(crate) fn from_swap_info(swap_info: &SwapInfo, status: SwapStatus) -> Self {
+    pub(crate) fn from_swap_info(
+        swap_info: &SwapInfo,
+        status: SwapStatus,
+        initiated_at: Option<u64>,
+    ) -> Self {
         Self {
             swap_info: swap_info.clone(),
             status,
+            initiated_at,
         }
     }
 }

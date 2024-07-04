@@ -89,7 +89,8 @@ use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{HTLCStatus, SwapStatus, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
-    connect_peer_if_necessary, do_connect_peer, hex_str, AppState, StaticState, UnlockedAppState,
+    connect_peer_if_necessary, do_connect_peer, get_current_timestamp, hex_str, AppState,
+    StaticState, UnlockedAppState,
 };
 
 pub(crate) const FEE_RATE: f32 = 7.0;
@@ -156,6 +157,14 @@ impl UnlockedAppState {
         self.save_maker_swaps(maker_swaps);
     }
 
+    pub(crate) fn update_maker_swap_to_pending(&self, payment_hash: &PaymentHash) {
+        let mut maker_swaps = self.get_maker_swaps();
+        let maker_swap = maker_swaps.swaps.get_mut(payment_hash).unwrap();
+        maker_swap.status = SwapStatus::Pending;
+        maker_swap.initiated_at = Some(get_current_timestamp());
+        self.save_maker_swaps(maker_swaps);
+    }
+
     pub(crate) fn is_maker_swap(&self, payment_hash: &PaymentHash) -> bool {
         self.maker_swaps().contains_key(payment_hash)
     }
@@ -170,6 +179,14 @@ impl UnlockedAppState {
         let mut taker_swaps = self.get_taker_swaps();
         let taker_swap = taker_swaps.swaps.get_mut(payment_hash).unwrap();
         taker_swap.status = status;
+        self.save_taker_swaps(taker_swaps);
+    }
+
+    pub(crate) fn update_taker_swap_to_pending(&self, payment_hash: &PaymentHash) {
+        let mut taker_swaps = self.get_taker_swaps();
+        let taker_swap = taker_swaps.swaps.get_mut(payment_hash).unwrap();
+        taker_swap.status = SwapStatus::Pending;
+        taker_swap.initiated_at = Some(get_current_timestamp());
         self.save_taker_swaps(taker_swaps);
     }
 
@@ -1030,7 +1047,7 @@ async fn handle_ldk_events(
             }
 
             tracing::debug!("Swap is whitelisted, forwarding the htlc...");
-            unlocked_state.update_taker_swap_status(&payment_hash, SwapStatus::Pending);
+            unlocked_state.update_taker_swap_to_pending(&payment_hash);
 
             unlocked_state
                 .channel_manager
