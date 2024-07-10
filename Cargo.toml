@@ -32,7 +32,7 @@ lightning-block-sync = { version = "0.0.123", features = ["rpc-client", "tokio"]
 lightning-invoice = { version = "0.31.0", path = "./rust-lightning/lightning-invoice" }
 lightning-net-tokio = { version = "0.0.123" }
 lightning-persister = { version = "0.0.123", path = "./rust-lightning/lightning-persister" }
-lightning-rapid-gossip-sync = { version = "0.0.123" }
+lightning-rapid-gossip-sync = { version = "0.0.123", path = "./rust-lightning/lightning-rapid-gossip-sync" }
 magic-crypt = "3.1.12"
 miniscript = { version = "8.0", features = ["serde"] }
 rand = "0.8.5"

@@ -1415,10 +1415,10 @@ pub(crate) async fn keysend(
         let payment_id = PaymentId(payment_hash_inner);
         let payment_hash = PaymentHash(payment_hash_inner);
 
-        match (payload.asset_id, payload.asset_amount) {
-            (Some(rgb_contract_id), Some(rgb_amount)) => {
-                let contract_id = ContractId::from_str(&rgb_contract_id)
-                    .map_err(|_| APIError::InvalidAssetID(rgb_contract_id))?;
+        let rgb_payment = match (payload.asset_id, payload.asset_amount) {
+            (Some(asset_id), Some(rgb_amount)) => {
+                let contract_id = ContractId::from_str(&asset_id)
+                    .map_err(|_| APIError::InvalidAssetID(asset_id))?;
 
                 write_rgb_payment_info_file(
                     &PathBuf::from(&state.static_state.ldk_data_dir),
@@ -1428,16 +1428,18 @@ pub(crate) async fn keysend(
                     false,
                     false,
                 );
+                Some((contract_id, rgb_amount))
             }
-            (None, None) => {}
+            (None, None) => None,
             _ => {
                 return Err(APIError::IncompleteRGBInfo);
             }
-        }
+        };
 
         let route_params = RouteParameters::from_payment_params_and_value(
             PaymentParameters::for_keysend(dest_pubkey, 40, false),
             amt_msat,
+            rgb_payment,
         );
         unlocked_state.add_outbound_payment(
             payment_id,
@@ -1937,10 +1939,14 @@ pub(crate) async fn maker_execute(
                         base_msat: config.fee_base_msat,
                         proportional_millionths: config.fee_proportional_millionths,
                     },
+                    htlc_maximum_rgb: None,
                 }])
             })
             .collect();
 
+        let rgb_payment = swap_info
+            .to_asset
+            .map(|to_asset| (to_asset, swap_info.qty_to));
         let first_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
@@ -1951,9 +1957,13 @@ pub(crate) async fn maker_execute(
             } else {
                 Some(HTLC_MIN_MSAT)
             },
-            swap_info.to_asset,
+            rgb_payment,
             vec![],
         );
+
+        let rgb_payment = swap_info
+            .from_asset
+            .map(|from_asset| (from_asset, swap_info.qty_from));
         let second_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
@@ -1964,7 +1974,7 @@ pub(crate) async fn maker_execute(
             } else {
                 Some(swap_info.qty_from + HTLC_MIN_MSAT)
             },
-            swap_info.from_asset,
+            rgb_payment,
             receive_hints,
         );
 
@@ -2035,6 +2045,8 @@ pub(crate) async fn maker_execute(
                 // by composing a pre-existing list of hops
                 final_value_msat: 0,
                 max_total_routing_fee_msat: None,
+                // This value is not used anywhere, same as final_value_msat
+                rgb_payment: None,
             }),
         };
 

@@ -2465,7 +2465,7 @@ version = "0.0.123"
 dependencies = [
  "bitcoin 0.30.2",
  "lightning",
- "lightning-rapid-gossip-sync 0.0.123",
+ "lightning-rapid-gossip-sync",
 ]
 
 [[package]]
@@ -2516,16 +2516,6 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.0.123"
-dependencies = [
- "bitcoin 0.30.2",
- "lightning",
-]
-
-[[package]]
-name = "lightning-rapid-gossip-sync"
-version = "0.0.123"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d861b0f0cd5f8fe8c63760023c4fd4fd32c384881b41780b62ced2a8a619f91"
 dependencies = [
  "bitcoin 0.30.2",
  "lightning",
@@ -3583,7 +3573,7 @@ dependencies = [
  "lightning-invoice",
  "lightning-net-tokio",
  "lightning-persister",
- "lightning-rapid-gossip-sync 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightning-rapid-gossip-sync",
  "magic-crypt",
  "mime",
  "miniscript 8.0.2",
