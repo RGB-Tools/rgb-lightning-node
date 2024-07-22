@@ -1498,6 +1498,7 @@ mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
+mod htlc_amount_checks;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
