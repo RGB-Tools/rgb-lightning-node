@@ -25,6 +25,9 @@ pub enum APIError {
     #[error("Anchor outputs are required for RGB channels")]
     AnchorsRequired,
 
+    #[error("Cannot open channel: {0}")]
+    CannotOpenChannel(String),
+
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
@@ -160,6 +163,9 @@ pub enum APIError {
     #[error("Wallet has not been initialized (hint: call init)")]
     NotInitialized,
 
+    #[error("Cannot perform this operation while an open channel operation is in progress")]
+    OpenChannelInProgress,
+
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
 
@@ -237,6 +243,7 @@ impl IntoResponse for APIError {
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
+            | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
             | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
@@ -245,6 +252,7 @@ impl IntoResponse for APIError {
             | APIError::NoRoute
             | APIError::NotInitialized
             | APIError::RecipientIDAlreadyUsed
+            | APIError::OpenChannelInProgress
             | APIError::UnknownContractId
             | APIError::UnknownLNInvoice
             | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),

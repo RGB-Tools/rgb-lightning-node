@@ -887,6 +887,8 @@ async fn handle_ldk_events(
                 })
                 .await
                 .unwrap();
+
+                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
             } else {
                 // acceptor
                 let consignment_path = static_state
@@ -962,6 +964,8 @@ async fn handle_ldk_events(
         Event::DiscardFunding { .. } => {
             // A "real" node should probably "lock" the UTXOs spent in funding transactions until
             // the funding transaction either confirms, or this event is generated.
+
+            *unlocked_state.rgb_send_lock.lock().unwrap() = false;
         }
         Event::HTLCIntercepted {
             is_swap,
@@ -1748,6 +1752,7 @@ pub(crate) async fn start_ldk(
         taker_swaps,
         router: Arc::clone(&router),
         output_sweeper: Arc::clone(&output_sweeper),
+        rgb_send_lock: Arc::new(Mutex::new(false)),
     });
 
     let recent_payments_payment_ids = channel_manager

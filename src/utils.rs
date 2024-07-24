@@ -105,6 +105,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) rgb_wallet_wrapper: Arc<RgbLibWalletWrapper>,
     pub(crate) router: Arc<Router>,
     pub(crate) output_sweeper: Arc<OutputSweeper>,
+    pub(crate) rgb_send_lock: Arc<Mutex<bool>>,
 }
 
 impl UnlockedAppState {

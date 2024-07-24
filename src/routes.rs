@@ -4,7 +4,7 @@ use axum_extra::extract::WithRejection;
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::Network;
+use bitcoin::{Network, ScriptBuf};
 use hex::DisplayHex;
 use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
@@ -12,7 +12,7 @@ use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
 use lightning::rgb_utils::{
     get_rgb_channel_info_path, get_rgb_payment_info_path, parse_rgb_channel_info,
-    parse_rgb_payment_info,
+    parse_rgb_payment_info, STATIC_BLINDING,
 };
 use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
@@ -38,10 +38,12 @@ use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use rgb_lib::{
     generate_keys,
+    utils::recipient_id_from_script_buf,
     wallet::{
         AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
         Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
+        WitnessData,
     },
     AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork, ContractId,
     Error as RgbLibError, RgbTransport,
@@ -1331,6 +1333,10 @@ pub(crate) async fn issue_asset_cfa(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
         let asset = unlocked_state.rgb_issue_asset_cfa(
             payload.name,
             payload.details,
@@ -1353,6 +1359,10 @@ pub(crate) async fn issue_asset_nia(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
         let asset = unlocked_state.rgb_issue_asset_nia(
             payload.ticker,
             payload.name,
@@ -1373,6 +1383,10 @@ pub(crate) async fn issue_asset_uda(
 ) -> Result<Json<IssueAssetUDAResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
 
         let asset = unlocked_state.rgb_issue_asset_uda(
             payload.ticker,
@@ -2202,6 +2216,10 @@ pub(crate) async fn open_channel(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
         let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
 
         let colored_info = match (payload.asset_id, payload.asset_amount) {
@@ -2281,6 +2299,41 @@ pub(crate) async fn open_channel(
         } else {
             None
         };
+
+        if let Some((contract_id, asset_amount)) = &colored_info {
+            let mut fake_p2wsh: [u8; 34] = [0; 34];
+            fake_p2wsh[1] = 32;
+            let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
+            let recipient_id =
+                recipient_id_from_script_buf(script_buf, state.static_state.network.into());
+            let asset_id = contract_id.to_string();
+            let recipient_map = map! {
+                asset_id => vec![Recipient {
+                    recipient_id,
+                    witness_data: Some(WitnessData {
+                        amount_sat: payload.capacity_sat,
+                        blinding: Some(STATIC_BLINDING + 1),
+                    }),
+                    amount: *asset_amount,
+                    transport_endpoints: vec![state.static_state.proxy_endpoint.clone()]
+            }]};
+
+            let unlocked_state_copy = unlocked_state.clone();
+            tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_send_begin(
+                    recipient_map,
+                    true,
+                    FEE_RATE,
+                    MIN_CHANNEL_CONFIRMATIONS,
+                )
+            })
+            .await
+            .unwrap()
+            .map_err(|e| APIError::CannotOpenChannel(format!("{:?}", e)))?;
+        }
+
+        *unlocked_state.rgb_send_lock.lock().unwrap() = true;
+
         let temporary_channel_id = unlocked_state
             .channel_manager
             .create_channel(
@@ -2398,6 +2451,10 @@ pub(crate) async fn send_asset(
 ) -> Result<Json<SendAssetResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
 
         RecipientInfo::new(payload.recipient_id.clone())?;
         let recipient_map = map! {
