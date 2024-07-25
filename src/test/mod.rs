@@ -1505,6 +1505,7 @@ mod lock_unlock_changepassword;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
+mod openchannel_fail;
 mod payment;
 mod refuse_high_fees;
 mod restart;
