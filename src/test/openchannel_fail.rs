@@ -1,8 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/open_fail/";
-const NODE1_PEER_PORT: u16 = 9901;
-const NODE2_PEER_PORT: u16 = 9902;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

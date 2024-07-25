@@ -1,9 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/vanilla_payment_on_rgb_channel/";
-const NODE1_PEER_PORT: u16 = 9821;
-const NODE2_PEER_PORT: u16 = 9822;
-const NODE3_PEER_PORT: u16 = 9823;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

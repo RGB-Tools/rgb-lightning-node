@@ -1,8 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/swap_roundtrip_fail_timeout/";
-const NODE1_PEER_PORT: u16 = 9821;
-const NODE2_PEER_PORT: u16 = 9822;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

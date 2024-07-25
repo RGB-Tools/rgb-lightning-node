@@ -2,8 +2,6 @@ use super::*;
 use regex::RegexSet;
 
 const TEST_DIR_BASE: &str = "tmp/backup_and_restore/";
-const NODE1_PEER_PORT: u16 = 9921;
-const NODE2_PEER_PORT: u16 = 9922;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

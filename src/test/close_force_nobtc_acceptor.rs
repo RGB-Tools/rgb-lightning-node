@@ -1,9 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/close_force_nobtc_acceptor/";
-const NODE1_PEER_PORT: u16 = 9871;
-const NODE2_PEER_PORT: u16 = 9872;
-const NODE3_PEER_PORT: u16 = 9873;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

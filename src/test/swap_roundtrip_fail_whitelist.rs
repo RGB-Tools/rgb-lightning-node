@@ -9,9 +9,6 @@ use std::{
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/swap_roundtrip_fail_whitelist/";
-const NODE1_PEER_PORT: u16 = 9821;
-const NODE2_PEER_PORT: u16 = 9822;
-const NODE3_PEER_PORT: u16 = 9823;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

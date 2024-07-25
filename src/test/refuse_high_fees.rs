@@ -9,9 +9,6 @@ use std::{
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/refuse_high_fees/";
-const NODE1_PEER_PORT: u16 = 9931;
-const NODE2_PEER_PORT: u16 = 9932;
-const NODE3_PEER_PORT: u16 = 9933;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

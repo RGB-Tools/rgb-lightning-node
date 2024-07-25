@@ -1,9 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/htlc_amount_checks/";
-const NODE1_PEER_PORT: u16 = 9901;
-const NODE2_PEER_PORT: u16 = 9902;
-const NODE3_PEER_PORT: u16 = 9903;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

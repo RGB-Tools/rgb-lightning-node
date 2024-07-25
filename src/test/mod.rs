@@ -36,6 +36,10 @@ use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
 use super::*;
 
 const ELECTRUM_URL: &str = "127.0.0.1:50001";
+const NODE1_PEER_PORT: u16 = 9801;
+const NODE2_PEER_PORT: u16 = 9802;
+const NODE3_PEER_PORT: u16 = 9803;
+const NODE4_PEER_PORT: u16 = 9804;
 
 static INIT: Once = Once::new();
 

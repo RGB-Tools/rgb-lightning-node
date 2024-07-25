@@ -1,7 +1,6 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/lock_unlock_changepassword/";
-const NODE1_PEER_PORT: u16 = 9941;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
