@@ -66,8 +66,8 @@ async fn main() -> Result<()> {
     let (router, app_state) = app(args).await?;
 
     tracing::info!("Listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(router.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal(app_state))
         .await
         .unwrap();
@@ -147,7 +147,6 @@ impl AppState {
 }
 
 /// Tokio signal handler that will wait for a user to press CTRL+C.
-/// We use this in our hyper `Server` method `with_graceful_shutdown`.
 async fn shutdown_signal(app_state: Arc<AppState>) {
     let cancel_token = app_state.cancel_token.clone();
 
