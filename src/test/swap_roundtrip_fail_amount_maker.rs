@@ -13,7 +13,7 @@ async fn swap_fail_amount_maker() {
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
     let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
 
-    fund_and_create_utxos(node1_addr).await;
+    fund_and_create_utxos(node1_addr, None).await;
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 

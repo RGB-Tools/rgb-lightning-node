@@ -21,8 +21,8 @@ async fn send_receive() {
     assert_eq!(net_info.network, BitcoinNetwork::Regtest);
     let height_1 = net_info.height;
 
-    fund_and_create_utxos(node1_addr).await;
-    fund_and_create_utxos(node2_addr).await;
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 

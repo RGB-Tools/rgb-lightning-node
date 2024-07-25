@@ -18,8 +18,8 @@ async fn close_coop_nobtc_acceptor() {
     let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
     let (node3_addr, _) = start_node(&test_dir_node3, NODE3_PEER_PORT, false).await;
 
-    fund_and_create_utxos(node1_addr).await;
-    fund_and_create_utxos(node3_addr).await;
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node3_addr, None).await;
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
@@ -51,7 +51,7 @@ async fn close_coop_nobtc_acceptor() {
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    fund_and_create_utxos(node2_addr).await;
+    fund_and_create_utxos(node2_addr, None).await;
     send_asset(node2_addr, &asset_id, 50, recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;

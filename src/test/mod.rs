@@ -434,14 +434,14 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
         .unwrap();
 }
 
-async fn fund_and_create_utxos(node_address: SocketAddr) {
+async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
     println!("funding wallet for node {node_address}");
     let addr = address(node_address).await;
 
     _fund_wallet(addr);
     mine(false);
 
-    create_utxos(node_address, false, Some(10), None).await;
+    create_utxos(node_address, false, Some(num.unwrap_or(10)), None).await;
     mine(false);
 }
 
