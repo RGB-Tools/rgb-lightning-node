@@ -88,6 +88,7 @@ pub(crate) struct StaticState {
     pub(crate) indexer_url: String,
     pub(crate) proxy_endpoint: String,
     pub(crate) bitcoind_client: Arc<BitcoindClient>,
+    pub(crate) max_media_upload_size_mb: u16,
 }
 
 pub(crate) struct UnlockedAppState {
@@ -325,7 +326,7 @@ pub(crate) fn parse_peer_info(
     Ok((pubkey.unwrap(), peer_addr.unwrap().unwrap()))
 }
 
-pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, AppError> {
+pub(crate) async fn start_daemon(args: &LdkUserInfo) -> Result<Arc<AppState>, AppError> {
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
@@ -382,15 +383,16 @@ pub(crate) async fn start_daemon(args: LdkUserInfo) -> Result<Arc<AppState>, App
 
     let static_state = Arc::new(StaticState {
         ldk_peer_listening_port: args.ldk_peer_listening_port,
-        ldk_announced_listen_addr: args.ldk_announced_listen_addr,
+        ldk_announced_listen_addr: args.ldk_announced_listen_addr.clone(),
         ldk_announced_node_name: args.ldk_announced_node_name,
         network,
-        storage_dir_path: args.storage_dir_path,
+        storage_dir_path: args.storage_dir_path.clone(),
         ldk_data_dir,
         logger,
         indexer_url: indexer_url.to_string(),
         proxy_endpoint: proxy_endpoint.to_string(),
         bitcoind_client,
+        max_media_upload_size_mb: args.max_media_upload_size_mb,
     });
 
     Ok(Arc::new(AppState {

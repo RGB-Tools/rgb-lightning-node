@@ -39,6 +39,10 @@ struct Args {
     /// Announced listen addresses
     #[arg(long, value_delimiter = ',')]
     announced_listen_addreses: Option<Vec<String>>,
+
+    /// Max allowed media size for upload (in MB)
+    #[arg(long, default_value_t = 5)]
+    max_media_upload_size_mb: u16,
 }
 
 pub(crate) struct LdkUserInfo {
@@ -52,6 +56,7 @@ pub(crate) struct LdkUserInfo {
     pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
     pub(crate) ldk_announced_node_name: [u8; 32],
     pub(crate) network: Network,
+    pub(crate) max_media_upload_size_mb: u16,
 }
 
 pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
@@ -135,6 +140,7 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
         ldk_announced_listen_addr,
         ldk_announced_node_name,
         network,
+        max_media_upload_size_mb: args.max_media_upload_size_mb,
     })
 }
 

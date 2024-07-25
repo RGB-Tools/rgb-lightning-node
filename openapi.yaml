@@ -277,7 +277,7 @@ paths:
       tags:
         - RGB
       summary: Issue an RGB CFA asset
-      description: Issue an RGB CFA asset
+      description: Issue an RGB CFA asset. To provide a media first call the /postassetmedia API.
       requestBody:
         content:
           application/json:
@@ -313,7 +313,7 @@ paths:
       tags:
         - RGB
       summary: Issue an RGB UDA asset
-      description: Issue an RGB UDA asset
+      description: Issue an RGB UDA asset. To provide a media first call the /postassetmedia API.
       requestBody:
         content:
           application/json:
@@ -569,6 +569,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenChannelResponse'
+  /postassetmedia:
+    post:
+      tags:
+        - RGB
+      summary: Post an asset media
+      description: Save the provided media
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PostAssetMediaRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostAssetMediaResponse'
   /refreshtransfers:
     post:
       tags:
@@ -1167,9 +1185,9 @@ components:
         precision:
           type: integer
           example: 0
-        file_path:
+        file_digest:
           type: string
-          example: /path/to/media
+          example: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
     IssueAssetCFAResponse:
       type: object
       properties:
@@ -1212,14 +1230,14 @@ components:
         precision:
           type: integer
           example: 0
-        media_file_path:
+        media_file_digest:
           type: string
           example: /path/to/media
-        attachments_file_paths:
+        attachments_file_digests:
           type: array
           items:
             type: string
-            example: [ /path/to/attachment0, /path/to/attachment1 ]
+            example: [ 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03, d7516e3a27cdf35aa9dcb323b5f556344ef7f57570be30b88de2bfd4ba339b1a ]
     IssueAssetUDAResponse:
       type: object
       properties:
@@ -1434,6 +1452,9 @@ components:
         onchain_pubkey:
           type: string
           example: tpubDDqiQYzNMGsKVVmWYG4FCPPcbd5S4uW9u7a6zUFkgbh16VmFTvsaNyo37mAgkCku6jStBcU8VaLxG2SE7ab2sEwwagjfbS8U9H82BadjKR1
+        max_media_upload_size_mb:
+          type: integer
+          example: 5
     OpenChannelRequest:
       type: object
       properties:
@@ -1496,6 +1517,18 @@ components:
         pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+    PostAssetMediaRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+    PostAssetMediaResponse:
+      type: object
+      properties:
+        digest:
+          type: string
+          example: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
     RestoreRequest:
       type: object
       properties:
@@ -1687,8 +1720,8 @@ components:
           additionalProperties:
             $ref: '#/components/schemas/Media'
           example:
-            0: { file_path: path/to/attachment0, mime: text/plain }
-            1: { file_path: path/to/attachment1, mime: image/png }
+            0: { file_path: path/to/attachment0, digest: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03, mime: text/plain }
+            1: { file_path: path/to/attachment1, digest: d7516e3a27cdf35aa9dcb323b5f556344ef7f57570be30b88de2bfd4ba339b1a, mime: image/png }
         reserves:
           type: boolean
           example: false

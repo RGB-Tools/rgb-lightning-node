@@ -10,7 +10,7 @@ name = "rgb-lightning-node"
 [dependencies]
 amplify = { version = "=4.6.0", default-features = false }
 anyhow = "1.0.86"
-axum = "0.7.5"
+axum = { version = "0.7.5", features = ["multipart"] }
 axum-extra = "0.9.3"
 # axum-macros = "0.4.1"  # uncomment to use debug_handler
 baid58 = "0.4.4"
@@ -32,7 +32,7 @@ lightning-persister = { version = "0.0.123", path = "./rust-lightning/lightning-
 lightning-rapid-gossip-sync = { version = "0.0.123", path = "./rust-lightning/lightning-rapid-gossip-sync" }
 magic-crypt = "3.1.13"
 rand = "0.8.5"
-rgb-lib = { version = "0.3.0-alpha.4", features = [
+rgb-lib = { version = "0.3.0-alpha.5", features = [
     "electrum",
     "esplora",
 ] }
@@ -44,7 +44,7 @@ thiserror = "1.0"
 time = { version = "0.3.36", features = ["std"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "rt-multi-thread", "signal", "sync", "net", "time"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
-tower-http = { version = "0.5.2", features = ["cors", "trace"] }
+tower-http = { version = "0.5.2", features = ["cors", "limit", "trace"] }
 tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

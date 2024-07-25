@@ -20,6 +20,7 @@ use axum::{
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::signal;
 use tower_http::cors::CorsLayer;
+use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::{self, TraceLayer};
 use tracing_subscriber::{filter, prelude::*};
 
@@ -32,7 +33,7 @@ use crate::routes::{
     invoice_status, issue_asset_cfa, issue_asset_nia, issue_asset_uda, keysend, list_assets,
     list_channels, list_payments, list_peers, list_swaps, list_transactions, list_transfers,
     list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info, node_info,
-    open_channel, refresh_transfers, restore, rgb_invoice, send_asset, send_btc,
+    open_channel, post_asset_media, refresh_transfers, restore, rgb_invoice, send_asset, send_btc,
     send_onion_message, send_payment, shutdown, sign_message, taker, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
@@ -76,7 +77,7 @@ async fn main() -> Result<()> {
 }
 
 pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), AppError> {
-    let app_state = start_daemon(args).await?;
+    let app_state = start_daemon(&args).await?;
 
     let router = Router::new()
         .route("/address", post(address))
@@ -112,6 +113,12 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/networkinfo", get(network_info))
         .route("/nodeinfo", get(node_info))
         .route("/openchannel", post(open_channel))
+        .route(
+            "/postassetmedia",
+            post(post_asset_media).layer(RequestBodyLimitLayer::new(
+                args.max_media_upload_size_mb as usize * 1024 * 1024,
+            )),
+        )
         .route("/refreshtransfers", post(refresh_transfers))
         .route("/restore", post(restore))
         .route("/rgbinvoice", post(rgb_invoice))

@@ -28,9 +28,10 @@ use crate::routes::{
     ListPeersResponse, ListSwapsResponse, ListTransactionsResponse, ListTransfersRequest,
     ListTransfersResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
     MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
-    OpenChannelResponse, Payment, Peer, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
-    SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
+    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RestoreRequest, RgbInvoiceRequest,
+    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse,
+    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer,
+    UnlockRequest, Unspent,
 };
 use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
 
@@ -60,6 +61,7 @@ impl Default for LdkUserInfo {
             storage_dir_path: PathBuf::from("tmp/test_name/nodeN"),
             daemon_listening_port: 3001,
             ldk_peer_listening_port: 9735,
+            max_media_upload_size_mb: 1,
         }
     }
 }
@@ -488,12 +490,16 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
 
 async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> AssetCFA {
     println!("issuing CFA asset on node {node_address}");
+    let mut file_digest = None;
+    if let Some(fp) = file_path {
+        file_digest = Some(post_asset_media(node_address, fp).await);
+    }
     let payload = IssueAssetCFARequest {
         amounts: vec![2000],
         name: s!("Collectible"),
         details: None,
         precision: 0,
-        file_path: file_path.map(|fp| fp.to_string()),
+        file_digest,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/issueassetcfa", node_address))
@@ -533,13 +539,17 @@ async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
 
 async fn issue_asset_uda(node_address: SocketAddr, file_path: Option<&str>) -> AssetUDA {
     println!("issuing UDA asset on node {node_address}");
+    let mut media_file_digest = None;
+    if let Some(fp) = file_path {
+        media_file_digest = Some(post_asset_media(node_address, fp).await);
+    }
     let payload = IssueAssetUDARequest {
         ticker: s!("UNI"),
         name: s!("Unique"),
         details: None,
         precision: 0,
-        media_file_path: file_path.map(|fp| fp.to_string()),
-        attachments_file_paths: vec![],
+        media_file_digest,
+        attachments_file_digests: vec![],
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/issueassetuda", node_address))
@@ -1020,6 +1030,25 @@ async fn open_channel_with_custom_fees(
             panic!("channel is taking too long to be ready")
         }
     }
+}
+
+async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
+    println!("posting asset media on node {node_address}");
+    let file_bytes = tokio::fs::read(file_path).await.unwrap();
+    let form =
+        reqwest::multipart::Form::new().part("file", reqwest::multipart::Part::bytes(file_bytes));
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/postassetmedia", node_address))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<PostAssetMediaResponse>()
+        .await
+        .unwrap()
+        .digest
 }
 
 async fn refresh_transfers(node_address: SocketAddr) {

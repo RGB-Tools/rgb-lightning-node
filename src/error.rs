@@ -151,6 +151,12 @@ pub enum APIError {
     #[error("Node is locked (hint: call unlock)")]
     LockedNode,
 
+    #[error("Media file is empty")]
+    MediaFileEmpty,
+
+    #[error("Media file has not been provided")]
+    MediaFileNotProvided,
+
     #[error("Unable to find payment preimage, be sure you've provided the correct swap info")]
     MissingSwapPaymentPreimage,
 
@@ -235,6 +241,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidTicker(_)
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::MediaFileEmpty
+            | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
             | APIError::UnsupportedBackupVersion { .. } => {

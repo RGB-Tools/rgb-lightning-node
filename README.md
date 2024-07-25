@@ -170,6 +170,7 @@ The node currently exposes the following APIs:
 - `/networkinfo` (GET)
 - `/nodeinfo` (GET)
 - `/openchannel` (POST)
+- `/postassetmedia` (POST)
 - `/refreshtransfers` (POST)
 - `/restore` (POST)
 - `/rgbinvoice` (POST)

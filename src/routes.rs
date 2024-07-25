@@ -1,7 +1,10 @@
 use amplify::{map, s};
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Multipart, State},
+    Json,
+};
 use axum_extra::extract::WithRejection;
-use bitcoin::hashes::sha256::Hash as Sha256;
+use bitcoin::hashes::sha256::{self, Hash as Sha256};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Network, ScriptBuf};
@@ -58,7 +61,7 @@ use std::{
 };
 use tokio::{
     fs::File,
-    io::{AsyncReadExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
     sync::MutexGuard as TokioMutexGuard,
 };
 
@@ -454,7 +457,7 @@ pub(crate) struct IssueAssetCFARequest {
     pub(crate) name: String,
     pub(crate) details: Option<String>,
     pub(crate) precision: u8,
-    pub(crate) file_path: Option<String>,
+    pub(crate) file_digest: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -481,8 +484,8 @@ pub(crate) struct IssueAssetUDARequest {
     pub(crate) name: String,
     pub(crate) details: Option<String>,
     pub(crate) precision: u8,
-    pub(crate) media_file_path: Option<String>,
-    pub(crate) attachments_file_paths: Vec<String>,
+    pub(crate) media_file_digest: Option<String>,
+    pub(crate) attachments_file_digests: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -629,6 +632,7 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) local_balance_msat: u64,
     pub(crate) num_peers: usize,
     pub(crate) onchain_pubkey: String,
+    pub(crate) max_media_upload_size_mb: u16,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -662,6 +666,11 @@ pub(crate) struct Payment {
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Peer {
     pub(crate) pubkey: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct PostAssetMediaResponse {
+    pub(crate) digest: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1264,9 +1273,13 @@ pub(crate) async fn get_asset_media(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<GetAssetMediaRequest>, APIError>,
 ) -> Result<Json<GetAssetMediaResponse>, APIError> {
-    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
-
-    let file_path = unlocked_state.rgb_get_media_dir().join(&payload.digest);
+    let file_path = state
+        .check_unlocked()
+        .await?
+        .clone()
+        .unwrap()
+        .rgb_get_media_dir()
+        .join(payload.digest.to_lowercase());
     if !file_path.exists() {
         return Err(APIError::InvalidMediaDigest);
     }
@@ -1338,12 +1351,20 @@ pub(crate) async fn issue_asset_cfa(
             return Err(APIError::OpenChannelInProgress);
         }
 
+        let file_path = payload.file_digest.map(|d: String| {
+            unlocked_state
+                .rgb_get_media_dir()
+                .join(d.to_lowercase())
+                .to_string_lossy()
+                .to_string()
+        });
+
         let asset = unlocked_state.rgb_issue_asset_cfa(
             payload.name,
             payload.details,
             payload.precision,
             payload.amounts,
-            payload.file_path,
+            file_path,
         )?;
 
         Ok(Json(IssueAssetCFAResponse {
@@ -1389,13 +1410,27 @@ pub(crate) async fn issue_asset_uda(
             return Err(APIError::OpenChannelInProgress);
         }
 
+        let rgb_media_dir = unlocked_state.rgb_get_media_dir();
+        let get_string_path = |d: String| {
+            rgb_media_dir
+                .join(d.to_lowercase())
+                .to_string_lossy()
+                .to_string()
+        };
+        let media_file_path = payload.media_file_digest.map(get_string_path);
+        let attachments_file_paths = payload
+            .attachments_file_digests
+            .into_iter()
+            .map(get_string_path)
+            .collect();
+
         let asset = unlocked_state.rgb_issue_asset_uda(
             payload.ticker,
             payload.name,
             payload.details,
             payload.precision,
-            payload.media_file_path,
-            payload.attachments_file_paths,
+            media_file_path,
+            attachments_file_paths,
         )?;
 
         Ok(Json(IssueAssetUDAResponse {
@@ -2208,6 +2243,7 @@ pub(crate) async fn node_info(
         local_balance_msat: chans.iter().map(|c| c.balance_msat).sum::<u64>(),
         num_peers: unlocked_state.peer_manager.list_peers().len(),
         onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
+        max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
     }))
 }
 
@@ -2381,6 +2417,51 @@ pub(crate) async fn open_channel(
         Ok(Json(OpenChannelResponse {
             temporary_channel_id,
         }))
+    })
+    .await
+}
+
+pub(crate) async fn post_asset_media(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Result<Json<PostAssetMediaResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        let digest = if let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|_| APIError::MediaFileNotProvided)?
+        {
+            let file_bytes = field.bytes().await.map_err(|_| APIError::Unexpected)?;
+            if file_bytes.is_empty() {
+                return Err(APIError::MediaFileEmpty);
+            }
+            let file_hash: sha256::Hash = Hash::hash(&file_bytes[..]);
+            let digest = file_hash.to_string();
+
+            let file_path = unlocked_state.rgb_get_media_dir().join(&digest);
+            let mut write = true;
+            if file_path.exists() {
+                let mut buf_reader = BufReader::new(File::open(&file_path).await?);
+                let mut existing_file_bytes = Vec::new();
+                buf_reader.read_to_end(&mut existing_file_bytes).await?;
+                if file_bytes != existing_file_bytes {
+                    tokio::fs::remove_file(&file_path).await?;
+                } else {
+                    write = false;
+                }
+            }
+            if write {
+                let mut file = File::create(&file_path).await?;
+                file.write_all(&file_bytes).await?;
+            }
+            digest
+        } else {
+            return Err(APIError::MediaFileNotProvided);
+        };
+
+        Ok(Json(PostAssetMediaResponse { digest }))
     })
     .await
 }
