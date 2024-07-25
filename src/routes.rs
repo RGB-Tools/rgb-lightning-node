@@ -628,6 +628,7 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) num_usable_channels: usize,
     pub(crate) local_balance_msat: u64,
     pub(crate) num_peers: usize,
+    pub(crate) onchain_pubkey: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2206,6 +2207,7 @@ pub(crate) async fn node_info(
         num_usable_channels: chans.iter().filter(|c| c.is_usable).count(),
         local_balance_msat: chans.iter().map(|c| c.balance_msat).sum::<u64>(),
         num_peers: unlocked_state.peer_manager.list_peers().len(),
+        onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
     }))
 }
 

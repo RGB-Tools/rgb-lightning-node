@@ -1431,6 +1431,9 @@ components:
         num_peers:
           type: integer
           example: 1
+        onchain_pubkey:
+          type: string
+          example: tpubDDqiQYzNMGsKVVmWYG4FCPPcbd5S4uW9u7a6zUFkgbh16VmFTvsaNyo37mAgkCku6jStBcU8VaLxG2SE7ab2sEwwagjfbS8U9H82BadjKR1
     OpenChannelRequest:
       type: object
       properties:

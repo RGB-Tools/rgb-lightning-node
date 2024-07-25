@@ -18,7 +18,7 @@ use rgb_lib::{
     wallet::{
         rust_only::ColoringInfo, AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Online,
         ReceiveData, Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction,
-        Transfer, Unspent,
+        Transfer, Unspent, WalletData,
     },
     AssetSchema, Contract, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
     Wallet as RgbLibWallet,
@@ -69,6 +69,10 @@ impl UnlockedAppState {
 
     pub(crate) fn rgb_get_media_dir(&self) -> PathBuf {
         self.rgb_wallet_wrapper.get_media_dir()
+    }
+
+    pub(crate) fn rgb_get_wallet_data(&self) -> WalletData {
+        self.rgb_wallet_wrapper.get_wallet_data()
     }
 
     pub(crate) fn rgb_get_wallet_dir(&self) -> PathBuf {
@@ -300,6 +304,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn get_media_dir(&self) -> PathBuf {
         self.get_rgb_wallet().get_media_dir()
+    }
+
+    pub(crate) fn get_wallet_data(&self) -> WalletData {
+        self.get_rgb_wallet().get_wallet_data()
     }
 
     pub(crate) fn get_wallet_dir(&self) -> PathBuf {
