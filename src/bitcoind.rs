@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::hash_types::{BlockHash, Txid};
@@ -119,8 +120,11 @@ impl BitcoindClient {
         logger: Arc<FilesystemLogger>,
     ) -> std::io::Result<Self> {
         let http_endpoint = HttpEndpoint::for_host(host.clone()).with_port(port);
-        let rpc_credentials =
-            base64::encode(format!("{}:{}", rpc_user.clone(), rpc_password.clone()));
+        let rpc_credentials = general_purpose::STANDARD.encode(format!(
+            "{}:{}",
+            rpc_user.clone(),
+            rpc_password.clone()
+        ));
         let bitcoind_rpc_client = RpcClient::new(&rpc_credentials, http_endpoint)?;
         let _dummy = bitcoind_rpc_client
             .call_method::<BlockchainInfo>("getblockchaininfo", &[])

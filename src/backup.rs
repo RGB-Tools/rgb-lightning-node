@@ -6,7 +6,7 @@ use scrypt::Scrypt;
 use tempfile::TempDir;
 use typenum::consts::U32;
 use walkdir::WalkDir;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 
 use std::fs::{create_dir_all, read_to_string, remove_file, write, File};
 use std::io::{Read, Write};
@@ -155,7 +155,7 @@ fn _zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
     // setup
     let writer = File::create(path_out)?;
     let mut zip = zip::ZipWriter::new(writer);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Zstd);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Zstd);
     let mut buffer = [0u8; 4096];
 
     // archive
