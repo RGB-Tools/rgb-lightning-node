@@ -2432,6 +2432,10 @@ pub(crate) async fn rgb_invoice(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
         let receive_data = unlocked_state.rgb_blind_receive(
             payload.asset_id,
             vec![state.static_state.proxy_endpoint.clone()],
