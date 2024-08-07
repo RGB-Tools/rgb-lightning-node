@@ -2618,7 +2618,7 @@ dependencies = [
  "futures",
  "hex-conservative 0.1.2",
  "musig2",
- "rgb-lib",
+ "rgb-lib 0.3.0-alpha.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
  "tokio",
@@ -2654,7 +2654,7 @@ dependencies = [
  "bech32 0.9.1",
  "bitcoin 0.30.2",
  "lightning",
- "rgb-lib",
+ "rgb-lib 0.3.0-alpha.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "secp256k1 0.27.0",
 ]
 
@@ -3628,7 +3628,55 @@ dependencies = [
  "reqwest 0.12.5",
  "rgb-core",
  "rgb-invoice",
- "rgb-lib-migration",
+ "rgb-lib-migration 0.3.0-alpha.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rgb-persist-fs",
+ "rgb-psbt",
+ "rgb-runtime",
+ "rgb-schemata",
+ "rgb-std",
+ "scrypt",
+ "sea-orm",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "strict_encoding",
+ "strict_encoding_derive",
+ "strict_types",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tree_magic_mini",
+ "typenum",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
+name = "rgb-lib"
+version = "0.3.0-alpha.5"
+source = "git+https://github.com/RGB-Tools/rgb-lib?branch=fix_for_windows#2a6bf9702ff294b81d1b870806326dc4fac49075"
+dependencies = [
+ "amplify",
+ "base64 0.22.1",
+ "bdk",
+ "bitcoin 0.30.2",
+ "bp-core",
+ "bp-electrum",
+ "bp-seals",
+ "bp-std",
+ "chacha20poly1305",
+ "commit_verify",
+ "electrum-client 0.19.0",
+ "futures",
+ "hex",
+ "rand",
+ "reqwest 0.12.5",
+ "rgb-core",
+ "rgb-invoice",
+ "rgb-lib-migration 0.3.0-alpha.1 (git+https://github.com/RGB-Tools/rgb-lib?branch=fix_for_windows)",
  "rgb-persist-fs",
  "rgb-psbt",
  "rgb-runtime",
@@ -3659,6 +3707,15 @@ name = "rgb-lib-migration"
 version = "0.3.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1fb017481faa630ff6300b644e2746c0cd472fb1aa49bf135737b1909058a8c"
+dependencies = [
+ "async-std",
+ "sea-orm-migration",
+]
+
+[[package]]
+name = "rgb-lib-migration"
+version = "0.3.0-alpha.1"
+source = "git+https://github.com/RGB-Tools/rgb-lib?branch=fix_for_windows#2a6bf9702ff294b81d1b870806326dc4fac49075"
 dependencies = [
  "async-std",
  "sea-orm-migration",
@@ -3696,7 +3753,7 @@ dependencies = [
  "rand",
  "regex",
  "reqwest 0.12.5",
- "rgb-lib",
+ "rgb-lib 0.3.0-alpha.5 (git+https://github.com/RGB-Tools/rgb-lib?branch=fix_for_windows)",
  "scrypt",
  "serde",
  "serde_json",
