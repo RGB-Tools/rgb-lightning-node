@@ -296,25 +296,21 @@ where
 
 pub(crate) fn parse_peer_info(
     peer_pubkey_and_ip_addr: String,
-) -> Result<(PublicKey, SocketAddr), APIError> {
+) -> Result<(PublicKey, Option<SocketAddr>), APIError> {
     let mut pubkey_and_addr = peer_pubkey_and_ip_addr.split('@');
     let pubkey = pubkey_and_addr.next();
-    let peer_addr_str = pubkey_and_addr.next();
-    if peer_addr_str.is_none() {
-        return Err(APIError::InvalidPeerInfo(s!(
-            "incorrectly formatted peer info. Should be formatted as: `pubkey@host:port`"
-        )));
-    }
 
-    let peer_addr = peer_addr_str
-        .unwrap()
-        .to_socket_addrs()
-        .map(|mut r| r.next());
-    if peer_addr.is_err() || peer_addr.as_ref().unwrap().is_none() {
-        return Err(APIError::InvalidPeerInfo(s!(
-            "couldn't parse pubkey@host:port into a socket address"
-        )));
-    }
+    let peer_addr = if let Some(peer_addr_str) = pubkey_and_addr.next() {
+        let peer_addr = peer_addr_str.to_socket_addrs().map(|mut r| r.next());
+        if peer_addr.is_err() || peer_addr.as_ref().unwrap().is_none() {
+            return Err(APIError::InvalidPeerInfo(s!(
+                "couldn't parse pubkey@host:port into a socket address"
+            )));
+        }
+        peer_addr.unwrap()
+    } else {
+        None
+    };
 
     let pubkey = hex_str_to_compressed_pubkey(pubkey.unwrap());
     if pubkey.is_none() {
@@ -323,7 +319,7 @@ pub(crate) fn parse_peer_info(
         )));
     }
 
-    Ok((pubkey.unwrap(), peer_addr.unwrap().unwrap()))
+    Ok((pubkey.unwrap(), peer_addr))
 }
 
 pub(crate) async fn start_daemon(args: &LdkUserInfo) -> Result<Arc<AppState>, AppError> {

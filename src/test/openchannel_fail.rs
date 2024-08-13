@@ -24,7 +24,7 @@ async fn open_fail() {
 
     // open with bad asset amount
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(0),
@@ -54,7 +54,7 @@ async fn open_fail() {
 
     // open with bad asset ID
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -84,7 +84,7 @@ async fn open_fail() {
 
     // open with invalid BTC amount (too low)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 1_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -114,7 +114,7 @@ async fn open_fail() {
 
     // open with invalid BTC amount (too high)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 20000000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -144,7 +144,7 @@ async fn open_fail() {
 
     // open with invalid push amount (for an RGB channel)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 0,
         asset_amount: Some(100),
@@ -174,7 +174,7 @@ async fn open_fail() {
 
     // open an RGB channel with anchors disabled
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -204,7 +204,7 @@ async fn open_fail() {
 
     // open with insufficient assets
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(2000),
@@ -229,7 +229,7 @@ async fn open_fail() {
 
     // open with insufficient allocation slots
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -260,7 +260,7 @@ async fn open_fail() {
     fund_and_create_utxos(node1_addr, Some(9)).await;
     // open a 1st channel (success)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -279,7 +279,7 @@ async fn open_fail() {
     assert!(res.status() == reqwest::StatusCode::OK);
     // open a 2nd channel while the previous open is still in progess (fail)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),

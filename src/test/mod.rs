@@ -965,7 +965,7 @@ async fn open_channel_with_custom_fees(
     );
     stop_mining();
     let payload = OpenChannelRequest {
-        peer_pubkey_and_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
         capacity_sat: capacity_sat.unwrap_or(100_000),
         push_msat: push_msat.unwrap_or(3_500_000),
         asset_amount,

@@ -1458,7 +1458,7 @@ components:
     OpenChannelRequest:
       type: object
       properties:
-        peer_pubkey_and_addr:
+        peer_pubkey_and_opt_addr:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d@localhost:9736
         capacity_sat:

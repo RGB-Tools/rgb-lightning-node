@@ -75,7 +75,7 @@ use crate::utils::{
     hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
 };
 use crate::{
-    disk,
+    disk::{self, CHANNEL_PEER_DATA},
     error::APIError,
     ldk::{PaymentInfo, FEE_RATE, UTXO_SIZE_SAT},
     utils::{
@@ -637,7 +637,7 @@ pub(crate) struct NodeInfoResponse {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct OpenChannelRequest {
-    pub(crate) peer_pubkey_and_addr: String,
+    pub(crate) peer_pubkey_and_opt_addr: String,
     pub(crate) capacity_sat: u64,
     pub(crate) push_msat: u64,
     pub(crate) asset_amount: Option<u64>,
@@ -1149,8 +1149,19 @@ pub(crate) async fn connect_peer(
 
         let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
 
-        connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
-            .await?;
+        if let Some(peer_addr) = peer_addr {
+            connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
+                .await?;
+            disk::persist_channel_peer(
+                &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
+                &peer_pubkey,
+                &peer_addr,
+            )?;
+        } else {
+            return Err(APIError::InvalidPeerInfo(s!(
+                "incorrectly formatted peer info. Should be formatted as: `pubkey@host:port`"
+            )));
+        }
 
         Ok(Json(EmptyResponse {}))
     })
@@ -1247,6 +1258,11 @@ pub(crate) async fn disconnect_peer(
                 )));
             }
         }
+
+        disk::delete_channel_peer(
+            &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
+            payload.peer_pubkey,
+        )?;
 
         //check the pubkey matches a valid connected peer
         if unlocked_state
@@ -2258,8 +2274,6 @@ pub(crate) async fn open_channel(
             return Err(APIError::OpenChannelInProgress);
         }
 
-        let (peer_pubkey, peer_addr) = parse_peer_info(payload.peer_pubkey_and_addr.to_string())?;
-
         let colored_info = match (payload.asset_id, payload.asset_amount) {
             (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
                 return Err(APIError::InvalidAmount(format!(
@@ -2298,8 +2312,28 @@ pub(crate) async fn open_channel(
             return Err(APIError::AnchorsRequired);
         }
 
-        connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
-            .await?;
+        let (peer_pubkey, mut peer_addr) =
+            parse_peer_info(payload.peer_pubkey_and_opt_addr.to_string())?;
+
+        let peer_data_path = state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA);
+        if peer_addr.is_none() {
+            let peer_info = disk::read_channel_peer_data(&peer_data_path)?;
+            for (pubkey, addr) in peer_info.into_iter() {
+                if pubkey == peer_pubkey {
+                    peer_addr = Some(addr);
+                    break;
+                }
+            }
+        }
+        if let Some(peer_addr) = peer_addr {
+            connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
+                .await?;
+            disk::persist_channel_peer(&peer_data_path, &peer_pubkey, &peer_addr)?;
+        } else {
+            return Err(APIError::InvalidPeerInfo(s!(
+                "cannot find the address for the provided pubkey"
+            )));
+        }
 
         let mut channel_config = ChannelConfig::default();
         if let Some(fee_base_msat) = payload.fee_base_msat {
@@ -2388,9 +2422,6 @@ pub(crate) async fn open_channel(
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 
         if let Some((contract_id, asset_amount)) = &colored_info {
-            let peer_data_path = state.static_state.ldk_data_dir.join("channel_peer_data");
-            let _ = disk::persist_channel_peer(&peer_data_path, &payload.peer_pubkey_and_addr);
-
             let rgb_info = RgbInfo {
                 contract_id: *contract_id,
                 local_rgb_amount: *asset_amount,

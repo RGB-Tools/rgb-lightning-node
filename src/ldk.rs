@@ -79,10 +79,9 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
-use crate::disk::FilesystemLogger;
 use crate::disk::{
-    self, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES,
-    TAKER_SWAPS_FNAME,
+    self, FilesystemLogger, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME,
+    OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
@@ -1811,7 +1810,7 @@ pub(crate) async fn start_ldk(
     // Regularly reconnect to channel peers.
     let connect_cm = Arc::clone(&channel_manager);
     let connect_pm = Arc::clone(&peer_manager);
-    let peer_data_path = ldk_data_dir.join("channel_peer_data");
+    let peer_data_path = ldk_data_dir.join(CHANNEL_PEER_DATA);
     let stop_connect = Arc::clone(&stop_processing);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
