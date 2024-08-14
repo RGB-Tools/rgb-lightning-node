@@ -2405,6 +2405,7 @@ pub(crate) async fn open_channel(
         }
 
         *unlocked_state.rgb_send_lock.lock().unwrap() = true;
+        tracing::debug!("RGB send lock set to true");
 
         let temporary_channel_id = unlocked_state
             .channel_manager
@@ -2417,7 +2418,11 @@ pub(crate) async fn open_channel(
                 Some(config),
                 consignment_endpoint,
             )
-            .map_err(|e| APIError::FailedOpenChannel(format!("{:?}", e)))?;
+            .map_err(|e| {
+                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                tracing::debug!("RGB send lock set to false (open channel failure: {e:?})");
+                APIError::FailedOpenChannel(format!("{:?}", e))
+            })?;
         let temporary_channel_id = temporary_channel_id.0.as_hex().to_string();
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 

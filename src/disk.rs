@@ -90,6 +90,7 @@ pub(crate) fn persist_channel_peer(
     tmp_path.set_extension("ptmp");
     fs::write(&tmp_path, format!("{}\n", peer_info).as_bytes())?;
     fs::rename(tmp_path, path)?;
+    tracing::info!("persisted peer (pubkey: {pubkey}, addr: {address})");
     Ok(())
 }
 

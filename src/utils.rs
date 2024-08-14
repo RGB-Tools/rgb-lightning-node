@@ -202,7 +202,7 @@ pub(crate) fn encrypt_and_save_mnemonic(
 
 pub(crate) async fn connect_peer_if_necessary(
     pubkey: PublicKey,
-    peer_addr: SocketAddr,
+    address: SocketAddr,
     peer_manager: Arc<PeerManager>,
 ) -> Result<(), APIError> {
     for peer_details in peer_manager.list_peers() {
@@ -210,17 +210,17 @@ pub(crate) async fn connect_peer_if_necessary(
             return Ok(());
         }
     }
-    do_connect_peer(pubkey, peer_addr, peer_manager).await?;
+    do_connect_peer(pubkey, address, peer_manager).await?;
+    tracing::info!("connected to peer (pubkey: {pubkey}, addr: {address})");
     Ok(())
 }
 
 pub(crate) async fn do_connect_peer(
     pubkey: PublicKey,
-    peer_addr: SocketAddr,
+    address: SocketAddr,
     peer_manager: Arc<PeerManager>,
 ) -> Result<(), APIError> {
-    match lightning_net_tokio::connect_outbound(Arc::clone(&peer_manager), pubkey, peer_addr).await
-    {
+    match lightning_net_tokio::connect_outbound(Arc::clone(&peer_manager), pubkey, address).await {
         Some(connection_closed_future) => {
             let mut connection_closed_future = Box::pin(connection_closed_future);
             loop {
