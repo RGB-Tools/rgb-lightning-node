@@ -30,7 +30,7 @@ async fn concurrent_btc_payments() {
     open_channel(
         node2_addr,
         &node1_pubkey,
-        NODE1_PEER_PORT,
+        Some(NODE1_PEER_PORT),
         Some(capacity_sat),
         Some(push_msat),
         None,
@@ -40,7 +40,7 @@ async fn concurrent_btc_payments() {
     open_channel(
         node3_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         Some(capacity_sat),
         Some(push_msat),
         None,
@@ -50,7 +50,7 @@ async fn concurrent_btc_payments() {
     open_channel(
         node4_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         Some(capacity_sat),
         Some(push_msat),
         None,

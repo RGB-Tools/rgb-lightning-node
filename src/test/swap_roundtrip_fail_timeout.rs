@@ -22,7 +22,7 @@ async fn swap_roundtrip_fail_timeout() {
     open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         None,
         None,
         Some(600),

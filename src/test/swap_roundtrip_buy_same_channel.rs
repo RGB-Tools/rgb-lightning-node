@@ -26,7 +26,7 @@ async fn swap_roundtrip_buy_same_channel() {
     let channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         Some(100000),
         Some(50000000),
         Some(600),

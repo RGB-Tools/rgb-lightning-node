@@ -54,7 +54,7 @@ async fn close_coop_vanilla() {
     let channel = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         Some(600_000),
         Some(300_000_000),
         None,

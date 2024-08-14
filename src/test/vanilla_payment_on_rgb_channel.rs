@@ -26,7 +26,7 @@ async fn vanilla_payment_on_rgb_channel() {
     let channel = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         None,
         None,
         Some(600),

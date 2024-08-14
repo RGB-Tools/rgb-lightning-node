@@ -41,7 +41,7 @@ async fn swap_roundtrip_multihop_sell() {
     let channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         Some(50000),
         None,
         Some(500),
@@ -51,7 +51,7 @@ async fn swap_roundtrip_multihop_sell() {
     let channel_23 = open_channel(
         node2_addr,
         &node3_pubkey,
-        NODE3_PEER_PORT,
+        Some(NODE3_PEER_PORT),
         Some(50000),
         None,
         Some(300),
@@ -62,7 +62,7 @@ async fn swap_roundtrip_multihop_sell() {
     let channel_32 = open_channel(
         node3_addr,
         &node2_pubkey,
-        NODE3_PEER_PORT,
+        Some(NODE3_PEER_PORT),
         Some(50000),
         Some(0),
         None,
@@ -72,7 +72,7 @@ async fn swap_roundtrip_multihop_sell() {
     let channel_21 = open_channel(
         node2_addr,
         &node1_pubkey,
-        NODE1_PEER_PORT,
+        Some(NODE1_PEER_PORT),
         Some(50000),
         Some(0),
         None,

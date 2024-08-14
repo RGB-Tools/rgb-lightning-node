@@ -23,7 +23,7 @@ async fn close_coop_zero_balance() {
     let channel = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         None,
         None,
         Some(1000),

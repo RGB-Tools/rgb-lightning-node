@@ -927,7 +927,7 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
 async fn open_channel(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
-    dest_peer_port: u16,
+    dest_peer_port: Option<u16>,
     capacity_sat: Option<u64>,
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
@@ -951,7 +951,7 @@ async fn open_channel(
 async fn open_channel_with_custom_fees(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
-    dest_peer_port: u16,
+    dest_peer_port: Option<u16>,
     capacity_sat: Option<u64>,
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
@@ -964,8 +964,13 @@ async fn open_channel_with_custom_fees(
               to {dest_peer_pubkey}"
     );
     stop_mining();
+    let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
+        format!("{}@127.0.0.1:{}", dest_peer_pubkey, p)
+    } else {
+        dest_peer_pubkey.to_string()
+    };
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", dest_peer_pubkey, dest_peer_port),
+        peer_pubkey_and_opt_addr,
         capacity_sat: capacity_sat.unwrap_or(100_000),
         push_msat: push_msat.unwrap_or(3_500_000),
         asset_amount,

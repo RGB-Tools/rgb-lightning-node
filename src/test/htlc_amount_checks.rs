@@ -33,7 +33,7 @@ async fn htlc_amount_checks_3nodes() {
     let _channel_21 = open_channel(
         node2_addr,
         &node1_pubkey,
-        NODE1_PEER_PORT,
+        Some(NODE1_PEER_PORT),
         None,
         None,
         Some(50),
@@ -45,7 +45,7 @@ async fn htlc_amount_checks_3nodes() {
     let _channel_23 = open_channel(
         node2_addr,
         &node3_pubkey,
-        NODE3_PEER_PORT,
+        Some(NODE3_PEER_PORT),
         None,
         None,
         Some(40),
@@ -108,7 +108,7 @@ async fn htlc_amount_checks_2nodes() {
     let _channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         None,
         None,
         Some(400),

@@ -44,7 +44,7 @@ async fn open_after_double_send() {
     let channel = open_channel(
         node2_addr,
         &node1_pubkey,
-        NODE1_PEER_PORT,
+        Some(NODE1_PEER_PORT),
         None,
         None,
         Some(250),

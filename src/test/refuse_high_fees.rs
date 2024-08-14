@@ -42,7 +42,7 @@ async fn refuse_high_fees() {
     let _channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
-        NODE2_PEER_PORT,
+        Some(NODE2_PEER_PORT),
         None,
         None,
         Some(500),
@@ -55,7 +55,7 @@ async fn refuse_high_fees() {
     let _channel_23 = open_channel_with_custom_fees(
         node2_addr,
         &node3_pubkey,
-        NODE3_PEER_PORT,
+        Some(NODE3_PEER_PORT),
         None,
         None,
         Some(300),
