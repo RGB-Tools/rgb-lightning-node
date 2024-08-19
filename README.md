@@ -149,6 +149,7 @@ The node currently exposes the following APIs:
 - `/decodergbinvoice` (POST)
 - `/disconnectpeer` (POST)
 - `/getassetmedia` (POST)
+- `/getchannelid` (POST)
 - `/init` (POST)
 - `/invoicestatus` (POST)
 - `/issueassetcfa` (POST)

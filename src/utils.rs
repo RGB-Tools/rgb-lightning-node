@@ -4,6 +4,7 @@ use bitcoin::Network;
 use futures::Future;
 use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::SocketAddress;
+use lightning::ln::ChannelId;
 use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME};
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
@@ -30,7 +31,7 @@ use std::{
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
-use crate::ldk::Router;
+use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
@@ -107,6 +108,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) router: Arc<Router>,
     pub(crate) output_sweeper: Arc<OutputSweeper>,
     pub(crate) rgb_send_lock: Arc<Mutex<bool>>,
+    pub(crate) channel_ids_map: Arc<Mutex<ChannelIdsMap>>,
 }
 
 impl UnlockedAppState {
@@ -124,6 +126,10 @@ impl UnlockedAppState {
 
     pub(crate) fn get_taker_swaps(&self) -> MutexGuard<SwapMap> {
         self.taker_swaps.lock().unwrap()
+    }
+
+    pub(crate) fn get_channel_ids_map(&self) -> MutexGuard<ChannelIdsMap> {
+        self.channel_ids_map.lock().unwrap()
     }
 }
 
@@ -174,6 +180,17 @@ pub(crate) fn check_password_validity(
         Ok(Mnemonic::from_str(&mnemonic_str).expect("valid mnemonic"))
     } else {
         Err(APIError::NotInitialized)
+    }
+}
+
+pub(crate) fn check_channel_id(channel_id_str: &str) -> Result<ChannelId, APIError> {
+    if let Some(channel_id_bytes) = hex_str_to_vec(channel_id_str) {
+        if channel_id_bytes.len() != 32 {
+            return Err(APIError::InvalidChannelID);
+        }
+        Ok(ChannelId::from_bytes(channel_id_bytes.try_into().unwrap()))
+    } else {
+        Err(APIError::InvalidChannelID)
     }
 }
 

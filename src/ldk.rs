@@ -80,8 +80,8 @@ use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
 use crate::disk::{
-    self, FilesystemLogger, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME, MAKER_SWAPS_FNAME,
-    OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
+    self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
+    MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
@@ -140,6 +140,14 @@ pub(crate) struct SwapMap {
 
 impl_writeable_tlv_based!(SwapMap, {
     (0, swaps, required),
+});
+
+pub(crate) struct ChannelIdsMap {
+    pub(crate) channel_ids: HashMap<ChannelId, ChannelId>,
+}
+
+impl_writeable_tlv_based!(ChannelIdsMap, {
+    (0, channel_ids, required),
 });
 
 impl UnlockedAppState {
@@ -318,6 +326,47 @@ impl UnlockedAppState {
         let payment = inbound.payments.get_mut(&payment_hash).unwrap();
         payment.status = status;
         self.save_inbound_payments(inbound);
+    }
+
+    pub(crate) fn channel_ids(&self) -> HashMap<ChannelId, ChannelId> {
+        self.get_channel_ids_map().channel_ids.clone()
+    }
+
+    pub(crate) fn add_channel_id(
+        &self,
+        former_temporary_channel_id: ChannelId,
+        channel_id: ChannelId,
+    ) {
+        let mut channel_ids_map = self.get_channel_ids_map();
+        channel_ids_map
+            .channel_ids
+            .insert(former_temporary_channel_id, channel_id);
+        self.save_channel_ids_map(channel_ids_map);
+    }
+
+    pub(crate) fn delete_channel_id(&self, channel_id: ChannelId) {
+        let mut channel_ids_map = self.get_channel_ids_map();
+        if let Some(temporary_channel_id) = channel_ids_map
+            .channel_ids
+            .clone()
+            .into_iter()
+            .find_map(|(tmp_chan_id, chan_id)| {
+                if chan_id == channel_id {
+                    Some(tmp_chan_id)
+                } else {
+                    None
+                }
+            })
+        {
+            channel_ids_map.channel_ids.remove(&temporary_channel_id);
+            self.save_channel_ids_map(channel_ids_map);
+        }
+    }
+
+    fn save_channel_ids_map(&self, channel_ids: MutexGuard<ChannelIdsMap>) {
+        self.fs_store
+            .write("", "", CHANNEL_IDS_FNAME, &channel_ids.encode())
+            .unwrap();
     }
 }
 
@@ -859,6 +908,7 @@ async fn handle_ldk_events(
             channel_id,
             counterparty_node_id,
             funding_txo,
+            former_temporary_channel_id,
             ..
         } => {
             tracing::info!(
@@ -866,6 +916,8 @@ async fn handle_ldk_events(
                 channel_id,
                 hex_str(&counterparty_node_id.serialize()),
             );
+
+            unlocked_state.add_channel_id(former_temporary_channel_id.unwrap(), channel_id);
 
             let funding_txid = funding_txo.txid.to_string();
             let psbt_path = static_state
@@ -959,12 +1011,16 @@ async fn handle_ldk_events(
                     unlocked_state.update_outbound_payment_status(*payment_id, HTLCStatus::Failed);
                 }
             }
+
+            unlocked_state.delete_channel_id(channel_id);
         }
-        Event::DiscardFunding { .. } => {
+        Event::DiscardFunding { channel_id, .. } => {
             // A "real" node should probably "lock" the UTXOs spent in funding transactions until
             // the funding transaction either confirms, or this event is generated.
 
             *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+
+            unlocked_state.delete_channel_id(channel_id);
         }
         Event::HTLCIntercepted {
             is_swap,
@@ -1729,11 +1785,17 @@ pub(crate) async fn start_ldk(
     // Persist ChannelManager and NetworkGraph
     let persister = Arc::new(FilesystemStore::new(ldk_data_dir_path.clone()));
 
+    // Read swaps info
     let maker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
         &ldk_data_dir.join(MAKER_SWAPS_FNAME),
     )));
     let taker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
         &ldk_data_dir.join(TAKER_SWAPS_FNAME),
+    )));
+
+    // Read channel IDs info
+    let channel_ids_map = Arc::new(Mutex::new(disk::read_channel_ids_info(
+        &ldk_data_dir.join(CHANNEL_IDS_FNAME),
     )));
 
     let unlocked_state = Arc::new(UnlockedAppState {
@@ -1752,6 +1814,7 @@ pub(crate) async fn start_ldk(
         router: Arc::clone(&router),
         output_sweeper: Arc::clone(&output_sweeper),
         rgb_send_lock: Arc::new(Mutex::new(false)),
+        channel_ids_map,
     });
 
     let recent_payments_payment_ids = channel_manager

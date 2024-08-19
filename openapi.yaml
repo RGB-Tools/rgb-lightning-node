@@ -236,6 +236,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetAssetMediaResponse'
+  /getchannelid:
+    post:
+      tags:
+        - Channels
+      summary: Get a channel's ID
+      description: Get a channel's ID from its former temporary channel ID
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetChannelIdRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetChannelIdResponse'
   /init:
     post:
       tags:
@@ -556,7 +574,8 @@ paths:
       tags:
         - Channels
       summary: Open a channel
-      description: Open a new LN channel (RGB-enabled when both asset_id and asset_amount are specified)
+      description: Open a new LN channel (RGB-enabled when both asset_id and asset_amount are specified).
+        You can optionally provide a 32 bytes temporary channel ID as a hex-encoded string.
       requestBody:
         content:
           application/json:
@@ -1132,6 +1151,18 @@ components:
         bytes_hex:
           type: string
           example: 68656c6c6f0a
+    GetChannelIdRequest:
+      type: object
+      properties:
+        temporary_channel_id:
+          type: string
+          example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
+    GetChannelIdResponse:
+      type: object
+      properties:
+        channel_id:
+          type: string
+          example: 8129afe1b1d7cf60d5e1bf4c04b09bec925ed4df5417ceee0484e24f816a105a
     HTLCStatus:
       type: string
       enum:
@@ -1485,6 +1516,9 @@ components:
         fee_proportional_millionths:
           type: integer
           example: 0
+        temporary_channel_id:
+          type: string
+          example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
     OpenChannelResponse:
       type: object
       properties:

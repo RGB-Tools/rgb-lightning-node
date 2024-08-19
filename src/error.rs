@@ -178,6 +178,9 @@ pub enum APIError {
     #[error("Recipient ID already used")]
     RecipientIDAlreadyUsed,
 
+    #[error("Temporary channel ID already used")]
+    TemporaryChannelIdAlreadyUsed,
+
     #[error("Unexpected error")]
     Unexpected,
 
@@ -186,6 +189,9 @@ pub enum APIError {
 
     #[error("Unknown LN invoice")]
     UnknownLNInvoice,
+
+    #[error("Unknown temporary channel ID")]
+    UnknownTemporaryChannelId,
 
     #[error("Node is unlocked (hint: call lock)")]
     UnlockedNode,
@@ -259,10 +265,12 @@ impl IntoResponse for APIError {
             | APIError::NoAvailableUtxos
             | APIError::NoRoute
             | APIError::NotInitialized
-            | APIError::RecipientIDAlreadyUsed
             | APIError::OpenChannelInProgress
+            | APIError::RecipientIDAlreadyUsed
+            | APIError::TemporaryChannelIdAlreadyUsed
             | APIError::UnknownContractId
             | APIError::UnknownLNInvoice
+            | APIError::UnknownTemporaryChannelId
             | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),
         };
 

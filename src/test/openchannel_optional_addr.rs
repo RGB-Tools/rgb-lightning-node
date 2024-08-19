@@ -33,6 +33,7 @@ async fn openchannel_optional_addr() {
         with_anchors: true,
         fee_base_msat: None,
         fee_proportional_millionths: None,
+        temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node1_addr))

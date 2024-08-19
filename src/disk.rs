@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use crate::error::APIError;
 use crate::ldk::{
-    InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage, OutputSpenderTxes, SwapMap,
+    ChannelIdsMap, InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage,
+    OutputSpenderTxes, SwapMap,
 };
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
@@ -26,6 +27,8 @@ pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
 pub(crate) const CHANNEL_PEER_DATA: &str = "channel_peer_data";
 
 pub(crate) const OUTPUT_SPENDER_TXES: &str = "output_spender_txes";
+
+pub(crate) const CHANNEL_IDS_FNAME: &str = "channel_ids";
 
 pub(crate) const MAKER_SWAPS_FNAME: &str = "maker_swaps";
 pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
@@ -197,4 +200,15 @@ pub(crate) fn read_scorer(
         }
     }
     ProbabilisticScorer::new(params, graph, logger)
+}
+
+pub(crate) fn read_channel_ids_info(path: &Path) -> ChannelIdsMap {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = ChannelIdsMap::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    ChannelIdsMap {
+        channel_ids: HashMap::new(),
+    }
 }

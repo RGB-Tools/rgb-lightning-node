@@ -70,7 +70,7 @@ use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRM
 use crate::rgb::get_rgb_channel_info_optional;
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
-    check_already_initialized, check_password_strength, check_password_validity,
+    check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
     hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
 };
@@ -410,6 +410,16 @@ pub(crate) struct GetAssetMediaResponse {
     pub(crate) bytes_hex: String,
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetChannelIdRequest {
+    pub(crate) temporary_channel_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetChannelIdResponse {
+    pub(crate) channel_id: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
     Pending,
@@ -646,6 +656,7 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) with_anchors: bool,
     pub(crate) fee_base_msat: Option<u32>,
     pub(crate) fee_proportional_millionths: Option<u32>,
+    pub(crate) temporary_channel_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1306,6 +1317,21 @@ pub(crate) async fn get_asset_media(
     let bytes_hex = hex_str(&file_bytes);
 
     Ok(Json(GetAssetMediaResponse { bytes_hex }))
+}
+
+pub(crate) async fn get_channel_id(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetChannelIdRequest>, APIError>,
+) -> Result<Json<GetChannelIdResponse>, APIError> {
+    let tmp_chan_id = check_channel_id(&payload.temporary_channel_id)?;
+    let channel_ids = state.check_unlocked().await?.clone().unwrap().channel_ids();
+    let channel_id = if let Some(channel_id) = channel_ids.get(&tmp_chan_id) {
+        channel_id.0.as_hex().to_string()
+    } else {
+        return Err(APIError::UnknownTemporaryChannelId);
+    };
+
+    Ok(Json(GetChannelIdResponse { channel_id }))
 }
 
 pub(crate) async fn init(
@@ -2274,6 +2300,16 @@ pub(crate) async fn open_channel(
             return Err(APIError::OpenChannelInProgress);
         }
 
+        let temporary_channel_id = if let Some(tmp_chan_id_str) = payload.temporary_channel_id {
+            let tmp_chan_id = check_channel_id(&tmp_chan_id_str)?;
+            if unlocked_state.channel_ids().contains_key(&tmp_chan_id) {
+                return Err(APIError::TemporaryChannelIdAlreadyUsed);
+            }
+            Some(tmp_chan_id)
+        } else {
+            None
+        };
+
         let colored_info = match (payload.asset_id, payload.asset_amount) {
             (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
                 return Err(APIError::InvalidAmount(format!(
@@ -2414,7 +2450,7 @@ pub(crate) async fn open_channel(
                 payload.capacity_sat,
                 payload.push_msat,
                 0,
-                None,
+                temporary_channel_id,
                 Some(config),
                 consignment_endpoint,
             )

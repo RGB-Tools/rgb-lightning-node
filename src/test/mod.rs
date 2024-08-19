@@ -979,6 +979,7 @@ async fn open_channel_with_custom_fees(
         with_anchors: true,
         fee_base_msat,
         fee_proportional_millionths,
+        temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node_address))
