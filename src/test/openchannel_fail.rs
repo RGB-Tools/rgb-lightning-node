@@ -265,6 +265,32 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
+    // open with an invalid temporary channel id
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        capacity_sat: 100_000,
+        push_msat: 3_500_000,
+        asset_amount: Some(100),
+        asset_id: Some(asset_id.clone()),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: Some(s!("ttoooosshhoorrtt")),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid channel ID").await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
     fund_and_create_utxos(node1_addr, Some(9)).await;
     // open a 1st channel (success)
     let payload = OpenChannelRequest {

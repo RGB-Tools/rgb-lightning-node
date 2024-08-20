@@ -52,7 +52,7 @@ async fn refuse_high_fees() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
-    let _channel_23 = open_channel_with_custom_fees(
+    let _channel_23 = open_channel_with_custom_data(
         node2_addr,
         &node3_pubkey,
         Some(NODE3_PEER_PORT),
@@ -61,6 +61,7 @@ async fn refuse_high_fees() {
         Some(300),
         Some(&asset_id),
         Some(2_000_000),
+        None,
         None,
     )
     .await;

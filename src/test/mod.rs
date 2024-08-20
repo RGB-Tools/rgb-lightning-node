@@ -20,18 +20,18 @@ use crate::routes::{
     BackupRequest, BtcBalanceResponse, ChangePasswordRequest, Channel, CloseChannelRequest,
     ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse,
     DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse,
-    GetAssetMediaRequest, GetAssetMediaResponse, HTLCStatus, InitRequest, InitResponse,
-    InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
-    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
-    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
-    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
-    ListPeersResponse, ListSwapsResponse, ListTransactionsResponse, ListTransfersRequest,
-    ListTransfersResponse, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
-    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RestoreRequest, RgbInvoiceRequest,
-    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse,
-    SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer,
-    UnlockRequest, Unspent,
+    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
+    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
+    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
+    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
+    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsResponse,
+    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
+    PostAssetMediaResponse, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
+    SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
+    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
 
@@ -467,6 +467,25 @@ async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
         .await
         .unwrap()
         .bytes_hex
+}
+
+async fn get_channel_id(node_address: SocketAddr, temp_chan_id: &str) -> String {
+    println!("requesting channel ID for temporary ID {temp_chan_id} from node {node_address}");
+    let payload = GetChannelIdRequest {
+        temporary_channel_id: temp_chan_id.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/getchannelid", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<GetChannelIdResponse>()
+        .await
+        .unwrap()
+        .channel_id
 }
 
 async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatus {
@@ -933,7 +952,7 @@ async fn open_channel(
     asset_amount: Option<u64>,
     asset_id: Option<&str>,
 ) -> Channel {
-    open_channel_with_custom_fees(
+    open_channel_with_custom_data(
         node_address,
         dest_peer_pubkey,
         dest_peer_port,
@@ -943,12 +962,13 @@ async fn open_channel(
         asset_id,
         None,
         None,
+        None,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn open_channel_with_custom_fees(
+async fn open_channel_with_custom_data(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: Option<u16>,
@@ -958,6 +978,7 @@ async fn open_channel_with_custom_fees(
     asset_id: Option<&str>,
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
+    temporary_channel_id: Option<&str>,
 ) -> Channel {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
@@ -979,7 +1000,7 @@ async fn open_channel_with_custom_fees(
         with_anchors: true,
         fee_base_msat,
         fee_proportional_millionths,
-        temporary_channel_id: None,
+        temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/openchannel", node_address))
@@ -1536,6 +1557,7 @@ mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
+mod getchannelid;
 mod htlc_amount_checks;
 mod invoice;
 mod issue;
