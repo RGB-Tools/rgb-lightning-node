@@ -1125,6 +1125,7 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
     let payload = RgbInvoiceRequest {
         min_confirmations: 1,
         asset_id,
+        duration_seconds: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/rgbinvoice", node_address))

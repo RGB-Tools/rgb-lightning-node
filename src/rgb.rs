@@ -34,11 +34,16 @@ impl UnlockedAppState {
     pub(crate) fn rgb_blind_receive(
         &self,
         asset_id: Option<String>,
+        duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
-        self.rgb_wallet_wrapper
-            .blind_receive(asset_id, transport_endpoints, min_confirmations)
+        self.rgb_wallet_wrapper.blind_receive(
+            asset_id,
+            duration_seconds,
+            transport_endpoints,
+            min_confirmations,
+        )
     }
 
     pub(crate) fn rgb_create_utxos(
@@ -245,13 +250,14 @@ impl RgbLibWalletWrapper {
     pub(crate) fn blind_receive(
         &self,
         asset_id: Option<String>,
+        duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
         self.get_rgb_wallet().blind_receive(
             asset_id,
             None,
-            None,
+            duration_seconds,
             transport_endpoints,
             min_confirmations,
         )

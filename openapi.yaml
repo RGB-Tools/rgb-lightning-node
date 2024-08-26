@@ -1593,6 +1593,9 @@ components:
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        duration_seconds:
+          type: integer
+          example: 86400
     RgbInvoiceResponse:
       type: object
       properties:
