@@ -1021,6 +1021,12 @@ components:
         inbound_balance_msat:
           type: integer
           example: 6394000
+        next_outbound_htlc_limit_msat:
+          type: integer
+          example: 3001000
+        next_outbound_htlc_minimum_msat:
+          type: integer
+          example: 1
         is_usable:
           type: boolean
           example: false
@@ -1486,6 +1492,9 @@ components:
         max_media_upload_size_mb:
           type: integer
           example: 5
+        rgb_htlc_min_msat:
+          type: integer
+          example: 3000000
     OpenChannelRequest:
       type: object
       properties:

@@ -330,8 +330,10 @@ pub(crate) struct Channel {
     pub(crate) ready: bool,
     pub(crate) capacity_sat: u64,
     pub(crate) local_balance_msat: u64,
-    pub(crate) outbound_balance_msat: Option<u64>,
-    pub(crate) inbound_balance_msat: Option<u64>,
+    pub(crate) outbound_balance_msat: u64,
+    pub(crate) inbound_balance_msat: u64,
+    pub(crate) next_outbound_htlc_limit_msat: u64,
+    pub(crate) next_outbound_htlc_minimum_msat: u64,
     pub(crate) is_usable: bool,
     pub(crate) public: bool,
     pub(crate) asset_id: Option<String>,
@@ -643,6 +645,7 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) num_peers: usize,
     pub(crate) onchain_pubkey: String,
     pub(crate) max_media_upload_size_mb: u16,
+    pub(crate) rgb_htlc_min_msat: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1616,6 +1619,10 @@ pub(crate) async fn list_channels(
             ready: chan_info.is_channel_ready,
             capacity_sat: chan_info.channel_value_satoshis,
             local_balance_msat: chan_info.balance_msat,
+            outbound_balance_msat: chan_info.outbound_capacity_msat,
+            inbound_balance_msat: chan_info.inbound_capacity_msat,
+            next_outbound_htlc_limit_msat: chan_info.next_outbound_htlc_limit_msat,
+            next_outbound_htlc_minimum_msat: chan_info.next_outbound_htlc_minimum_msat,
             is_usable: chan_info.is_usable,
             public: chan_info.is_public,
             ..Default::default()
@@ -1638,11 +1645,6 @@ pub(crate) async fn list_channels(
 
         if let Some(id) = chan_info.short_channel_id {
             channel.short_channel_id = Some(id);
-        }
-
-        if chan_info.is_usable {
-            channel.outbound_balance_msat = Some(chan_info.outbound_capacity_msat);
-            channel.inbound_balance_msat = Some(chan_info.inbound_capacity_msat);
         }
 
         let info_file_path = get_rgb_channel_info_path(
@@ -2287,6 +2289,7 @@ pub(crate) async fn node_info(
         num_peers: unlocked_state.peer_manager.list_peers().len(),
         onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
+        rgb_htlc_min_msat: HTLC_MIN_MSAT,
     }))
 }
 
