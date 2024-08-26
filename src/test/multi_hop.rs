@@ -52,12 +52,14 @@ async fn multi_hop() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 600);
 
+    let push_msat = 3500000;
+
     let channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
         Some(NODE2_PEER_PORT),
         None,
-        None,
+        Some(push_msat),
         Some(500),
         Some(&asset_id),
     )
@@ -70,7 +72,7 @@ async fn multi_hop() {
         &node3_pubkey,
         Some(NODE3_PEER_PORT),
         None,
-        None,
+        Some(push_msat),
         Some(300),
         Some(&asset_id),
     )
@@ -118,7 +120,7 @@ async fn multi_hop() {
     let node3_info = node_info(node3_addr).await;
     assert_eq!(node1_info.num_channels, 1);
     assert_eq!(node1_info.num_usable_channels, 1);
-    assert_eq!(node1_info.local_balance_msat, 96500000); // capacity - push
+    assert_eq!(node1_info.local_balance_msat, 100000000 - push_msat); // capacity - push
     assert_eq!(node1_info.num_peers, 1);
     assert_eq!(node2_info.num_channels, 2);
     assert_eq!(node2_info.num_usable_channels, 2);
@@ -126,7 +128,7 @@ async fn multi_hop() {
     assert_eq!(node2_info.num_peers, 2);
     assert_eq!(node3_info.num_channels, 1);
     assert_eq!(node3_info.num_usable_channels, 1);
-    assert_eq!(node3_info.local_balance_msat, 3500000); // push
+    assert_eq!(node3_info.local_balance_msat, push_msat); // push
     assert_eq!(node3_info.num_peers, 1);
 
     let LNInvoiceResponse { invoice } =

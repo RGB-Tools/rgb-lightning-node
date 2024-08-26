@@ -2338,12 +2338,6 @@ pub(crate) async fn open_channel(
             )));
         }
 
-        if colored_info.is_some() && payload.push_msat < DUST_LIMIT_MSAT {
-            return Err(APIError::InvalidAmount(format!(
-                "Push amount must be equal or higher than the dust limit ({DUST_LIMIT_MSAT})"
-            )));
-        }
-
         if !payload.with_anchors {
             return Err(APIError::AnchorsRequired);
         }

@@ -662,16 +662,18 @@ async fn keysend(
     _wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn keysend_with_ln_balance(
     node_address: SocketAddr,
     counterparty_node_address: SocketAddr,
     dest_pubkey: &str,
+    amt_msat: Option<u64>,
     asset_id: Option<&str>,
     asset_amount: Option<u64>,
     initial_ln_balance_rgb: Option<u64>,
     counterparty_initial_ln_balance_rgb: Option<u64>,
 ) {
-    let res = _keysend_raw(node_address, dest_pubkey, None, asset_id, asset_amount).await;
+    let res = _keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
 
     _with_ln_balance_checks(
         node_address,
@@ -993,7 +995,7 @@ async fn open_channel_with_custom_data(
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr,
         capacity_sat: capacity_sat.unwrap_or(100_000),
-        push_msat: push_msat.unwrap_or(3_500_000),
+        push_msat: push_msat.unwrap_or(0),
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
         public: true,

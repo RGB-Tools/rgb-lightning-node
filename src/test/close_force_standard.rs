@@ -29,7 +29,7 @@ async fn close_force_standard() {
         &node2_pubkey,
         Some(NODE2_PEER_PORT),
         None,
-        None,
+        Some(3000000),
         Some(600),
         Some(&asset_id),
     )
