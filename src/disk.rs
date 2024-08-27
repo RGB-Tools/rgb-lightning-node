@@ -91,7 +91,7 @@ pub(crate) fn persist_channel_peer(
     };
     let mut tmp_path = path.to_path_buf();
     tmp_path.set_extension("ptmp");
-    fs::write(&tmp_path, format!("{}\n", peer_info).as_bytes())?;
+    fs::write(&tmp_path, peer_info.to_string().as_bytes())?;
     fs::rename(tmp_path, path)?;
     tracing::info!("persisted peer (pubkey: {pubkey}, addr: {address})");
     Ok(())
@@ -106,7 +106,7 @@ pub(crate) fn delete_channel_peer(path: &Path, pubkey: String) -> Result<(), API
             .join("\n");
         let mut tmp_path = path.to_path_buf();
         tmp_path.set_extension("dtmp");
-        fs::write(&tmp_path, format!("{}\n", updated_peer_info).as_bytes())?;
+        fs::write(&tmp_path, updated_peer_info.to_string().as_bytes())?;
         fs::rename(tmp_path, path)?;
     }
     Ok(())
