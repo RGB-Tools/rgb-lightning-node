@@ -561,7 +561,7 @@ async fn handle_ldk_events(
                     .rgb_get_wallet_dir()
                     .join("transfers")
                     .join(funding_txid.clone())
-                    .join(asset_id)
+                    .join(asset_id.replace("rgb:", ""))
                     .join("consignment_out");
                 let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
                     .unwrap()
@@ -579,8 +579,8 @@ async fn handle_ldk_events(
                 .await
                 .unwrap();
 
-                if res.is_err() {
-                    tracing::error!("cannot post consignment");
+                if let Err(e) = res {
+                    tracing::error!("cannot post consignment: {e}");
                     return;
                 }
             }
@@ -1342,8 +1342,8 @@ impl OutputSpender for RgbOutputSpender {
                     Some(vout),
                 )
             }));
-            if res.is_err() {
-                tracing::error!("cannot post consignment: {res:?}");
+            if let Err(e) = res {
+                tracing::error!("cannot post consignment: {e}");
                 return Err(());
             }
             fs::remove_file(&consignment_path).unwrap();
