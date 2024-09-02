@@ -371,7 +371,12 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
     );
 
     let num = if num.is_some() { num } else { Some(10) };
-    let payload = CreateUtxosRequest { up_to, num, size };
+    let payload = CreateUtxosRequest {
+        up_to,
+        num,
+        size,
+        fee_rate: FEE_RATE,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{}/createutxos", node_address))
         .json(&payload)

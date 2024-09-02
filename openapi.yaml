@@ -1072,6 +1072,9 @@ components:
         size:
           type: integer
           example: 32500
+        fee_rate:
+          type: number
+          example: 4.2
     DecodeLNInvoiceRequest:
       type: object
       properties:

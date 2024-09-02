@@ -358,6 +358,7 @@ pub(crate) struct CreateUtxosRequest {
     pub(crate) up_to: bool,
     pub(crate) num: Option<u8>,
     pub(crate) size: Option<u32>,
+    pub(crate) fee_rate: f32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1195,7 +1196,7 @@ pub(crate) async fn create_utxos(
             payload.up_to,
             payload.num.unwrap_or(UTXO_NUM),
             payload.size.unwrap_or(UTXO_SIZE_SAT),
-            FEE_RATE,
+            payload.fee_rate,
         )?;
         tracing::debug!("UTXO creation complete");
 
