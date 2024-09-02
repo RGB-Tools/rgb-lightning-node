@@ -4,31 +4,36 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str::FromStr;
 
-use crate::{routes::SwapStatus, utils::hex_str_to_vec};
+use crate::{
+    routes::SwapStatus,
+    utils::{get_current_timestamp, hex_str_to_vec},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SwapData {
     pub(crate) swap_info: SwapInfo,
     pub(crate) status: SwapStatus,
+    pub(crate) requested_at: u64,
     pub(crate) initiated_at: Option<u64>,
+    pub(crate) completed_at: Option<u64>,
 }
 
 impl_writeable_tlv_based!(SwapData, {
     (0, swap_info, required),
     (1, status, required),
-    (2, initiated_at, option),
+    (2, requested_at, required),
+    (3, initiated_at, option),
+    (4, completed_at, option),
 });
 
 impl SwapData {
-    pub(crate) fn from_swap_info(
-        swap_info: &SwapInfo,
-        status: SwapStatus,
-        initiated_at: Option<u64>,
-    ) -> Self {
+    pub(crate) fn create_from_swap_info(swap_info: &SwapInfo) -> Self {
         Self {
             swap_info: swap_info.clone(),
-            status,
-            initiated_at,
+            status: SwapStatus::Waiting,
+            requested_at: get_current_timestamp(),
+            initiated_at: None,
+            completed_at: None,
         }
     }
 }

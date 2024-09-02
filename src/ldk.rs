@@ -160,15 +160,14 @@ impl UnlockedAppState {
     pub(crate) fn update_maker_swap_status(&self, payment_hash: &PaymentHash, status: SwapStatus) {
         let mut maker_swaps = self.get_maker_swaps();
         let maker_swap = maker_swaps.swaps.get_mut(payment_hash).unwrap();
+        match &status {
+            SwapStatus::Succeeded | SwapStatus::Failed | SwapStatus::Expired => {
+                maker_swap.completed_at = Some(get_current_timestamp())
+            }
+            SwapStatus::Pending => maker_swap.initiated_at = Some(get_current_timestamp()),
+            SwapStatus::Waiting => panic!("this doesn't make sense: swap starts in Waiting status"),
+        }
         maker_swap.status = status;
-        self.save_maker_swaps(maker_swaps);
-    }
-
-    pub(crate) fn update_maker_swap_to_pending(&self, payment_hash: &PaymentHash) {
-        let mut maker_swaps = self.get_maker_swaps();
-        let maker_swap = maker_swaps.swaps.get_mut(payment_hash).unwrap();
-        maker_swap.status = SwapStatus::Pending;
-        maker_swap.initiated_at = Some(get_current_timestamp());
         self.save_maker_swaps(maker_swaps);
     }
 
@@ -185,15 +184,14 @@ impl UnlockedAppState {
     pub(crate) fn update_taker_swap_status(&self, payment_hash: &PaymentHash, status: SwapStatus) {
         let mut taker_swaps = self.get_taker_swaps();
         let taker_swap = taker_swaps.swaps.get_mut(payment_hash).unwrap();
+        match &status {
+            SwapStatus::Succeeded | SwapStatus::Failed | SwapStatus::Expired => {
+                taker_swap.completed_at = Some(get_current_timestamp())
+            }
+            SwapStatus::Pending => taker_swap.initiated_at = Some(get_current_timestamp()),
+            SwapStatus::Waiting => panic!("this doesn't make sense: swap starts in Waiting status"),
+        }
         taker_swap.status = status;
-        self.save_taker_swaps(taker_swaps);
-    }
-
-    pub(crate) fn update_taker_swap_to_pending(&self, payment_hash: &PaymentHash) {
-        let mut taker_swaps = self.get_taker_swaps();
-        let taker_swap = taker_swaps.swaps.get_mut(payment_hash).unwrap();
-        taker_swap.status = SwapStatus::Pending;
-        taker_swap.initiated_at = Some(get_current_timestamp());
         self.save_taker_swaps(taker_swaps);
     }
 
@@ -1132,7 +1130,7 @@ async fn handle_ldk_events(
             }
 
             tracing::debug!("Swap is whitelisted, forwarding the htlc...");
-            unlocked_state.update_taker_swap_to_pending(&payment_hash);
+            unlocked_state.update_taker_swap_status(&payment_hash, SwapStatus::Pending);
 
             unlocked_state
                 .channel_manager

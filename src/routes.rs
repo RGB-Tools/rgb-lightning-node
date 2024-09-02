@@ -782,6 +782,10 @@ pub(crate) struct Swap {
     pub(crate) to_asset: Option<String>,
     pub(crate) payment_hash: String,
     pub(crate) status: SwapStatus,
+    pub(crate) requested_at: u64,
+    pub(crate) initiated_at: Option<u64>,
+    pub(crate) expires_at: u64,
+    pub(crate) completed_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -1766,6 +1770,10 @@ pub(crate) async fn list_swaps(
             from_asset: swap_data.swap_info.from_asset.map(|c| c.to_string()),
             to_asset: swap_data.swap_info.to_asset.map(|c| c.to_string()),
             status,
+            requested_at: swap_data.requested_at,
+            initiated_at: swap_data.initiated_at,
+            expires_at: swap_data.swap_info.expiry,
+            completed_at: swap_data.completed_at,
         }
     };
 
@@ -2158,7 +2166,7 @@ pub(crate) async fn maker_execute(
             );
         }
 
-        unlocked_state.update_maker_swap_to_pending(&swapstring.payment_hash);
+        unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Pending);
 
         let (_status, err) = match unlocked_state.channel_manager.send_spontaneous_payment(
             &route,
@@ -2230,7 +2238,7 @@ pub(crate) async fn maker_init(
             qty_to,
             expiry,
         };
-        let swap_data = SwapData::from_swap_info(&swap_info, SwapStatus::Waiting, None);
+        let swap_data = SwapData::create_from_swap_info(&swap_info);
 
         // Check that we have enough assets to send
         if let Some(to_asset) = to_asset {
@@ -2944,7 +2952,7 @@ pub(crate) async fn taker(
             }
         }
 
-        let swap_data = SwapData::from_swap_info(&swapstring.swap_info, SwapStatus::Waiting, None);
+        let swap_data = SwapData::create_from_swap_info(&swapstring.swap_info);
         unlocked_state.add_taker_swap(swapstring.payment_hash, swap_data);
 
         Ok(Json(EmptyResponse {}))
