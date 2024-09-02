@@ -1149,6 +1149,7 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, recip
         amount,
         recipient_id,
         donation: true,
+        fee_rate: FEE_RATE,
         min_confirmations: 1,
         transport_endpoints: vec![PROXY_ENDPOINT_REGTEST.to_string()],
     };

@@ -1632,6 +1632,9 @@ components:
         donation:
           type: boolean
           example: false
+        fee_rate:
+          type: number
+          example: 4.2
         min_confirmations:
           type: integer
           example: 1

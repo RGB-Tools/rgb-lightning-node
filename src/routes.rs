@@ -720,6 +720,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) amount: u64,
     pub(crate) recipient_id: String,
     pub(crate) donation: bool,
+    pub(crate) fee_rate: f32,
     pub(crate) min_confirmations: u8,
     pub(crate) transport_endpoints: Vec<String>,
 }
@@ -2628,7 +2629,7 @@ pub(crate) async fn send_asset(
             unlocked_state.rgb_send(
                 recipient_map,
                 payload.donation,
-                FEE_RATE,
+                payload.fee_rate,
                 payload.min_confirmations,
             )
         })
