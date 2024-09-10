@@ -20,7 +20,7 @@ use rgb_lib::{
         ReceiveData, Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction,
         Transfer, Unspent, WalletData,
     },
-    AssetSchema, Contract, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
+    AssetSchema, Contract, ContractId, Error as RgbLibError, RgbTransfer, UpdateRes,
     Wallet as RgbLibWallet,
 };
 use std::collections::HashMap;
@@ -272,10 +272,6 @@ impl RgbLibWalletWrapper {
             .color_psbt_and_consume(psbt_to_color, coloring_info)
     }
 
-    pub(crate) fn consume_fascia(&self, fascia: Fascia) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().consume_fascia(fascia)
-    }
-
     pub(crate) fn create_utxos(
         &self,
         up_to: bool,
@@ -310,6 +306,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn get_media_dir(&self) -> PathBuf {
         self.get_rgb_wallet().get_media_dir()
+    }
+
+    pub(crate) fn get_tx_height(&self, txid: String) -> Result<Option<u32>, RgbLibError> {
+        self.get_rgb_wallet().get_tx_height(txid)
     }
 
     pub(crate) fn get_wallet_data(&self) -> WalletData {
@@ -486,6 +486,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
         self.get_rgb_wallet().sign_psbt(unsigned_psbt, None)
+    }
+
+    pub(crate) fn update_witnesses(&self, after_height: u32) -> Result<UpdateRes, RgbLibError> {
+        self.get_rgb_wallet().update_witnesses(after_height)
     }
 
     pub(crate) fn witness_receive(

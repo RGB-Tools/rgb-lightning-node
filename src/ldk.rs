@@ -44,7 +44,6 @@ use lightning_block_sync::UnboundedCache;
 use lightning_net_tokio::SocketDescriptor;
 use lightning_persister::fs_store::FilesystemStore;
 use rand::{thread_rng, Rng, RngCore};
-use rgb_lib::wallet::AssetIface;
 use rgb_lib::{
     bdk::keys::{bip39::Mnemonic, DerivableKey, ExtendedKey},
     bitcoin::{
@@ -56,10 +55,10 @@ use rgb_lib::{
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{AssetColoringInfo, ColoringInfo},
-        DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
-        WitnessData,
+        AssetIface, DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet,
+        WalletData, WitnessData,
     },
-    AssetSchema, ContractId, FileContent, RgbTransfer,
+    AssetSchema, ConsignmentExt, ContractId, FileContent, RgbTransfer,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -503,7 +502,7 @@ async fn handle_ldk_events(
                 &temporary_channel_id,
                 &PathBuf::from(&static_state.ldk_data_dir),
             );
-            let (unsigned_psbt, asset_id) = if is_colored {
+            let (unsigned_psbt, asset_id, recipient_id) = if is_colored {
                 let (rgb_info, _) = get_rgb_channel_info_pending(
                     &temporary_channel_id,
                     &PathBuf::from(&static_state.ldk_data_dir),
@@ -517,7 +516,7 @@ async fn handle_ldk_events(
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
-                        recipient_id,
+                        recipient_id: recipient_id.clone(),
                         witness_data: Some(WitnessData {
                             amount_sat: channel_value_satoshis,
                             blinding: Some(STATIC_BLINDING),
@@ -534,12 +533,12 @@ async fn handle_ldk_events(
                 })
                 .await
                 .unwrap();
-                (unsigned_psbt, Some(asset_id))
+                (unsigned_psbt, Some(asset_id), Some(recipient_id))
             } else {
                 let unsigned_psbt = unlocked_state
                     .rgb_send_btc_begin(addr.to_address(), channel_value_satoshis, FEE_RATE)
                     .unwrap();
-                (unsigned_psbt, None)
+                (unsigned_psbt, None, None)
             };
 
             let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
@@ -554,13 +553,17 @@ async fn handle_ldk_events(
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
             if is_colored {
-                let asset_id = asset_id.expect("Must be present");
+                let asset_id = asset_id.expect("is present");
+                let recipient_id = recipient_id.expect("is present");
                 let consignment_path = unlocked_state
                     .rgb_get_wallet_dir()
                     .join("transfers")
                     .join(funding_txid.clone())
                     .join(asset_id.replace("rgb:", ""))
-                    .join("consignment_out");
+                    .join(format!(
+                        "{}.consignment_out",
+                        recipient_id.replace(":", "_")
+                    ));
                 let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
@@ -1193,11 +1196,12 @@ impl OutputSpender for RgbOutputSpender {
             };
 
             let txid = outpoint.txid;
+            let txid_str = txid.to_string();
 
             let transfer_info_path = self
                 .static_state
                 .ldk_data_dir
-                .join(format!("{txid}_transfer_info"));
+                .join(format!("{txid_str}_transfer_info"));
             if !transfer_info_path.exists() {
                 continue;
             };
@@ -1207,6 +1211,18 @@ impl OutputSpender for RgbOutputSpender {
             }
 
             vanilla_descriptor = false;
+
+            let closing_height = self
+                .rgb_wallet_wrapper
+                .get_tx_height(txid_str.clone())
+                .map_err(|_| ())?;
+            let update_res = self
+                .rgb_wallet_wrapper
+                .update_witnesses(closing_height.unwrap())
+                .unwrap();
+            if !update_res.failed.is_empty() {
+                return Err(());
+            }
 
             let contract_id = transfer_info.contract_id;
 
@@ -1229,14 +1245,10 @@ impl OutputSpender for RgbOutputSpender {
                 receive_data.recipient_id
             };
 
-            self.rgb_wallet_wrapper
-                .consume_fascia(transfer_info.fascia.clone())
-                .unwrap();
-
             let amt_rgb = transfer_info.rgb_amount;
 
             let input_outpoint = Outpoint {
-                txid: outpoint.txid.to_string(),
+                txid: txid_str,
                 vout: outpoint.index.into(),
             };
             asset_info
@@ -1291,6 +1303,7 @@ impl OutputSpender for RgbOutputSpender {
         let coloring_info = ColoringInfo {
             asset_info_map,
             static_blinding: None,
+            nonce: None,
         };
 
         let mut psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
