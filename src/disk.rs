@@ -82,9 +82,18 @@ pub(crate) fn persist_channel_peer(
         let mut updated_peer_info = fs::read_to_string(path)?
             .lines()
             .filter(|&line| !line.trim().starts_with(&pubkey))
+            .map(|line| line.trim())
             .collect::<Vec<_>>()
             .join("\n");
-        updated_peer_info += format!("\n{pubkey}@{address}").as_str();
+        updated_peer_info += format!(
+            "{}{pubkey}@{address}",
+            if updated_peer_info.is_empty() {
+                ""
+            } else {
+                "\n"
+            }
+        )
+        .as_str();
         updated_peer_info
     } else {
         format!("{pubkey}@{address}")
@@ -102,6 +111,7 @@ pub(crate) fn delete_channel_peer(path: &Path, pubkey: String) -> Result<(), API
         let updated_peer_info = fs::read_to_string(path)?
             .lines()
             .filter(|&line| !line.trim().starts_with(&pubkey))
+            .map(|line| line.trim())
             .collect::<Vec<_>>()
             .join("\n");
         let mut tmp_path = path.to_path_buf();
