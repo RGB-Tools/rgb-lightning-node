@@ -991,6 +991,7 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InvalidTransportEndpoints { details } => {
                 APIError::InvalidTransportEndpoints(details)
             }
+            RgbLibError::MinFeeNotMet { txid } => APIError::MinFeeNotMet(txid),
             RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
             _ => {

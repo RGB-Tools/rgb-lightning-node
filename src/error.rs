@@ -157,6 +157,9 @@ pub enum APIError {
     #[error("Media file has not been provided")]
     MediaFileNotProvided,
 
+    #[error("Min fee not met for transfer with TXID: {0}")]
+    MinFeeNotMet(String),
+
     #[error("Unable to find payment preimage, be sure you've provided the correct swap info")]
     MissingSwapPaymentPreimage,
 
@@ -262,6 +265,7 @@ impl IntoResponse for APIError {
             | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
             | APIError::LockedNode
+            | APIError::MinFeeNotMet(_)
             | APIError::NoAvailableUtxos
             | APIError::NoRoute
             | APIError::NotInitialized
