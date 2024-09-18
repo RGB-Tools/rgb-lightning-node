@@ -555,15 +555,13 @@ async fn handle_ldk_events(
             if is_colored {
                 let asset_id = asset_id.expect("is present");
                 let recipient_id = recipient_id.expect("is present");
-                let consignment_path = unlocked_state
-                    .rgb_get_wallet_dir()
-                    .join("transfers")
-                    .join(funding_txid.clone())
-                    .join(asset_id.replace("rgb:", ""))
-                    .join(format!(
-                        "{}.consignment_out",
-                        recipient_id.replace(":", "_")
-                    ));
+                let transfers_dir = unlocked_state
+                    .rgb_get_transfers_dir()
+                    .join(funding_txid.clone());
+                let asset_transfer_dir =
+                    unlocked_state.rgb_get_asset_transfer_dir(transfers_dir, &asset_id);
+                let consignment_path =
+                    unlocked_state.rgb_get_send_consignment_path(asset_transfer_dir, &recipient_id);
                 let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;

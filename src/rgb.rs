@@ -68,6 +68,15 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.get_asset_balance(contract_id)
     }
 
+    pub(crate) fn rgb_get_asset_transfer_dir<P: AsRef<Path>>(
+        &self,
+        transfers_dir: P,
+        asset_id: &str,
+    ) -> PathBuf {
+        self.rgb_wallet_wrapper
+            .get_asset_transfer_dir(transfers_dir, asset_id)
+    }
+
     pub(crate) fn rgb_get_btc_balance(&self) -> Result<BtcBalance, RgbLibError> {
         self.rgb_wallet_wrapper.get_btc_balance()
     }
@@ -76,12 +85,21 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.get_media_dir()
     }
 
-    pub(crate) fn rgb_get_wallet_data(&self) -> WalletData {
-        self.rgb_wallet_wrapper.get_wallet_data()
+    pub(crate) fn rgb_get_send_consignment_path<P: AsRef<Path>>(
+        &self,
+        asset_transfer_dir: P,
+        recipient_id: &str,
+    ) -> PathBuf {
+        self.rgb_wallet_wrapper
+            .get_send_consignment_path(asset_transfer_dir, recipient_id)
     }
 
-    pub(crate) fn rgb_get_wallet_dir(&self) -> PathBuf {
-        self.rgb_wallet_wrapper.get_wallet_dir()
+    pub(crate) fn rgb_get_transfers_dir(&self) -> PathBuf {
+        self.rgb_wallet_wrapper.get_transfers_dir()
+    }
+
+    pub(crate) fn rgb_get_wallet_data(&self) -> WalletData {
+        self.rgb_wallet_wrapper.get_wallet_data()
     }
 
     pub(crate) fn rgb_issue_asset_cfa(
@@ -300,6 +318,15 @@ impl RgbLibWalletWrapper {
             .get_asset_balance(contract_id.to_string())
     }
 
+    pub(crate) fn get_asset_transfer_dir<P: AsRef<Path>>(
+        &self,
+        transfers_dir: P,
+        asset_id: &str,
+    ) -> PathBuf {
+        self.get_rgb_wallet()
+            .get_asset_transfer_dir(transfers_dir, asset_id)
+    }
+
     pub(crate) fn get_btc_balance(&self) -> Result<BtcBalance, RgbLibError> {
         self.get_rgb_wallet().get_btc_balance(self.online.clone())
     }
@@ -308,16 +335,25 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().get_media_dir()
     }
 
+    pub(crate) fn get_send_consignment_path<P: AsRef<Path>>(
+        &self,
+        asset_transfer_dir: P,
+        recipient_id: &str,
+    ) -> PathBuf {
+        self.get_rgb_wallet()
+            .get_send_consignment_path(asset_transfer_dir, recipient_id)
+    }
+
+    pub(crate) fn get_transfers_dir(&self) -> PathBuf {
+        self.get_rgb_wallet().get_transfers_dir()
+    }
+
     pub(crate) fn get_tx_height(&self, txid: String) -> Result<Option<u32>, RgbLibError> {
         self.get_rgb_wallet().get_tx_height(txid)
     }
 
     pub(crate) fn get_wallet_data(&self) -> WalletData {
         self.get_rgb_wallet().get_wallet_data()
-    }
-
-    pub(crate) fn get_wallet_dir(&self) -> PathBuf {
-        self.get_rgb_wallet().get_wallet_dir()
     }
 
     pub(crate) fn issue_asset_cfa(
