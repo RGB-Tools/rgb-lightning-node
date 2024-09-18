@@ -61,7 +61,7 @@ impl Default for LdkUserInfo {
             storage_dir_path: PathBuf::from("tmp/test_name/nodeN"),
             daemon_listening_port: 3001,
             ldk_peer_listening_port: 9735,
-            max_media_upload_size_mb: 1,
+            max_media_upload_size_mb: 3,
         }
     }
 }

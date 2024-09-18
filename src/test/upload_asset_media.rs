@@ -35,6 +35,20 @@ async fn success() {
     let mut file_bytes = Vec::new();
     buf_reader.read_to_end(&mut file_bytes).await.unwrap();
     assert_eq!(cfa_media_bytes, file_bytes);
+
+    // upload asset media smaller than the size limit but bigger than the default body limit
+    let file_bytes = vec![4; 2 * 1024 * 1024];
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(file_bytes).headers([].into_iter().collect()),
+    );
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/postassetmedia", node1_addr))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), reqwest::StatusCode::OK);
 }
 
 #[serial_test::serial]
@@ -75,7 +89,7 @@ async fn fail() {
     check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Media file is empty").await;
 
     // upload asset media bigger than the size limit
-    let file_bytes = vec![4; 1024 * 1024];
+    let file_bytes = vec![4; 3 * 1024 * 1024];
     let form = reqwest::multipart::Form::new().part(
         "file",
         reqwest::multipart::Part::bytes(file_bytes).headers([].into_iter().collect()),
