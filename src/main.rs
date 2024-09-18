@@ -14,6 +14,7 @@ mod test;
 
 use anyhow::Result;
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -80,6 +81,14 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
     let app_state = start_daemon(&args).await?;
 
     let router = Router::new()
+        .route(
+            "/postassetmedia",
+            post(post_asset_media).layer(RequestBodyLimitLayer::new(
+                args.max_media_upload_size_mb as usize * 1024 * 1024,
+            )),
+        )
+        // all routes before this will have the default body limit disabled
+        .layer(DefaultBodyLimit::disable())
         .route("/address", post(address))
         .route("/assetbalance", post(asset_balance))
         .route("/backup", post(backup))
@@ -114,12 +123,6 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/networkinfo", get(network_info))
         .route("/nodeinfo", get(node_info))
         .route("/openchannel", post(open_channel))
-        .route(
-            "/postassetmedia",
-            post(post_asset_media).layer(RequestBodyLimitLayer::new(
-                args.max_media_upload_size_mb as usize * 1024 * 1024,
-            )),
-        )
         .route("/refreshtransfers", post(refresh_transfers))
         .route("/restore", post(restore))
         .route("/rgbinvoice", post(rgb_invoice))
