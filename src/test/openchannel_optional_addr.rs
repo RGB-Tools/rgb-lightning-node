@@ -22,7 +22,7 @@ async fn openchannel_optional_addr_forward() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
-    // open channel without addr and without having connected to the peer > fails
+    // open channel without addr and without having a connection to the peer > fails
     println!("\nopening channel with no addr (peer not connected)");
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: node2_pubkey.to_string(),
@@ -54,7 +54,7 @@ async fn openchannel_optional_addr_forward() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
-    // open without addr after having connected to the peer > works
+    // open without addr after connecting to the peer > works
     println!("\nconnecting peer");
     connect_peer(
         node1_addr,
@@ -82,7 +82,6 @@ async fn openchannel_optional_addr_forward() {
     assert_eq!(channels_2.len(), 1);
 }
 
-
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
@@ -105,7 +104,7 @@ async fn openchannel_optional_addr_reverse() {
     let node1_pubkey = node1_info.pubkey;
     let node2_pubkey = node2_info.pubkey;
 
-    // open channel without addr and without having connected to the peer > fails
+    // open channel without addr and without having a connection to the peer > fails
     println!("\nopening channel with no addr (peer not connected)");
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: node1_pubkey.to_string(),
@@ -137,7 +136,7 @@ async fn openchannel_optional_addr_reverse() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
-    // open without addr after having connected to the peer > works
+    // open without addr after the peer connected > works
     println!("\nconnecting peer");
     connect_peer(
         node1_addr,
