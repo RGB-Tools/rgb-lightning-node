@@ -310,6 +310,11 @@ impl From<RgbLibBalance> for BtcBalance {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BtcBalanceRequest {
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct BtcBalanceResponse {
     pub(crate) vanilla: BtcBalance,
     pub(crate) colored: BtcBalance,
@@ -360,6 +365,7 @@ pub(crate) struct CreateUtxosRequest {
     pub(crate) num: Option<u8>,
     pub(crate) size: Option<u32>,
     pub(crate) fee_rate: f32,
+    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -556,6 +562,11 @@ pub(crate) struct ListSwapsResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct ListTransactionsRequest {
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransactionsResponse {
     pub(crate) transactions: Vec<Transaction>,
 }
@@ -568,6 +579,11 @@ pub(crate) struct ListTransfersRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersResponse {
     pub(crate) transfers: Vec<Transfer>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ListUnspentsRequest {
+    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -694,6 +710,11 @@ pub(crate) struct PostAssetMediaResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct RefreshRequest {
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RestoreRequest {
     pub(crate) backup_path: String,
     pub(crate) password: String,
@@ -741,6 +762,7 @@ pub(crate) struct SendBtcRequest {
     pub(crate) amount: u64,
     pub(crate) address: String,
     pub(crate) fee_rate: f32,
+    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1078,10 +1100,11 @@ pub(crate) async fn backup(
 
 pub(crate) async fn btc_balance(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<BtcBalanceRequest>, APIError>,
 ) -> Result<Json<BtcBalanceResponse>, APIError> {
     let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-    let btc_balance = unlocked_state.rgb_get_btc_balance()?;
+    let btc_balance = unlocked_state.rgb_get_btc_balance(payload.skip_sync)?;
 
     let vanilla = BtcBalance {
         settled: btc_balance.vanilla.settled,
@@ -1207,6 +1230,7 @@ pub(crate) async fn create_utxos(
             payload.num.unwrap_or(UTXO_NUM),
             payload.size.unwrap_or(UTXO_SIZE_SAT),
             payload.fee_rate,
+            payload.skip_sync,
         )?;
         tracing::debug!("UTXO creation complete");
 
@@ -1800,11 +1824,12 @@ pub(crate) async fn list_swaps(
 
 pub(crate) async fn list_transactions(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<ListTransactionsRequest>, APIError>,
 ) -> Result<Json<ListTransactionsResponse>, APIError> {
     let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
     let mut transactions = vec![];
-    for tx in unlocked_state.rgb_list_transactions()? {
+    for tx in unlocked_state.rgb_list_transactions(payload.skip_sync)? {
         transactions.push(Transaction {
             transaction_type: match tx.transaction_type {
                 rgb_lib::TransactionType::RgbSend => TransactionType::RgbSend,
@@ -1876,11 +1901,12 @@ pub(crate) async fn list_transfers(
 
 pub(crate) async fn list_unspents(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<ListUnspentsRequest>, APIError>,
 ) -> Result<Json<ListUnspentsResponse>, APIError> {
     let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
     let mut unspents = vec![];
-    for unspent in unlocked_state.rgb_list_unspents()? {
+    for unspent in unlocked_state.rgb_list_unspents(payload.skip_sync)? {
         unspents.push(Unspent {
             utxo: Utxo {
                 outpoint: unspent.utxo.outpoint.to_string(),
@@ -2568,11 +2594,12 @@ pub(crate) async fn post_asset_media(
 
 pub(crate) async fn refresh_transfers(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<RefreshRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-        tokio::task::spawn_blocking(move || unlocked_state.rgb_refresh())
+        tokio::task::spawn_blocking(move || unlocked_state.rgb_refresh(payload.skip_sync))
             .await
             .unwrap()?;
 
@@ -2679,8 +2706,12 @@ pub(crate) async fn send_btc(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-        let txid =
-            unlocked_state.rgb_send_btc(payload.address, payload.amount, payload.fee_rate)?;
+        let txid = unlocked_state.rgb_send_btc(
+            payload.address,
+            payload.amount,
+            payload.fee_rate,
+            payload.skip_sync,
+        )?;
 
         Ok(Json(SendBtcResponse { txid }))
     })

@@ -52,9 +52,10 @@ impl UnlockedAppState {
         num: u8,
         size: u32,
         fee_rate: f32,
+        skip_sync: bool,
     ) -> Result<u8, RgbLibError> {
         self.rgb_wallet_wrapper
-            .create_utxos(up_to, num, size, fee_rate)
+            .create_utxos(up_to, num, size, fee_rate, skip_sync)
     }
 
     pub(crate) fn rgb_get_address(&self) -> Result<String, RgbLibError> {
@@ -77,8 +78,8 @@ impl UnlockedAppState {
             .get_asset_transfer_dir(transfer_dir, asset_id)
     }
 
-    pub(crate) fn rgb_get_btc_balance(&self) -> Result<BtcBalance, RgbLibError> {
-        self.rgb_wallet_wrapper.get_btc_balance()
+    pub(crate) fn rgb_get_btc_balance(&self, skip_sync: bool) -> Result<BtcBalance, RgbLibError> {
+        self.rgb_wallet_wrapper.get_btc_balance(skip_sync)
     }
 
     pub(crate) fn rgb_get_media_dir(&self) -> PathBuf {
@@ -151,8 +152,11 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.list_assets(filter_asset_schemas)
     }
 
-    pub(crate) fn rgb_list_transactions(&self) -> Result<Vec<RgbLibTransaction>, RgbLibError> {
-        self.rgb_wallet_wrapper.list_transactions()
+    pub(crate) fn rgb_list_transactions(
+        &self,
+        skip_sync: bool,
+    ) -> Result<Vec<RgbLibTransaction>, RgbLibError> {
+        self.rgb_wallet_wrapper.list_transactions(skip_sync)
     }
 
     pub(crate) fn rgb_list_transfers(
@@ -162,8 +166,8 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.list_transfers(asset_id)
     }
 
-    pub(crate) fn rgb_list_unspents(&self) -> Result<Vec<Unspent>, RgbLibError> {
-        self.rgb_wallet_wrapper.list_unspents()
+    pub(crate) fn rgb_list_unspents(&self, skip_sync: bool) -> Result<Vec<Unspent>, RgbLibError> {
+        self.rgb_wallet_wrapper.list_unspents(skip_sync)
     }
 
     pub(crate) fn rgb_post_consignment<P: AsRef<Path>>(
@@ -183,8 +187,8 @@ impl UnlockedAppState {
         )
     }
 
-    pub(crate) fn rgb_refresh(&self) -> Result<RefreshResult, RgbLibError> {
-        self.rgb_wallet_wrapper.refresh()
+    pub(crate) fn rgb_refresh(&self, skip_sync: bool) -> Result<RefreshResult, RgbLibError> {
+        self.rgb_wallet_wrapper.refresh(skip_sync)
     }
 
     pub(crate) fn rgb_save_new_asset(
@@ -224,8 +228,10 @@ impl UnlockedAppState {
         address: String,
         amount: u64,
         fee_rate: f32,
+        skip_sync: bool,
     ) -> Result<String, RgbLibError> {
-        self.rgb_wallet_wrapper.send_btc(address, amount, fee_rate)
+        self.rgb_wallet_wrapper
+            .send_btc(address, amount, fee_rate, skip_sync)
     }
 
     pub(crate) fn rgb_send_btc_begin(
@@ -296,6 +302,7 @@ impl RgbLibWalletWrapper {
         num: u8,
         size: u32,
         fee_rate: f32,
+        skip_sync: bool,
     ) -> Result<u8, RgbLibError> {
         self.get_rgb_wallet().create_utxos(
             self.online.clone(),
@@ -303,7 +310,7 @@ impl RgbLibWalletWrapper {
             Some(num),
             Some(size),
             fee_rate,
-            false,
+            skip_sync,
         )
     }
 
@@ -328,9 +335,13 @@ impl RgbLibWalletWrapper {
             .get_asset_transfer_dir(transfer_dir, asset_id)
     }
 
-    pub(crate) fn get_btc_balance(&self) -> Result<BtcBalance, RgbLibError> {
-        self.get_rgb_wallet()
-            .get_btc_balance(Some(self.online.clone()), false)
+    pub(crate) fn get_btc_balance(&self, skip_sync: bool) -> Result<BtcBalance, RgbLibError> {
+        let online = if skip_sync {
+            None
+        } else {
+            Some(self.online.clone())
+        };
+        self.get_rgb_wallet().get_btc_balance(online, skip_sync)
     }
 
     pub(crate) fn get_media_dir(&self) -> PathBuf {
@@ -414,18 +425,30 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().list_assets(filter_asset_schemas)
     }
 
-    pub(crate) fn list_transactions(&self) -> Result<Vec<RgbLibTransaction>, RgbLibError> {
-        self.get_rgb_wallet()
-            .list_transactions(Some(self.online.clone()), false)
+    pub(crate) fn list_transactions(
+        &self,
+        skip_sync: bool,
+    ) -> Result<Vec<RgbLibTransaction>, RgbLibError> {
+        let online = if skip_sync {
+            None
+        } else {
+            Some(self.online.clone())
+        };
+        self.get_rgb_wallet().list_transactions(online, skip_sync)
     }
 
     pub(crate) fn list_transfers(&self, asset_id: String) -> Result<Vec<Transfer>, RgbLibError> {
         self.get_rgb_wallet().list_transfers(Some(asset_id))
     }
 
-    pub(crate) fn list_unspents(&self) -> Result<Vec<Unspent>, RgbLibError> {
+    pub(crate) fn list_unspents(&self, skip_sync: bool) -> Result<Vec<Unspent>, RgbLibError> {
+        let online = if skip_sync {
+            None
+        } else {
+            Some(self.online.clone())
+        };
         self.get_rgb_wallet()
-            .list_unspents(Some(self.online.clone()), false, false)
+            .list_unspents(online, false, skip_sync)
     }
 
     pub(crate) fn post_consignment<P: AsRef<Path>>(
@@ -445,9 +468,9 @@ impl RgbLibWalletWrapper {
         )
     }
 
-    pub(crate) fn refresh(&self) -> Result<RefreshResult, RgbLibError> {
+    pub(crate) fn refresh(&self, skip_sync: bool) -> Result<RefreshResult, RgbLibError> {
         self.get_rgb_wallet()
-            .refresh(self.online.clone(), None, vec![], false)
+            .refresh(self.online.clone(), None, vec![], skip_sync)
     }
 
     pub(crate) fn save_new_asset(
@@ -498,9 +521,10 @@ impl RgbLibWalletWrapper {
         address: String,
         amount: u64,
         fee_rate: f32,
+        skip_sync: bool,
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
-            .send_btc(self.online.clone(), address, amount, fee_rate, false)
+            .send_btc(self.online.clone(), address, amount, fee_rate, skip_sync)
     }
 
     pub(crate) fn send_btc_begin(

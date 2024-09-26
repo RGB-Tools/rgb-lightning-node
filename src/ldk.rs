@@ -971,8 +971,8 @@ async fn handle_ldk_events(
             );
 
             tokio::task::spawn_blocking(move || {
-                unlocked_state.rgb_refresh().unwrap();
-                unlocked_state.rgb_refresh().unwrap()
+                unlocked_state.rgb_refresh(false).unwrap();
+                unlocked_state.rgb_refresh(true).unwrap()
             })
             .await
             .unwrap();
