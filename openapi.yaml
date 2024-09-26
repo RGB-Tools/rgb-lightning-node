@@ -1498,6 +1498,18 @@ components:
         rgb_htlc_min_msat:
           type: integer
           example: 3000000
+        channel_capacity_min_sat:
+          type: integer
+          example: 5506
+        channel_capacity_max_sat:
+          type: integer
+          example: 16777215
+        channel_asset_min_amount:
+          type: integer
+          example: 1
+        channel_asset_max_amount:
+          type: integer
+          example: 18446744073709551615
     OpenChannelRequest:
       type: object
       properties:

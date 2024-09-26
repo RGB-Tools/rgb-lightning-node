@@ -648,6 +648,10 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) onchain_pubkey: String,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) rgb_htlc_min_msat: u64,
+    pub(crate) channel_capacity_min_sat: u64,
+    pub(crate) channel_capacity_max_sat: u64,
+    pub(crate) channel_asset_min_amount: u64,
+    pub(crate) channel_asset_max_amount: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2302,6 +2306,10 @@ pub(crate) async fn node_info(
         onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
         rgb_htlc_min_msat: HTLC_MIN_MSAT,
+        channel_capacity_min_sat: OPENCHANNEL_MIN_SAT,
+        channel_capacity_max_sat: OPENCHANNEL_MAX_SAT,
+        channel_asset_min_amount: OPENCHANNEL_MIN_RGB_AMT,
+        channel_asset_max_amount: u64::MAX,
     }))
 }
 
