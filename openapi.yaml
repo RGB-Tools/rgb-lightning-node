@@ -1215,7 +1215,7 @@ components:
           type: array
           items:
             type: integer
-            example: [ 1000, 600 ]
+          example: [ 1000, 600 ]
         name:
           type: string
           example: Tether
@@ -1240,7 +1240,7 @@ components:
           type: array
           items:
             type: integer
-            example: [ 1000, 600 ]
+          example: [ 1000, 600 ]
         ticker:
           type: string
           example: USDT
@@ -1277,7 +1277,7 @@ components:
           type: array
           items:
             type: string
-            example: [ 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03, d7516e3a27cdf35aa9dcb323b5f556344ef7f57570be30b88de2bfd4ba339b1a ]
+          example: [ 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03, d7516e3a27cdf35aa9dcb323b5f556344ef7f57570be30b88de2bfd4ba339b1a ]
     IssueAssetUDAResponse:
       type: object
       properties:
