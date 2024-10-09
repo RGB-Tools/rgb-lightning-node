@@ -3613,9 +3613,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-lib"
-version = "0.3.0-alpha.8"
+version = "0.3.0-alpha.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d9da373c5aa9e769c5ff7b600b2bb89f6da5a3cbbcafe4cfa220169789be042"
+checksum = "d4cc0a019f4ed7f07f4b98c8eaf8cb6f69bfa936e5271d6836733ca960ac643a"
 dependencies = [
  "amplify",
  "base64 0.22.1",
