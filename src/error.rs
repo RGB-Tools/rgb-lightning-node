@@ -73,6 +73,9 @@ pub enum APIError {
     #[error("For an RGB operation both asset_id and asset_amount must be set")]
     IncompleteRGBInfo,
 
+    #[error("Indexer error: {0}")]
+    Indexer(String),
+
     #[error("Not enough assets")]
     InsufficientAssets,
 
@@ -272,6 +275,7 @@ impl IntoResponse for APIError {
             | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
             | APIError::FailedBitcoindConnection(_)
+            | APIError::Indexer(_)
             | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
             | APIError::InvalidIndexer(_)

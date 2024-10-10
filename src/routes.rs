@@ -43,6 +43,10 @@ use rgb_lib::{
     generate_keys,
     utils::recipient_id_from_script_buf,
     wallet::{
+        rust_only::{
+            check_indexer_url as rgb_lib_check_indexer_url,
+            IndexerProtocol as RgbLibIndexerProtocol,
+        },
         AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
         Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
@@ -347,6 +351,16 @@ pub(crate) struct Channel {
     pub(crate) asset_remote_amount: Option<u64>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct CheckIndexerUrlRequest {
+    pub(crate) indexer_url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct CheckIndexerUrlResponse {
+    pub(crate) indexer_protocol: IndexerProtocol,
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) struct CloseChannelRequest {
     pub(crate) channel_id: String,
@@ -452,6 +466,21 @@ impl_writeable_tlv_based_enum!(HTLCStatus,
     (1, Succeeded) => {},
     (2, Failed) => {};
 );
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) enum IndexerProtocol {
+    Electrum,
+    Esplora,
+}
+
+impl From<RgbLibIndexerProtocol> for IndexerProtocol {
+    fn from(x: RgbLibIndexerProtocol) -> Self {
+        match x {
+            RgbLibIndexerProtocol::Electrum => Self::Electrum,
+            RgbLibIndexerProtocol::Esplora => Self::Esplora,
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct InitRequest {
@@ -1018,6 +1047,7 @@ impl From<RgbLibError> for APIError {
             RgbLibError::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
             RgbLibError::AssetNotFound { .. } => APIError::UnknownContractId,
             RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
+            RgbLibError::Indexer { details } => APIError::Indexer(details),
             RgbLibError::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
             RgbLibError::InsufficientBitcoins { needed, available } => {
                 APIError::InsufficientFunds(needed - available)
@@ -1025,7 +1055,9 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InsufficientSpendableAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InsufficientTotalAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
+            RgbLibError::InvalidElectrum { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
+            RgbLibError::InvalidIndexer { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidName { details } => APIError::InvalidName(details),
             RgbLibError::InvalidPrecision { details } => APIError::InvalidPrecision(details),
             RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
@@ -1158,6 +1190,16 @@ pub(crate) async fn change_password(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+pub(crate) async fn check_indexer_url(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<CheckIndexerUrlRequest>, APIError>,
+) -> Result<Json<CheckIndexerUrlResponse>, APIError> {
+    let indexer_protocol =
+        rgb_lib_check_indexer_url(&payload.indexer_url, state.static_state.network)?.into();
+
+    Ok(Json(CheckIndexerUrlResponse { indexer_protocol }))
 }
 
 pub(crate) async fn close_channel(

@@ -142,6 +142,7 @@ The node currently exposes the following APIs:
 - `/backup` (POST)
 - `/btcbalance` (POST)
 - `/changepassword` (POST)
+- `/checkindexerurl` (POST)
 - `/closechannel` (POST)
 - `/connectpeer` (POST)
 - `/createutxos` (POST)

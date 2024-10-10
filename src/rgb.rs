@@ -20,8 +20,8 @@ use rgb_lib::{
         ReceiveData, Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction,
         Transfer, Unspent, WalletData,
     },
-    AssetSchema, Contract, ContractId, Error as RgbLibError, RgbTransfer, UpdateRes,
-    Wallet as RgbLibWallet,
+    AssetSchema, BitcoinNetwork, Contract, ContractId, Error as RgbLibError, RgbTransfer,
+    UpdateRes, Wallet as RgbLibWallet,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -277,6 +277,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {
         self.wallet.lock().unwrap()
+    }
+
+    pub(crate) fn bitcoin_network(&self) -> BitcoinNetwork {
+        self.get_rgb_wallet().get_wallet_data().bitcoin_network
     }
 
     pub(crate) fn blind_receive(
@@ -593,14 +597,8 @@ impl ChangeDestinationSource for RgbLibWalletWrapper {
 impl WalletSource for RgbLibWalletWrapper {
     fn list_confirmed_utxos(&self) -> Result<Vec<Utxo>, ()> {
         let wallet = self.wallet.lock().unwrap();
-        let network = Network::from_str(
-            &wallet
-                .get_wallet_data()
-                .bitcoin_network
-                .to_string()
-                .to_lowercase(),
-        )
-        .unwrap();
+        let network =
+            Network::from_str(&self.bitcoin_network().to_string().to_lowercase()).unwrap();
         Ok(wallet.list_unspents_vanilla(self.online.clone(), 1, false).unwrap().iter().filter_map(|u| {
             let script = u.txout.script_pubkey.clone().into_boxed_script();
             let address = Address::from_script(&script, network).unwrap();

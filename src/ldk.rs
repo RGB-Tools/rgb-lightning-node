@@ -1413,8 +1413,7 @@ pub(crate) async fn start_ldk(
 
     // RGB setup
     let indexer_url = if let Some(indexer_url) = &unlock_request.indexer_url {
-        check_indexer_url(indexer_url, bitcoin_network)
-            .map_err(|e| APIError::InvalidIndexer(e.to_string()))?;
+        check_indexer_url(indexer_url, bitcoin_network)?;
         indexer_url
     } else {
         match bitcoin_network {
