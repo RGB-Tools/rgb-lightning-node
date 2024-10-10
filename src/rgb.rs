@@ -82,6 +82,10 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.get_btc_balance(skip_sync)
     }
 
+    pub(crate) fn rgb_get_fee_estimation(&self, blocks: u16) -> Result<f64, RgbLibError> {
+        self.rgb_wallet_wrapper.get_fee_estimation(blocks)
+    }
+
     pub(crate) fn rgb_get_media_dir(&self) -> PathBuf {
         self.rgb_wallet_wrapper.get_media_dir()
     }
@@ -346,6 +350,11 @@ impl RgbLibWalletWrapper {
             Some(self.online.clone())
         };
         self.get_rgb_wallet().get_btc_balance(online, skip_sync)
+    }
+
+    pub(crate) fn get_fee_estimation(&self, blocks: u16) -> Result<f64, RgbLibError> {
+        self.get_rgb_wallet()
+            .get_fee_estimation(self.online.clone(), blocks)
     }
 
     pub(crate) fn get_media_dir(&self) -> PathBuf {

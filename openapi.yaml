@@ -223,6 +223,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /estimatefee:
+    post:
+      tags:
+        - On-chain
+      summary: Get fee estimation
+      description: Get on-chain fee estimation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateFeeRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateFeeResponse'
   /getassetmedia:
     post:
       tags:
@@ -1190,6 +1208,18 @@ components:
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
     EmptyResponse:
       type: object
+    EstimateFeeRequest:
+      type: object
+      properties:
+        blocks:
+          type: integer
+          example: 7
+    EstimateFeeResponse:
+      type: object
+      properties:
+        fee_rate:
+          type: number
+          example: 9.3
     GetAssetMediaRequest:
       type: object
       properties:

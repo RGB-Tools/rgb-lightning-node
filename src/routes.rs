@@ -411,6 +411,16 @@ pub(crate) struct DisconnectPeerRequest {
 pub(crate) struct EmptyResponse {}
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct EstimateFeeRequest {
+    pub(crate) blocks: u16,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct EstimateFeeResponse {
+    pub(crate) fee_rate: f64,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct GetAssetMediaRequest {
     pub(crate) digest: String,
 }
@@ -1334,6 +1344,20 @@ pub(crate) async fn disconnect_peer(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+pub(crate) async fn estimate_fee(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<EstimateFeeRequest>, APIError>,
+) -> Result<Json<EstimateFeeResponse>, APIError> {
+    let fee_rate = state
+        .check_unlocked()
+        .await?
+        .clone()
+        .unwrap()
+        .rgb_get_fee_estimation(payload.blocks)?;
+
+    Ok(Json(EstimateFeeResponse { fee_rate }))
 }
 
 pub(crate) async fn get_asset_media(
