@@ -18,8 +18,8 @@ use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::messenger::{DefaultMessageRouter, SimpleArcOnionMessenger};
 use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, STATIC_BLINDING, WALLET_ACCOUNT_XPUB_FNAME,
-    WALLET_FINGERPRINT_FNAME,
+    update_rgb_channel_amount, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME, STATIC_BLINDING,
+    WALLET_ACCOUNT_XPUB_FNAME, WALLET_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -54,11 +54,11 @@ use rgb_lib::{
     },
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
-        rust_only::{AssetColoringInfo, ColoringInfo},
+        rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
         AssetIface, DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet,
         WalletData, WitnessData,
     },
-    AssetSchema, ConsignmentExt, ContractId, FileContent, RgbTransfer,
+    AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -84,11 +84,12 @@ use crate::disk::{
 };
 use crate::error::APIError;
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
-use crate::routes::{HTLCStatus, SwapStatus, DUST_LIMIT_MSAT};
+use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     connect_peer_if_necessary, do_connect_peer, get_current_timestamp, hex_str, AppState,
-    StaticState, UnlockedAppState,
+    StaticState, UnlockedAppState, ELECTRUM_URL_REGTEST, ELECTRUM_URL_TESTNET,
+    PROXY_ENDPOINT_REGTEST, PROXY_ENDPOINT_TESTNET,
 };
 
 pub(crate) const FEE_RATE: f32 = 7.0;
@@ -432,6 +433,7 @@ pub(crate) struct RgbOutputSpender {
     keys_manager: Arc<KeysManager>,
     fs_store: Arc<FilesystemStore>,
     txes: Arc<Mutex<OutputSpenderTxes>>,
+    proxy_endpoint: String,
 }
 
 pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
@@ -488,11 +490,10 @@ async fn handle_ldk_events(
             let addr = WitnessProgram::from_scriptpubkey(
                 output_script.as_bytes(),
                 match static_state.network {
-                    Network::Bitcoin => bitcoin_bech32::constants::Network::Bitcoin,
-                    Network::Testnet => bitcoin_bech32::constants::Network::Testnet,
-                    Network::Regtest => bitcoin_bech32::constants::Network::Regtest,
-                    Network::Signet => bitcoin_bech32::constants::Network::Signet,
-                    _ => unimplemented!("unsupported network"),
+                    BitcoinNetwork::Mainnet => bitcoin_bech32::constants::Network::Bitcoin,
+                    BitcoinNetwork::Testnet => bitcoin_bech32::constants::Network::Testnet,
+                    BitcoinNetwork::Regtest => bitcoin_bech32::constants::Network::Regtest,
+                    BitcoinNetwork::Signet => bitcoin_bech32::constants::Network::Signet,
                 },
             )
             .expect("Lightning funding tx should always be to a SegWit output");
@@ -511,8 +512,7 @@ async fn handle_ldk_events(
                 let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
 
-                let recipient_id =
-                    recipient_id_from_script_buf(script_buf, static_state.network.into());
+                let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
@@ -522,7 +522,7 @@ async fn handle_ldk_events(
                             blinding: Some(STATIC_BLINDING),
                         }),
                         amount: channel_rgb_amount,
-                        transport_endpoints: vec![static_state.proxy_endpoint.clone()]
+                        transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
@@ -560,7 +560,7 @@ async fn handle_ldk_events(
                     unlocked_state.rgb_get_asset_transfer_dir(transfer_dir, &asset_id);
                 let consignment_path =
                     unlocked_state.rgb_get_send_consignment_path(asset_transfer_dir, &recipient_id);
-                let proxy_url = TransportEndpoint::new(static_state.proxy_endpoint.clone())
+                let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
                 let unlocked_state_copy = unlocked_state.clone();
@@ -1229,7 +1229,7 @@ impl OutputSpender for RgbOutputSpender {
                 new_asset = true;
                 let receive_data = self
                     .rgb_wallet_wrapper
-                    .witness_receive(vec![self.static_state.proxy_endpoint.clone()])
+                    .witness_receive(vec![self.proxy_endpoint.clone()])
                     .unwrap();
                 let script_pubkey = script_buf_from_recipient_id(receive_data.recipient_id.clone())
                     .unwrap()
@@ -1334,7 +1334,7 @@ impl OutputSpender for RgbOutputSpender {
             consignment
                 .save_file(&consignment_path)
                 .expect("successful save");
-            let proxy_url = TransportEndpoint::new(self.static_state.proxy_endpoint.clone())
+            let proxy_url = TransportEndpoint::new(self.proxy_endpoint.clone())
                 .unwrap()
                 .endpoint;
             let rgb_wallet_wrapper_copy = self.rgb_wallet_wrapper.clone();
@@ -1368,18 +1368,77 @@ impl OutputSpender for RgbOutputSpender {
 pub(crate) async fn start_ldk(
     app_state: Arc<AppState>,
     mnemonic: Mnemonic,
+    unlock_request: UnlockRequest,
 ) -> Result<(LdkBackgroundServices, Arc<UnlockedAppState>), APIError> {
     let static_state = &app_state.static_state;
 
-    let bitcoind_client = static_state.bitcoind_client.clone();
     let ldk_data_dir = static_state.ldk_data_dir.clone();
     let ldk_data_dir_path = PathBuf::from(&ldk_data_dir);
     let logger = static_state.logger.clone();
-    let network = static_state.network;
+    let bitcoin_network = static_state.network;
+    let network: Network = bitcoin_network.into();
     let ldk_peer_listening_port = static_state.ldk_peer_listening_port;
     let ldk_announced_listen_addr = static_state.ldk_announced_listen_addr.clone();
     let ldk_announced_node_name = static_state.ldk_announced_node_name;
-    let indexer_url = static_state.indexer_url.clone();
+
+    // Initialize our bitcoind client.
+    let bitcoind_client = match BitcoindClient::new(
+        unlock_request.bitcoind_rpc_host.clone(),
+        unlock_request.bitcoind_rpc_port,
+        unlock_request.bitcoind_rpc_username.clone(),
+        unlock_request.bitcoind_rpc_password.clone(),
+        tokio::runtime::Handle::current(),
+        Arc::clone(&logger),
+    )
+    .await
+    {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            return Err(APIError::FailedBitcoindConnection(e.to_string()));
+        }
+    };
+
+    // Check that the bitcoind we've connected to is running the network we expect
+    let bitcoind_chain = bitcoind_client.get_blockchain_info().await.chain;
+    if bitcoind_chain
+        != match bitcoin_network {
+            BitcoinNetwork::Mainnet => "main",
+            BitcoinNetwork::Testnet => "test",
+            BitcoinNetwork::Regtest => "regtest",
+            BitcoinNetwork::Signet => "signet",
+        }
+    {
+        return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
+    }
+
+    // RGB setup
+    let indexer_url = if let Some(indexer_url) = &unlock_request.indexer_url {
+        check_indexer_url(indexer_url, bitcoin_network)
+            .map_err(|e| APIError::InvalidIndexer(e.to_string()))?;
+        indexer_url
+    } else {
+        match bitcoin_network {
+            BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
+            BitcoinNetwork::Regtest => ELECTRUM_URL_REGTEST,
+            _ => unimplemented!("unsupported network"),
+        }
+    };
+    let proxy_endpoint =
+        unlock_request
+            .proxy_endpoint
+            .as_deref()
+            .unwrap_or_else(|| match bitcoin_network {
+                BitcoinNetwork::Testnet => PROXY_ENDPOINT_TESTNET,
+                BitcoinNetwork::Regtest => PROXY_ENDPOINT_REGTEST,
+                _ => unimplemented!("unsupported network"),
+            });
+    let storage_dir_path = app_state.static_state.storage_dir_path.clone();
+    fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
+    fs::write(
+        storage_dir_path.join(BITCOIN_NETWORK_FNAME),
+        bitcoin_network.to_string(),
+    )
+    .expect("able to write");
 
     // Initialize the FeeEstimator
     // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
@@ -1529,7 +1588,6 @@ pub(crate) async fn start_ldk(
 
     // Prepare the RGB wallet
     let mnemonic_str = mnemonic.to_string();
-    let bitcoin_network = network.into();
     let account_xpub = get_account_xpub(bitcoin_network, &mnemonic_str).unwrap();
     let data_dir = static_state
         .storage_dir_path
@@ -1551,7 +1609,7 @@ pub(crate) async fn start_ldk(
     .await
     .unwrap();
     let rgb_online = rgb_wallet
-        .go_online(false, indexer_url.clone())
+        .go_online(false, indexer_url.to_string())
         .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
@@ -1581,6 +1639,7 @@ pub(crate) async fn start_ldk(
         keys_manager: keys_manager.clone(),
         fs_store: fs_store.clone(),
         txes,
+        proxy_endpoint: proxy_endpoint.to_string(),
     });
     let (sweeper_best_block, output_sweeper) = match fs_store.read(
         OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
@@ -1822,6 +1881,7 @@ pub(crate) async fn start_ldk(
         output_sweeper: Arc::clone(&output_sweeper),
         rgb_send_lock: Arc::new(Mutex::new(false)),
         channel_ids_map,
+        proxy_endpoint: proxy_endpoint.to_string(),
     });
 
     let recent_payments_payment_ids = channel_manager

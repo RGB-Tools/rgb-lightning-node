@@ -1,11 +1,9 @@
 use amplify::s;
 use bitcoin::secp256k1::PublicKey;
-use bitcoin::Network;
 use futures::Future;
 use lightning::ln::channelmanager::ChannelDetails;
 use lightning::ln::msgs::SocketAddress;
 use lightning::ln::ChannelId;
-use lightning::rgb_utils::{BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME};
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
@@ -36,7 +34,6 @@ use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::LdkUserInfo,
-    bitcoind::BitcoindClient,
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
@@ -48,10 +45,10 @@ use crate::{
 
 pub(crate) const LDK_DIR: &str = ".ldk";
 pub(crate) const LOGS_DIR: &str = "logs";
-const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
-const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
+pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
+pub(crate) const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 pub(crate) const PROXY_ENDPOINT_REGTEST: &str = "rpc://127.0.0.1:3000/json-rpc";
-const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";
+pub(crate) const PROXY_ENDPOINT_TESTNET: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";
 const PASSWORD_MIN_LENGTH: u8 = 8;
 
 pub(crate) struct AppState {
@@ -82,13 +79,10 @@ pub(crate) struct StaticState {
     pub(crate) ldk_peer_listening_port: u16,
     pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
     pub(crate) ldk_announced_node_name: [u8; 32],
-    pub(crate) network: Network,
+    pub(crate) network: BitcoinNetwork,
     pub(crate) storage_dir_path: PathBuf,
     pub(crate) ldk_data_dir: PathBuf,
     pub(crate) logger: Arc<FilesystemLogger>,
-    pub(crate) indexer_url: String,
-    pub(crate) proxy_endpoint: String,
-    pub(crate) bitcoind_client: Arc<BitcoindClient>,
     pub(crate) max_media_upload_size_mb: u16,
 }
 
@@ -109,6 +103,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) output_sweeper: Arc<OutputSweeper>,
     pub(crate) rgb_send_lock: Arc<Mutex<bool>>,
     pub(crate) channel_ids_map: Arc<Mutex<ChannelIdsMap>>,
+    pub(crate) proxy_endpoint: String,
 }
 
 impl UnlockedAppState {
@@ -344,67 +339,16 @@ pub(crate) async fn start_daemon(args: &LdkUserInfo) -> Result<Arc<AppState>, Ap
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
 
-    // Initialize our bitcoind client.
-    let bitcoind_client = match BitcoindClient::new(
-        args.bitcoind_rpc_host.clone(),
-        args.bitcoind_rpc_port,
-        args.bitcoind_rpc_username.clone(),
-        args.bitcoind_rpc_password.clone(),
-        tokio::runtime::Handle::current(),
-        Arc::clone(&logger),
-    )
-    .await
-    {
-        Ok(client) => Arc::new(client),
-        Err(e) => {
-            return Err(AppError::FailedBitcoindConnection(e.to_string()));
-        }
-    };
-
-    // Check that the bitcoind we've connected to is running the network we expect
-    let network = args.network;
-    let bitcoind_chain = bitcoind_client.get_blockchain_info().await.chain;
-    if bitcoind_chain
-        != match network {
-            bitcoin::Network::Bitcoin => "main",
-            bitcoin::Network::Testnet => "test",
-            bitcoin::Network::Regtest => "regtest",
-            bitcoin::Network::Signet => "signet",
-            _ => unimplemented!("unsupported network"),
-        }
-    {
-        return Err(AppError::InvalidBitcoinNetwork(network, bitcoind_chain));
-    }
-
-    // RGB setup
-    let (indexer_url, proxy_endpoint) = match network {
-        bitcoin::Network::Testnet => (ELECTRUM_URL_TESTNET, PROXY_ENDPOINT_TESTNET),
-        bitcoin::Network::Regtest => (ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_REGTEST),
-        _ => {
-            return Err(AppError::UnsupportedBitcoinNetwork);
-        }
-    };
-    fs::write(args.storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
-    let bitcoin_network: BitcoinNetwork = network.into();
-    fs::write(
-        args.storage_dir_path.join(BITCOIN_NETWORK_FNAME),
-        bitcoin_network.to_string(),
-    )
-    .expect("able to write");
-
     let cancel_token = CancellationToken::new();
 
     let static_state = Arc::new(StaticState {
         ldk_peer_listening_port: args.ldk_peer_listening_port,
         ldk_announced_listen_addr: args.ldk_announced_listen_addr.clone(),
         ldk_announced_node_name: args.ldk_announced_node_name,
-        network,
+        network: args.network,
         storage_dir_path: args.storage_dir_path.clone(),
         ldk_data_dir,
         logger,
-        indexer_url: indexer_url.to_string(),
-        proxy_endpoint: proxy_endpoint.to_string(),
-        bitcoind_client,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
     });
 

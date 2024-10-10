@@ -1994,6 +1994,24 @@ components:
         password:
           type: string
           example: nodepassword
+        bitcoind_rpc_username:
+          type: string
+          example: user
+        bitcoind_rpc_password:
+          type: string
+          example: password
+        bitcoind_rpc_host:
+          type: string
+          example: localhost
+        bitcoind_rpc_port:
+          type: integer
+          example: 18443
+        indexer_url:
+          type: string
+          example: 127.0.0.1:50001
+        proxy_endpoint:
+          type: string
+          example: rpc://127.0.0.1:3000/json-rpc
     Unspent:
       type: object
       properties:

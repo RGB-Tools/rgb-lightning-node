@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use bitcoin::Network;
+use rgb_lib::BitcoinNetwork;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -33,6 +33,9 @@ pub enum APIError {
 
     #[error("The swap offer has expired")]
     ExpiredSwapOffer,
+
+    #[error("Failed to connect to bitcoind client: {0}")]
+    FailedBitcoindConnection(String),
 
     #[error("Failed closing channel: {0}")]
     FailedClosingChannel(String),
@@ -90,6 +93,9 @@ pub enum APIError {
 
     #[error("Invalid fee rate: {0}")]
     InvalidFeeRate(String),
+
+    #[error("Invalid indexer: {0}")]
+    InvalidIndexer(String),
 
     #[error("Invalid invoice: {0}")]
     InvalidInvoice(String),
@@ -162,6 +168,9 @@ pub enum APIError {
 
     #[error("Unable to find payment preimage, be sure you've provided the correct swap info")]
     MissingSwapPaymentPreimage,
+
+    #[error("The network of the given bitcoind ({0}) doesn't match the node's chain ({1})")]
+    NetworkMismatch(String, BitcoinNetwork),
 
     #[error("No uncolored UTXOs are available (hint: call createutxos)")]
     NoAvailableUtxos,
@@ -262,10 +271,13 @@ impl IntoResponse for APIError {
             | APIError::AlreadyInitialized
             | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
+            | APIError::FailedBitcoindConnection(_)
             | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
+            | APIError::InvalidIndexer(_)
             | APIError::LockedNode
             | APIError::MinFeeNotMet(_)
+            | APIError::NetworkMismatch(_, _)
             | APIError::NoAvailableUtxos
             | APIError::NoRoute
             | APIError::NotInitialized
@@ -293,17 +305,8 @@ impl IntoResponse for APIError {
 /// The error variants returned by the app
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Failed to connect to bitcoind client: {0}")]
-    FailedBitcoindConnection(String),
-
     #[error("Invalid announced listen addresses: {0}")]
     InvalidAnnouncedListenAddresses(String),
-
-    #[error("Chain argument ({0}) didn't match bitcoind chain ({1})")]
-    InvalidBitcoinNetwork(Network, String),
-
-    #[error("Invalid bitcoind RPC info: {0}")]
-    InvalidBitcoinRPCInfo(String),
 
     #[error("Invalid node alias: {0}")]
     InvalidNodeAlias(String),

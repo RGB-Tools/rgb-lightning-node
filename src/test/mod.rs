@@ -1,8 +1,8 @@
 use amplify::s;
-use bitcoin::Network;
 use electrum_client::ElectrumApi;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
+use rgb_lib::BitcoinNetwork;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -52,13 +52,9 @@ static MINER: Lazy<RwLock<Miner>> = Lazy::new(|| RwLock::new(Miner { no_mine_cou
 impl Default for LdkUserInfo {
     fn default() -> Self {
         Self {
-            bitcoind_rpc_username: s!("user"),
-            bitcoind_rpc_password: s!("password"),
-            bitcoind_rpc_host: s!("localhost"),
-            bitcoind_rpc_port: 18443,
             ldk_announced_listen_addr: vec![],
             ldk_announced_node_name: [0; 32],
-            network: Network::Regtest,
+            network: BitcoinNetwork::Regtest,
             storage_dir_path: PathBuf::from("tmp/test_name/nodeN"),
             daemon_listening_port: 3001,
             ldk_peer_listening_port: 9735,
@@ -1317,6 +1313,12 @@ async fn unlock(node_address: SocketAddr, password: &str) {
     println!("unlocking node {node_address}");
     let payload = UnlockRequest {
         password: password.to_string(),
+        bitcoind_rpc_username: s!("user"),
+        bitcoind_rpc_password: s!("password"),
+        bitcoind_rpc_host: s!("localhost"),
+        bitcoind_rpc_port: 18443,
+        indexer_url: None,
+        proxy_endpoint: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/unlock", node_address))

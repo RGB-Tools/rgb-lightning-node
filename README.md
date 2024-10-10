@@ -70,16 +70,16 @@ Here's an example of how to start three regtest nodes, each one using the
 shared regtest services provided by docker compose:
 ```sh
 # 1st shell
-rgb-lightning-node user:password@localhost:18443 dataldk0/ \
-    --daemon-listening-port 3001 --ldk-peer-listening-port 9735 --network regtest
+rgb-lightning-node dataldk0/ --daemon-listening-port 3001 \
+    --ldk-peer-listening-port 9735 --network regtest
 
 # 2nd shell
-rgb-lightning-node user:password@localhost:18443 dataldk1/ \
-    --daemon-listening-port 3002 --ldk-peer-listening-port 9736 --network regtest
+rgb-lightning-node dataldk1/ --daemon-listening-port 3002 \
+    --ldk-peer-listening-port 9736 --network regtest
 
 # 3rd shell
-rgb-lightning-node user:password@localhost:18443 dataldk2/ \
-    --daemon-listening-port 3003 --ldk-peer-listening-port 9737 --network regtest
+rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
+    --ldk-peer-listening-port 9737 --network regtest
 ```
 
 To send some bitcoins to a node, first get a bitcoin address with the POST
@@ -113,16 +113,16 @@ external testnet services:
 
 ```sh
 # 1st shell
-rgb-lightning-node user:password@electrum.iriswallet.com:18332 dataldk0/ \
-    --daemon-listening-port 3001 --ldk-peer-listening-port 9735 --network testnet
+rgb-lightning-node dataldk0/ --daemon-listening-port 3001 \
+    --ldk-peer-listening-port 9735 --network testnet
 
 # 2nd shell
-rgb-lightning-node user:password@electrum.iriswallet.com:18332 dataldk1/ 9736 testnet
-    --daemon-listening-port 3002 --ldk-peer-listening-port 9736 --network testnet
+rgb-lightning-node dataldk1/ --daemon-listening-port 3002 \
+    --ldk-peer-listening-port 9736 --network testnet
 
 # 3rd shell
-rgb-lightning-node user:password@electrum.iriswallet.com:18332 dataldk2/ \
-    --daemon-listening-port 3003 --ldk-peer-listening-port 9737 --network testnet
+rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
+    --ldk-peer-listening-port 9737 --network testnet
 ```
 
 ## Use

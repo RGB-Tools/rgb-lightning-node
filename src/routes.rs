@@ -943,6 +943,12 @@ pub(crate) enum TransportType {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct UnlockRequest {
     pub(crate) password: String,
+    pub(crate) bitcoind_rpc_username: String,
+    pub(crate) bitcoind_rpc_password: String,
+    pub(crate) bitcoind_rpc_host: String,
+    pub(crate) bitcoind_rpc_port: u16,
+    pub(crate) indexer_url: Option<String>,
+    pub(crate) proxy_endpoint: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1410,7 +1416,7 @@ pub(crate) async fn init(
         let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
         check_already_initialized(&mnemonic_path)?;
 
-        let keys = generate_keys(state.static_state.network.into());
+        let keys = generate_keys(state.static_state.network);
 
         let mnemonic = keys.mnemonic;
 
@@ -1971,11 +1977,10 @@ pub(crate) async fn ln_invoice(
         }
 
         let currency = match state.static_state.network {
-            Network::Bitcoin => Currency::Bitcoin,
-            Network::Testnet => Currency::BitcoinTestnet,
-            Network::Regtest => Currency::Regtest,
-            Network::Signet => Currency::Signet,
-            _ => unimplemented!("unsupported network"),
+            RgbLibNetwork::Mainnet => Currency::Bitcoin,
+            RgbLibNetwork::Testnet => Currency::BitcoinTestnet,
+            RgbLibNetwork::Regtest => Currency::Regtest,
+            RgbLibNetwork::Signet => Currency::Signet,
         };
         let invoice = match create_invoice_from_channelmanager(
             &unlocked_state.channel_manager,
@@ -2481,7 +2486,7 @@ pub(crate) async fn open_channel(
                 return Err(APIError::InsufficientAssets);
             }
 
-            Some(RgbTransport::from_str(&state.static_state.proxy_endpoint).unwrap())
+            Some(RgbTransport::from_str(&unlocked_state.proxy_endpoint).unwrap())
         } else {
             None
         };
@@ -2490,8 +2495,7 @@ pub(crate) async fn open_channel(
             let mut fake_p2wsh: [u8; 34] = [0; 34];
             fake_p2wsh[1] = 32;
             let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
-            let recipient_id =
-                recipient_id_from_script_buf(script_buf, state.static_state.network.into());
+            let recipient_id = recipient_id_from_script_buf(script_buf, state.static_state.network);
             let asset_id = contract_id.to_string();
             let recipient_map = map! {
                 asset_id => vec![Recipient {
@@ -2501,7 +2505,7 @@ pub(crate) async fn open_channel(
                         blinding: Some(STATIC_BLINDING + 1),
                     }),
                     amount: *asset_amount,
-                    transport_endpoints: vec![state.static_state.proxy_endpoint.clone()]
+                    transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
             }]};
 
             let unlocked_state_copy = unlocked_state.clone();
@@ -2671,7 +2675,7 @@ pub(crate) async fn rgb_invoice(
         let receive_data = unlocked_state.rgb_blind_receive(
             payload.asset_id,
             payload.duration_seconds,
-            vec![state.static_state.proxy_endpoint.clone()],
+            vec![unlocked_state.proxy_endpoint.clone()],
             payload.min_confirmations,
         )?;
 
@@ -3077,7 +3081,7 @@ pub(crate) async fn unlock(
 
         tracing::debug!("Starting LDK...");
         let (new_ldk_background_services, new_unlocked_app_state) =
-            match start_ldk(state.clone(), mnemonic).await {
+            match start_ldk(state.clone(), mnemonic, payload).await {
                 Ok((nlbs, nuap)) => (nlbs, nuap),
                 Err(e) => {
                     state.update_changing_state(false);
