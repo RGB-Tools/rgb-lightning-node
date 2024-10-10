@@ -35,7 +35,7 @@ use crate::routes::{
     keysend, list_assets, list_channels, list_payments, list_peers, list_swaps, list_transactions,
     list_transfers, list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info,
     node_info, open_channel, post_asset_media, refresh_transfers, restore, rgb_invoice, send_asset,
-    send_btc, send_onion_message, send_payment, shutdown, sign_message, taker, unlock,
+    send_btc, send_onion_message, send_payment, shutdown, sign_message, sync, taker, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -132,6 +132,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/sendpayment", post(send_payment))
         .route("/shutdown", post(shutdown))
         .route("/signmessage", post(sign_message))
+        .route("/sync", post(sync))
         .route("/taker", post(taker))
         .route("/unlock", post(unlock))
         .layer(

@@ -2978,6 +2978,19 @@ pub(crate) async fn sign_message(
     Ok(Json(SignMessageResponse { signed_message }))
 }
 
+pub(crate) async fn sync(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        unlocked_state.rgb_sync()?;
+
+        Ok(Json(EmptyResponse {}))
+    })
+    .await
+}
+
 pub(crate) async fn taker(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<TakerRequest>, APIError>,

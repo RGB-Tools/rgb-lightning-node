@@ -255,6 +255,10 @@ impl UnlockedAppState {
     pub(crate) fn rgb_sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper.sign_psbt(unsigned_psbt)
     }
+
+    pub(crate) fn rgb_sync(&self) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.sync()
+    }
 }
 
 pub(crate) struct RgbLibWalletWrapper {
@@ -549,6 +553,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
         self.get_rgb_wallet().sign_psbt(unsigned_psbt, None)
+    }
+
+    pub(crate) fn sync(&self) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().sync(self.online.clone())
     }
 
     pub(crate) fn update_witnesses(&self, after_height: u32) -> Result<UpdateRes, RgbLibError> {

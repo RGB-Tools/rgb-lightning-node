@@ -760,6 +760,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /sync:
+    post:
+      tags:
+        - RGB
+      summary: Sync the RGB wallet
+      description: Sync the RGB wallet
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /signmessage:
     post:
       tags:
