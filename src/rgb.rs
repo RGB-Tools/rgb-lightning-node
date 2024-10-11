@@ -596,9 +596,9 @@ impl ChangeDestinationSource for RgbLibWalletWrapper {
 
 impl WalletSource for RgbLibWalletWrapper {
     fn list_confirmed_utxos(&self) -> Result<Vec<Utxo>, ()> {
-        let wallet = self.wallet.lock().unwrap();
         let network =
             Network::from_str(&self.bitcoin_network().to_string().to_lowercase()).unwrap();
+        let wallet = self.wallet.lock().unwrap();
         Ok(wallet.list_unspents_vanilla(self.online.clone(), 1, false).unwrap().iter().filter_map(|u| {
             let script = u.txout.script_pubkey.clone().into_boxed_script();
             let address = Address::from_script(&script, network).unwrap();
