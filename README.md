@@ -103,6 +103,14 @@ For more info about regtest utility commands, run:
 ./regtest.sh -h
 ```
 
+When unlocking regtest nodes use the following local services:
+- bitcoind_rpc_username: user
+- bitcoind_rpc_username: password
+- bitcoind_rpc_host: localhost
+- bitcoind_rpc_port: 18433
+- indexer_url: 127.0.0.1:50001
+- proxy_endpoint: rpc://127.0.0.1:3000/json-rpc
+
 ### Testnet
 
 When running the node on the testnet network the docker services are not needed
@@ -124,6 +132,14 @@ rgb-lightning-node dataldk1/ --daemon-listening-port 3002 \
 rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
     --ldk-peer-listening-port 9737 --network testnet
 ```
+
+When unlocking testnet nodes you can use the following services:
+- bitcoind_rpc_username: user
+- bitcoind_rpc_username: password
+- bitcoind_rpc_host: electrum.iriswallet.com
+- bitcoind_rpc_port: 18332
+- indexer_url: ssl://electrum.iriswallet.com:50013
+- proxy_endpoint: rpcs://proxy.iriswallet.com/0.2/json-rpc
 
 ## Use
 
