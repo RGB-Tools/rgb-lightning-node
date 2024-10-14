@@ -58,6 +58,16 @@ impl UnlockedAppState {
             .create_utxos(up_to, num, size, fee_rate, skip_sync)
     }
 
+    pub(crate) fn rgb_fail_transfers(
+        &self,
+        batch_transfer_idx: Option<i32>,
+        no_asset_only: bool,
+        skip_sync: bool,
+    ) -> Result<bool, RgbLibError> {
+        self.rgb_wallet_wrapper
+            .fail_transfers(batch_transfer_idx, no_asset_only, skip_sync)
+    }
+
     pub(crate) fn rgb_get_address(&self) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper.get_address()
     }
@@ -322,6 +332,20 @@ impl RgbLibWalletWrapper {
             Some(num),
             Some(size),
             fee_rate,
+            skip_sync,
+        )
+    }
+
+    pub(crate) fn fail_transfers(
+        &self,
+        batch_transfer_idx: Option<i32>,
+        no_asset_only: bool,
+        skip_sync: bool,
+    ) -> Result<bool, RgbLibError> {
+        self.get_rgb_wallet().fail_transfers(
+            self.online.clone(),
+            batch_transfer_idx,
+            no_asset_only,
             skip_sync,
         )
     }

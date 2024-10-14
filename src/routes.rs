@@ -435,6 +435,18 @@ pub(crate) struct EstimateFeeResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct FailTransfersRequest {
+    pub(crate) batch_transfer_idx: Option<i32>,
+    pub(crate) no_asset_only: bool,
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct FailTransfersResponse {
+    pub(crate) transfers_changed: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct GetAssetMediaRequest {
     pub(crate) digest: String,
 }
@@ -1406,6 +1418,24 @@ pub(crate) async fn estimate_fee(
         .rgb_get_fee_estimation(payload.blocks)?;
 
     Ok(Json(EstimateFeeResponse { fee_rate }))
+}
+
+pub(crate) async fn fail_transfers(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<FailTransfersRequest>, APIError>,
+) -> Result<Json<FailTransfersResponse>, APIError> {
+    no_cancel(async move {
+        let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+        let transfers_changed = unlocked_state.rgb_fail_transfers(
+            payload.batch_transfer_idx,
+            payload.no_asset_only,
+            payload.skip_sync,
+        )?;
+
+        Ok(Json(FailTransfersResponse { transfers_changed }))
+    })
+    .await
 }
 
 pub(crate) async fn get_asset_media(

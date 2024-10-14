@@ -259,6 +259,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EstimateFeeResponse'
+  /failtransfers:
+    post:
+      tags:
+        - RGB
+      summary: Fail RGB transfers
+      description: Set the status for eligible RGB transfers to
+        `TransferStatus::Failed`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FailTransfersRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailTransfersResponse'
   /getassetmedia:
     post:
       tags:
@@ -1249,6 +1268,24 @@ components:
         fee_rate:
           type: number
           example: 9.3
+    FailTransfersRequest:
+      type: object
+      properties:
+        batch_transfer_idx:
+          type: integer
+          example: null
+        no_asset_only:
+          type: boolean
+          example: false
+        skip_sync:
+          type: boolean
+          example: false
+    FailTransfersResponse:
+      type: object
+      properties:
+        transfers_changed:
+          type: boolean
+          example: true
     GetAssetMediaRequest:
       type: object
       properties:
