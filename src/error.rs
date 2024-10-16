@@ -40,6 +40,9 @@ pub enum APIError {
     #[error("Failed to connect to bitcoind client: {0}")]
     FailedBitcoindConnection(String),
 
+    #[error("Failed broadcast: {0}")]
+    FailedBroadcast(String),
+
     #[error("Failed closing channel: {0}")]
     FailedClosingChannel(String),
 
@@ -278,6 +281,7 @@ impl IntoResponse for APIError {
             | APIError::CannotEstimateFees
             | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
+            | APIError::FailedBroadcast(_)
             | APIError::FailedBitcoindConnection(_)
             | APIError::Indexer(_)
             | APIError::InsufficientAssets

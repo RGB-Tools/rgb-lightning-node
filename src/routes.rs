@@ -1059,6 +1059,7 @@ impl From<RgbLibError> for APIError {
             RgbLibError::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
             RgbLibError::AssetNotFound { .. } => APIError::UnknownContractId,
             RgbLibError::CannotEstimateFees => APIError::CannotEstimateFees,
+            RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
             RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
             RgbLibError::Indexer { details } => APIError::Indexer(details),
             RgbLibError::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
