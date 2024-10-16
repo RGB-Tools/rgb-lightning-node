@@ -90,14 +90,15 @@ use crate::{
 
 const UTXO_NUM: u8 = 4;
 
+pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
+pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
+
+const OPENRGBCHANNEL_MIN_SAT: u64 = HTLC_MIN_MSAT / 1000 * 10 + 10;
 const OPENCHANNEL_MIN_SAT: u64 = 5506;
 const OPENCHANNEL_MAX_SAT: u64 = 16777215;
 const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
 
 pub const DUST_LIMIT_MSAT: u64 = 546000;
-
-pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
-pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
 
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 
@@ -715,6 +716,7 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) onchain_pubkey: String,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) rgb_htlc_min_msat: u64,
+    pub(crate) rgb_channel_capacity_min_sat: u64,
     pub(crate) channel_capacity_min_sat: u64,
     pub(crate) channel_capacity_max_sat: u64,
     pub(crate) channel_asset_min_amount: u64,
@@ -2435,6 +2437,7 @@ pub(crate) async fn node_info(
         onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
         rgb_htlc_min_msat: HTLC_MIN_MSAT,
+        rgb_channel_capacity_min_sat: OPENRGBCHANNEL_MIN_SAT,
         channel_capacity_min_sat: OPENCHANNEL_MIN_SAT,
         channel_capacity_max_sat: OPENCHANNEL_MAX_SAT,
         channel_asset_min_amount: OPENCHANNEL_MIN_RGB_AMT,
@@ -2466,7 +2469,7 @@ pub(crate) async fn open_channel(
         let colored_info = match (payload.asset_id, payload.asset_amount) {
             (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
                 return Err(APIError::InvalidAmount(format!(
-                    "Channel RGB amount must be equal or higher than {OPENCHANNEL_MIN_RGB_AMT}"
+                    "Channel RGB amount must be equal to or higher than {OPENCHANNEL_MIN_RGB_AMT}"
                 )));
             }
             (Some(asset), Some(amt)) => {
@@ -2480,14 +2483,18 @@ pub(crate) async fn open_channel(
             }
         };
 
-        if payload.capacity_sat < OPENCHANNEL_MIN_SAT {
+        if colored_info.is_some() && payload.capacity_sat < OPENRGBCHANNEL_MIN_SAT {
             return Err(APIError::InvalidAmount(format!(
-                "Channel amount must be equal or higher than {OPENCHANNEL_MIN_SAT}"
+                "RGB channel amount must be equal to or higher than {OPENRGBCHANNEL_MIN_SAT} sats"
+            )));
+        } else if payload.capacity_sat < OPENCHANNEL_MIN_SAT {
+            return Err(APIError::InvalidAmount(format!(
+                "Channel amount must be equal to or higher than {OPENCHANNEL_MIN_SAT} sats"
             )));
         }
         if payload.capacity_sat > OPENCHANNEL_MAX_SAT {
             return Err(APIError::InvalidAmount(format!(
-                "Channel amount must be equal or less than {OPENCHANNEL_MAX_SAT}"
+                "Channel amount must be equal to or less than {OPENCHANNEL_MAX_SAT} sats"
             )));
         }
 
