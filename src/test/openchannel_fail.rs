@@ -44,7 +44,7 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::BAD_REQUEST,
-        "Invalid amount: Channel RGB amount must be equal or higher than 1",
+        "Invalid amount: Channel RGB amount must be equal to or higher than 1",
     )
     .await;
 
@@ -89,8 +89,8 @@ async fn open_fail() {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
         capacity_sat: 1_000,
         push_msat: 3_500_000,
-        asset_amount: Some(100),
-        asset_id: Some(asset_id.clone()),
+        asset_amount: None,
+        asset_id: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -106,7 +106,7 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::BAD_REQUEST,
-        "Invalid amount: Channel amount must be equal or higher than 5506",
+        "Invalid amount: Channel amount must be equal to or higher than 5506 sats",
     )
     .await;
 
@@ -137,7 +137,7 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::BAD_REQUEST,
-        "Invalid amount: Channel amount must be equal or less than 16777215",
+        "Invalid amount: Channel amount must be equal to or less than 16777215 sats",
     )
     .await;
 
