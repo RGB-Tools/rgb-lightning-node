@@ -25,6 +25,9 @@ pub enum APIError {
     #[error("Anchor outputs are required for RGB channels")]
     AnchorsRequired,
 
+    #[error("Cannot estimate fees")]
+    CannotEstimateFees,
+
     #[error("Cannot open channel: {0}")]
     CannotOpenChannel(String),
 
@@ -272,6 +275,7 @@ impl IntoResponse for APIError {
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
+            | APIError::CannotEstimateFees
             | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
             | APIError::FailedBitcoindConnection(_)
