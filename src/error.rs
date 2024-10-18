@@ -25,8 +25,14 @@ pub enum APIError {
     #[error("Anchor outputs are required for RGB channels")]
     AnchorsRequired,
 
+    #[error("Batch transfer not found")]
+    BatchTransferNotFound,
+
     #[error("Cannot estimate fees")]
     CannotEstimateFees,
+
+    #[error("Batch transfer cannot be set to failed status")]
+    CannotFailBatchTransfer,
 
     #[error("Cannot open channel: {0}")]
     CannotOpenChannel(String),
@@ -278,7 +284,9 @@ impl IntoResponse for APIError {
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
+            | APIError::BatchTransferNotFound
             | APIError::CannotEstimateFees
+            | APIError::CannotFailBatchTransfer
             | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
             | APIError::FailedBroadcast(_)

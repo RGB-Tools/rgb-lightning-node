@@ -1060,7 +1060,9 @@ impl From<RgbLibError> for APIError {
         match error {
             RgbLibError::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
             RgbLibError::AssetNotFound { .. } => APIError::UnknownContractId,
+            RgbLibError::BatchTransferNotFound { .. } => APIError::BatchTransferNotFound,
             RgbLibError::CannotEstimateFees => APIError::CannotEstimateFees,
+            RgbLibError::CannotFailBatchTransfer => APIError::CannotFailBatchTransfer,
             RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
             RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
             RgbLibError::Indexer { details } => APIError::Indexer(details),
