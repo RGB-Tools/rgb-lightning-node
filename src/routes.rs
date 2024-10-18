@@ -48,8 +48,9 @@ use rgb_lib::{
             IndexerProtocol as RgbLibIndexerProtocol,
         },
         AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
-        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, Invoice as RgbLibInvoice,
-        Media as RgbLibMedia, Recipient, RecipientInfo, TokenLight as RgbLibTokenLight,
+        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
+        Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
+        Recipient, RecipientInfo, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
         WitnessData,
     },
     AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork, ContractId,
@@ -121,6 +122,24 @@ pub(crate) struct AssetBalanceResponse {
     pub(crate) spendable: u64,
     pub(crate) offchain_outbound: u64,
     pub(crate) offchain_inbound: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetMetadataRequest {
+    pub(crate) asset_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetMetadataResponse {
+    pub(crate) asset_iface: AssetIface,
+    pub(crate) asset_schema: AssetSchema,
+    pub(crate) issued_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) name: String,
+    pub(crate) precision: u8,
+    pub(crate) ticker: Option<String>,
+    pub(crate) details: Option<String>,
+    pub(crate) token: Option<Token>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -217,6 +236,16 @@ impl From<AssetSchema> for RgbLibAssetSchema {
             AssetSchema::Nia => Self::Nia,
             AssetSchema::Uda => Self::Uda,
             AssetSchema::Cfa => Self::Cfa,
+        }
+    }
+}
+
+impl From<RgbLibAssetSchema> for AssetSchema {
+    fn from(value: RgbLibAssetSchema) -> Self {
+        match value {
+            RgbLibAssetSchema::Nia => Self::Nia,
+            RgbLibAssetSchema::Uda => Self::Uda,
+            RgbLibAssetSchema::Cfa => Self::Cfa,
         }
     }
 }
@@ -420,6 +449,21 @@ pub(crate) struct DecodeRGBInvoiceResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct DisconnectPeerRequest {
     pub(crate) peer_pubkey: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct EmbeddedMedia {
+    pub(crate) mime: String,
+    pub(crate) data: Vec<u8>,
+}
+
+impl From<RgbLibEmbeddedMedia> for EmbeddedMedia {
+    fn from(value: RgbLibEmbeddedMedia) -> Self {
+        Self {
+            mime: value.mime,
+            data: value.data,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -763,6 +807,21 @@ pub(crate) struct PostAssetMediaResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct ProofOfReserves {
+    pub(crate) utxo: String,
+    pub(crate) proof: Vec<u8>,
+}
+
+impl From<RgbLibProofOfReserves> for ProofOfReserves {
+    fn from(value: RgbLibProofOfReserves) -> Self {
+        Self {
+            utxo: value.utxo.to_string(),
+            proof: value.proof,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RefreshRequest {
     pub(crate) skip_sync: bool,
 }
@@ -888,6 +947,37 @@ impl_writeable_tlv_based_enum!(SwapStatus,
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TakerRequest {
     pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Token {
+    pub(crate) index: u32,
+    pub(crate) ticker: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) details: Option<String>,
+    pub(crate) embedded_media: Option<EmbeddedMedia>,
+    pub(crate) media: Option<Media>,
+    pub(crate) attachments: HashMap<u8, Media>,
+    pub(crate) reserves: Option<ProofOfReserves>,
+}
+
+impl From<RgbLibToken> for Token {
+    fn from(value: RgbLibToken) -> Self {
+        Self {
+            index: value.index,
+            ticker: value.ticker,
+            name: value.name,
+            details: value.details,
+            embedded_media: value.embedded_media.map(|em| em.into()),
+            media: value.media.map(|m| m.into()),
+            attachments: value
+                .attachments
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+            reserves: value.reserves.map(|r| r.into()),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1140,6 +1230,33 @@ pub(crate) async fn asset_balance(
         spendable: balance.spendable,
         offchain_outbound,
         offchain_inbound,
+    }))
+}
+
+pub(crate) async fn asset_metadata(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<AssetMetadataRequest>, APIError>,
+) -> Result<Json<AssetMetadataResponse>, APIError> {
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
+
+    let metadata = state
+        .check_unlocked()
+        .await?
+        .clone()
+        .unwrap()
+        .rgb_get_asset_metadata(contract_id)?;
+
+    Ok(Json(AssetMetadataResponse {
+        asset_iface: metadata.asset_iface.into(),
+        asset_schema: metadata.asset_schema.into(),
+        issued_supply: metadata.issued_supply,
+        timestamp: metadata.timestamp,
+        name: metadata.name,
+        precision: metadata.precision,
+        ticker: metadata.ticker,
+        details: metadata.details,
+        token: metadata.token.map(|t| t.into()),
     }))
 }
 

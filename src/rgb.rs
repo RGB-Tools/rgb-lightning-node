@@ -16,9 +16,9 @@ use rgb_lib::{
     bdk::SignOptions,
     bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt,
     wallet::{
-        rust_only::ColoringInfo, AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Online,
-        ReceiveData, Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction,
-        Transfer, Unspent, WalletData,
+        rust_only::ColoringInfo, AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance,
+        Metadata, Online, ReceiveData, Recipient, RefreshResult, SendResult,
+        Transaction as RgbLibTransaction, Transfer, Unspent, WalletData,
     },
     AssetSchema, BitcoinNetwork, Contract, ContractId, Error as RgbLibError, RgbTransfer,
     UpdateRes, Wallet as RgbLibWallet,
@@ -77,6 +77,13 @@ impl UnlockedAppState {
         contract_id: ContractId,
     ) -> Result<Balance, RgbLibError> {
         self.rgb_wallet_wrapper.get_asset_balance(contract_id)
+    }
+
+    pub(crate) fn rgb_get_asset_metadata(
+        &self,
+        contract_id: ContractId,
+    ) -> Result<Metadata, RgbLibError> {
+        self.rgb_wallet_wrapper.get_asset_metadata(contract_id)
     }
 
     pub(crate) fn rgb_get_asset_transfer_dir<P: AsRef<Path>>(
@@ -360,6 +367,14 @@ impl RgbLibWalletWrapper {
     ) -> Result<Balance, RgbLibError> {
         self.get_rgb_wallet()
             .get_asset_balance(contract_id.to_string())
+    }
+
+    pub(crate) fn get_asset_metadata(
+        &self,
+        contract_id: ContractId,
+    ) -> Result<Metadata, RgbLibError> {
+        self.get_rgb_wallet()
+            .get_asset_metadata(contract_id.to_string())
     }
 
     pub(crate) fn get_asset_transfer_dir<P: AsRef<Path>>(

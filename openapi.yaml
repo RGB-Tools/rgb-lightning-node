@@ -61,6 +61,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssetBalanceResponse'
+  /assetmetadata:
+    post:
+      tags:
+        - RGB
+      summary: Get the metadata of an asset
+      description: Get the metadata for the provided RGB asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetMetadataRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetMetadataResponse'
   /backup:
     post:
       tags:
@@ -914,6 +932,39 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    AssetMetadataRequest:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+    AssetMetadataResponse:
+      type: object
+      properties:
+        asset_iface:
+          $ref: '#/components/schemas/AssetIface'
+        asset_schema:
+          $ref: '#/components/schemas/AssetSchema'
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
+        name:
+          type: string
+          example: Collectible
+        precision:
+          type: integer
+          example: 0
+        ticker:
+          type: string
+          example: USDT
+        details:
+          type: string
+          example: asset details
+        token:
+          $ref: '#/components/schemas/Token'
     AssetCFA:
       type: object
       properties:
@@ -1254,6 +1305,17 @@ components:
         peer_pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+    EmbeddedMedia:
+      type: object
+      properties:
+        mime:
+          type: string
+          example: text/plain
+        data:
+          type: array
+          items:
+            type: integer
+          example: [82, 76, 78]
     EmptyResponse:
       type: object
     EstimateFeeRequest:
@@ -1745,6 +1807,17 @@ components:
         digest:
           type: string
           example: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+    ProofOfReserves:
+      type: object
+      properties:
+        utxo:
+          type: string
+          example: efed66f5309396ff43c8a09941c8103d9d5bbffd473ad9f13013ac89fb6b4671:0
+        proof:
+          type: array
+          items:
+            type: integer
+          example: [6, 36, 87, 13, 5, 17]
     RefreshRequest:
       type: object
       properties:
@@ -1938,6 +2011,34 @@ components:
         swapstring:
             type: string
             example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+    Token:
+      type: object
+      properties:
+        index:
+          type: integer
+          example: 0
+        ticker:
+          type: string
+          example: TKN
+        name:
+          type: string
+          example: Token
+        details:
+          type: string
+          example: token details
+        embedded_media:
+          $ref: '#/components/schemas/EmbeddedMedia'
+        media:
+          $ref: '#/components/schemas/Media'
+        attachments:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Media'
+          example:
+            0: { file_path: path/to/attachment0, digest: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03, mime: text/plain }
+            1: { file_path: path/to/attachment1, digest: d7516e3a27cdf35aa9dcb323b5f556344ef7f57570be30b88de2bfd4ba339b1a, mime: image/png }
+        reserves:
+          $ref: '#/components/schemas/ProofOfReserves'
     TokenLight:
       type: object
       properties:

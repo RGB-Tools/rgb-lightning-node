@@ -155,6 +155,7 @@ curl -X POST -H "Content-type: application/json" \
 The node currently exposes the following APIs:
 - `/address` (POST)
 - `/assetbalance` (POST)
+- `/assetmetadata` (POST)
 - `/backup` (POST)
 - `/btcbalance` (POST)
 - `/changepassword` (POST)
