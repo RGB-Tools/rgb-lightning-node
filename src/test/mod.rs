@@ -20,19 +20,20 @@ use crate::routes::{
     BackupRequest, BtcBalanceRequest, BtcBalanceResponse, ChangePasswordRequest, Channel,
     CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
-    DisconnectPeerRequest, EmptyResponse, GetAssetMediaRequest, GetAssetMediaResponse,
-    GetChannelIdRequest, GetChannelIdResponse, HTLCStatus, InitRequest, InitResponse,
-    InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
-    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
-    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
-    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
-    ListPeersResponse, ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse,
-    ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse,
-    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
-    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    PostAssetMediaResponse, RefreshRequest, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
-    SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent,
+    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
+    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
+    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
+    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
+    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
+    ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse,
+    ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RefreshRequest, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
+    Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
 
@@ -442,6 +443,29 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
         .json::<EmptyResponse>()
         .await
         .unwrap();
+}
+
+async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32>) -> bool {
+    println!(
+        "failing transfers, batch_transfer_idx {batch_transfer_idx:?} from node {node_address}"
+    );
+    let payload = FailTransfersRequest {
+        batch_transfer_idx,
+        no_asset_only: false,
+        skip_sync: false,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/failtransfers", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<FailTransfersResponse>()
+        .await
+        .unwrap()
+        .transfers_changed
 }
 
 async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
@@ -1579,6 +1603,7 @@ mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
+mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
 mod invoice;

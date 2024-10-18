@@ -1551,11 +1551,16 @@ pub(crate) async fn fail_transfers(
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
 
-        let transfers_changed = unlocked_state.rgb_fail_transfers(
-            payload.batch_transfer_idx,
-            payload.no_asset_only,
-            payload.skip_sync,
-        )?;
+        let unlocked_state_copy = unlocked_state.clone();
+        let transfers_changed = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_fail_transfers(
+                payload.batch_transfer_idx,
+                payload.no_asset_only,
+                payload.skip_sync,
+            )
+        })
+        .await
+        .unwrap()?;
 
         Ok(Json(FailTransfersResponse { transfers_changed }))
     })
