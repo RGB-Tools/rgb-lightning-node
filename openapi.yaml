@@ -1869,6 +1869,9 @@ components:
         expiration_timestamp:
           type: integer
           example: 1695811760
+        batch_transfer_idx:
+          type: integer
+          example: 1
     SendAssetRequest:
       type: object
       properties:

@@ -36,7 +36,7 @@ async fn send_receive() {
     let RgbInvoiceResponse {
         recipient_id,
         invoice,
-        expiration_timestamp: _,
+        ..
     } = rgb_invoice(node1_addr, Some(asset_id.clone())).await;
     send_asset(node2_addr, &asset_id, 300, recipient_id.clone()).await;
     mine(false);

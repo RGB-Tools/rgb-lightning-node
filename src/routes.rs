@@ -851,6 +851,7 @@ pub(crate) struct RgbInvoiceResponse {
     pub(crate) recipient_id: String,
     pub(crate) invoice: String,
     pub(crate) expiration_timestamp: Option<i64>,
+    pub(crate) batch_transfer_idx: i32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2883,6 +2884,7 @@ pub(crate) async fn rgb_invoice(
             recipient_id: receive_data.recipient_id,
             invoice: receive_data.invoice,
             expiration_timestamp: receive_data.expiration_timestamp,
+            batch_transfer_idx: receive_data.batch_transfer_idx,
         }))
     })
     .await
