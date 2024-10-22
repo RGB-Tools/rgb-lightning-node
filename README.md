@@ -160,6 +160,7 @@ The node currently exposes the following APIs:
 - `/btcbalance` (POST)
 - `/changepassword` (POST)
 - `/checkindexerurl` (POST)
+- `/checkproxyendpoint` (POST)
 - `/closechannel` (POST)
 - `/connectpeer` (POST)
 - `/createutxos` (POST)

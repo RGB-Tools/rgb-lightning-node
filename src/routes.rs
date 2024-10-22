@@ -71,14 +71,16 @@ use tokio::{
     sync::MutexGuard as TokioMutexGuard,
 };
 
-use crate::backup::{do_backup, restore_backup};
 use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
-use crate::rgb::get_rgb_channel_info_optional;
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
     hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
+};
+use crate::{
+    backup::{do_backup, restore_backup},
+    rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional},
 };
 use crate::{
     disk::{self, CHANNEL_PEER_DATA},
@@ -389,6 +391,11 @@ pub(crate) struct CheckIndexerUrlRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct CheckIndexerUrlResponse {
     pub(crate) indexer_protocol: IndexerProtocol,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct CheckProxyEndpointRequest {
+    pub(crate) proxy_endpoint: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1340,6 +1347,14 @@ pub(crate) async fn check_indexer_url(
         rgb_lib_check_indexer_url(&payload.indexer_url, state.static_state.network)?.into();
 
     Ok(Json(CheckIndexerUrlResponse { indexer_protocol }))
+}
+
+pub(crate) async fn check_proxy_endpoint(
+    WithRejection(Json(payload), _): WithRejection<Json<CheckProxyEndpointRequest>, APIError>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    check_rgb_proxy_endpoint(&payload.proxy_endpoint).await?;
+
+    Ok(Json(EmptyResponse {}))
 }
 
 pub(crate) async fn close_channel(

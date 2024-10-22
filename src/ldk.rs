@@ -54,12 +54,11 @@ use rgb_lib::{
     },
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
-        rust_only::{check_indexer_url, check_proxy_url, AssetColoringInfo, ColoringInfo},
+        rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
         AssetIface, DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet,
         WalletData, WitnessData,
     },
     AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
-    RgbTransport,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -84,7 +83,7 @@ use crate::disk::{
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
-use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
@@ -1429,12 +1428,7 @@ pub(crate) async fn start_ldk(
         }
     };
     let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
-        let rgb_transport =
-            RgbTransport::from_str(proxy_endpoint).map_err(|_| APIError::InvalidProxyEndpoint)?;
-        let proxy_url = TransportEndpoint::try_from(rgb_transport)?.endpoint;
-        tokio::task::spawn_blocking(move || check_proxy_url(&proxy_url))
-            .await
-            .unwrap()?;
+        check_rgb_proxy_endpoint(proxy_endpoint).await?;
         tracing::info!("Using a custom proxy");
         proxy_endpoint
     } else {

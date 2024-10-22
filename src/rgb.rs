@@ -16,19 +16,20 @@ use rgb_lib::{
     bdk::SignOptions,
     bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt,
     wallet::{
-        rust_only::ColoringInfo, AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance,
-        Metadata, Online, ReceiveData, Recipient, RefreshResult, SendResult,
-        Transaction as RgbLibTransaction, Transfer, Unspent, WalletData,
+        rust_only::{check_proxy_url, ColoringInfo},
+        AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online, ReceiveData,
+        Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction, Transfer,
+        TransportEndpoint, Unspent, WalletData,
     },
     AssetSchema, BitcoinNetwork, Contract, ContractId, Error as RgbLibError, RgbTransfer,
-    UpdateRes, Wallet as RgbLibWallet,
+    RgbTransport, UpdateRes, Wallet as RgbLibWallet,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::utils::UnlockedAppState;
+use crate::{error::APIError, utils::UnlockedAppState};
 
 impl UnlockedAppState {
     pub(crate) fn rgb_blind_receive(
@@ -691,6 +692,16 @@ impl WalletSource for RgbLibWalletWrapper {
             .unwrap()
             .extract_tx())
     }
+}
+
+pub(crate) async fn check_rgb_proxy_endpoint(proxy_endpoint: &str) -> Result<(), APIError> {
+    let rgb_transport =
+        RgbTransport::from_str(proxy_endpoint).map_err(|_| APIError::InvalidProxyEndpoint)?;
+    let proxy_url = TransportEndpoint::try_from(rgb_transport)?.endpoint;
+    tokio::task::spawn_blocking(move || check_proxy_url(&proxy_url))
+        .await
+        .unwrap()?;
+    Ok(())
 }
 
 pub(crate) fn get_rgb_channel_info_optional(

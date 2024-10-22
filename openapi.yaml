@@ -151,6 +151,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CheckIndexerUrlResponse'
+  /checkproxyendpoint:
+    post:
+      tags:
+        - Other
+      summary: Check a proxy endpoint
+      description: Check the given proxy endpoint is valid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckProxyEndpointRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /closechannel:
     post:
       tags:
@@ -1198,6 +1216,12 @@ components:
       properties:
         indexer_protocol:
           $ref: '#/components/schemas/IndexerProtocol'
+    CheckProxyEndpointRequest:
+      type: object
+      properties:
+        proxy_url:
+          type: string
+          example: rpc://127.0.0.1:3000/json-rpc
     CloseChannelRequest:
       type: object
       properties:

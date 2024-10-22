@@ -30,13 +30,14 @@ use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
     address, asset_balance, asset_metadata, backup, btc_balance, change_password,
-    check_indexer_url, close_channel, connect_peer, create_utxos, decode_ln_invoice,
-    decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers, get_asset_media,
-    get_channel_id, init, invoice_status, issue_asset_cfa, issue_asset_nia, issue_asset_uda,
-    keysend, list_assets, list_channels, list_payments, list_peers, list_swaps, list_transactions,
-    list_transfers, list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info,
-    node_info, open_channel, post_asset_media, refresh_transfers, restore, rgb_invoice, send_asset,
-    send_btc, send_onion_message, send_payment, shutdown, sign_message, sync, taker, unlock,
+    check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
+    decode_ln_invoice, decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers,
+    get_asset_media, get_channel_id, init, invoice_status, issue_asset_cfa, issue_asset_nia,
+    issue_asset_uda, keysend, list_assets, list_channels, list_payments, list_peers, list_swaps,
+    list_transactions, list_transfers, list_unspents, ln_invoice, lock, maker_execute, maker_init,
+    network_info, node_info, open_channel, post_asset_media, refresh_transfers, restore,
+    rgb_invoice, send_asset, send_btc, send_onion_message, send_payment, shutdown, sign_message,
+    sync, taker, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -97,6 +98,7 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/btcbalance", post(btc_balance))
         .route("/changepassword", post(change_password))
         .route("/checkindexerurl", post(check_indexer_url))
+        .route("/checkproxyendpoint", post(check_proxy_endpoint))
         .route("/closechannel", post(close_channel))
         .route("/connectpeer", post(connect_peer))
         .route("/createutxos", post(create_utxos))
