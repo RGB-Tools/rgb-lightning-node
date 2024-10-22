@@ -54,11 +54,12 @@ use rgb_lib::{
     },
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
-        rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
+        rust_only::{check_indexer_url, check_proxy_url, AssetColoringInfo, ColoringInfo},
         AssetIface, DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet,
         WalletData, WitnessData,
     },
     AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
+    RgbTransport,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -1413,24 +1414,37 @@ pub(crate) async fn start_ldk(
 
     // RGB setup
     let indexer_url = if let Some(indexer_url) = &unlock_request.indexer_url {
-        check_indexer_url(indexer_url, bitcoin_network)?;
+        let indexer_protocol = check_indexer_url(indexer_url, bitcoin_network)?;
+        tracing::info!(
+            "Connected to an indexer with the {} protocol",
+            indexer_protocol
+        );
         indexer_url
     } else {
+        tracing::info!("Using the default indexer");
         match bitcoin_network {
             BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
             BitcoinNetwork::Regtest => ELECTRUM_URL_REGTEST,
             _ => unimplemented!("unsupported network"),
         }
     };
-    let proxy_endpoint =
-        unlock_request
-            .proxy_endpoint
-            .as_deref()
-            .unwrap_or_else(|| match bitcoin_network {
-                BitcoinNetwork::Testnet => PROXY_ENDPOINT_TESTNET,
-                BitcoinNetwork::Regtest => PROXY_ENDPOINT_REGTEST,
-                _ => unimplemented!("unsupported network"),
-            });
+    let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
+        let rgb_transport =
+            RgbTransport::from_str(proxy_endpoint).map_err(|_| APIError::InvalidProxyEndpoint)?;
+        let proxy_url = TransportEndpoint::try_from(rgb_transport)?.endpoint;
+        tokio::task::spawn_blocking(move || check_proxy_url(&proxy_url))
+            .await
+            .unwrap()?;
+        tracing::info!("Using a custom proxy");
+        proxy_endpoint
+    } else {
+        tracing::info!("Using the default proxy");
+        match bitcoin_network {
+            BitcoinNetwork::Testnet => PROXY_ENDPOINT_TESTNET,
+            BitcoinNetwork::Regtest => PROXY_ENDPOINT_REGTEST,
+            _ => unimplemented!("unsupported network"),
+        }
+    };
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
     fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
     fs::write(

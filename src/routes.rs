@@ -1169,6 +1169,9 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InvalidIndexer { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidName { details } => APIError::InvalidName(details),
             RgbLibError::InvalidPrecision { details } => APIError::InvalidPrecision(details),
+            RgbLibError::InvalidProxyProtocol { version } => {
+                APIError::InvalidProxyProtocol(version)
+            }
             RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
             RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
             RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
@@ -1176,6 +1179,7 @@ impl From<RgbLibError> for APIError {
                 APIError::InvalidTransportEndpoints(details)
             }
             RgbLibError::MinFeeNotMet { txid } => APIError::MinFeeNotMet(txid),
+            RgbLibError::Proxy { details } => APIError::Proxy(details),
             RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
             _ => {

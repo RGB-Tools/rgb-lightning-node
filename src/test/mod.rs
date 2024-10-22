@@ -35,7 +35,7 @@ use crate::routes::{
     SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
     Transaction, Transfer, UnlockRequest, Unspent,
 };
-use crate::utils::{hex_str_to_vec, PROXY_ENDPOINT_REGTEST};
+use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_REGTEST};
 
 use super::*;
 
@@ -1341,8 +1341,8 @@ async fn unlock(node_address: SocketAddr, password: &str) {
         bitcoind_rpc_password: s!("password"),
         bitcoind_rpc_host: s!("localhost"),
         bitcoind_rpc_port: 18443,
-        indexer_url: None,
-        proxy_endpoint: None,
+        indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
+        proxy_endpoint: Some(PROXY_ENDPOINT_REGTEST.to_string()),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{}/unlock", node_address))

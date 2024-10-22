@@ -139,6 +139,14 @@ pub enum APIError {
     #[error("Invalid precision: {0}")]
     InvalidPrecision(String),
 
+    /// The provided proxy endpoint is invalid
+    #[error("Invalid proxy endpoint")]
+    InvalidProxyEndpoint,
+
+    /// The provided proxy is running an unsupported protocol version
+    #[error("Invalid proxy protocol version: {0}")]
+    InvalidProxyProtocol(String),
+
     #[error("Invalid pubkey")]
     InvalidPubkey,
 
@@ -201,6 +209,10 @@ pub enum APIError {
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
+
+    /// Error contacting the RGB proxy
+    #[error("Proxy error: {0}")]
+    Proxy(String),
 
     #[error("Recipient ID already used")]
     RecipientIDAlreadyUsed,
@@ -295,6 +307,8 @@ impl IntoResponse for APIError {
             | APIError::InsufficientAssets
             | APIError::InsufficientFunds(_)
             | APIError::InvalidIndexer(_)
+            | APIError::InvalidProxyEndpoint
+            | APIError::InvalidProxyProtocol(_)
             | APIError::LockedNode
             | APIError::MinFeeNotMet(_)
             | APIError::NetworkMismatch(_, _)
@@ -302,6 +316,7 @@ impl IntoResponse for APIError {
             | APIError::NoRoute
             | APIError::NotInitialized
             | APIError::OpenChannelInProgress
+            | APIError::Proxy(_)
             | APIError::RecipientIDAlreadyUsed
             | APIError::TemporaryChannelIdAlreadyUsed
             | APIError::UnknownContractId
