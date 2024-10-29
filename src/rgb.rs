@@ -229,9 +229,15 @@ impl UnlockedAppState {
         donation: bool,
         fee_rate: f32,
         min_confirmations: u8,
+        skip_sync: bool,
     ) -> Result<SendResult, RgbLibError> {
-        self.rgb_wallet_wrapper
-            .send(recipient_map, donation, fee_rate, min_confirmations)
+        self.rgb_wallet_wrapper.send(
+            recipient_map,
+            donation,
+            fee_rate,
+            min_confirmations,
+            skip_sync,
+        )
     }
 
     pub(crate) fn rgb_send_begin(
@@ -546,6 +552,7 @@ impl RgbLibWalletWrapper {
         donation: bool,
         fee_rate: f32,
         min_confirmations: u8,
+        skip_sync: bool,
     ) -> Result<SendResult, RgbLibError> {
         self.get_rgb_wallet().send(
             self.online.clone(),
@@ -553,7 +560,7 @@ impl RgbLibWalletWrapper {
             donation,
             fee_rate,
             min_confirmations,
-            false,
+            skip_sync,
         )
     }
 

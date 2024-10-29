@@ -870,6 +870,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) fee_rate: f32,
     pub(crate) min_confirmations: u8,
     pub(crate) transport_endpoints: Vec<String>,
+    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2941,6 +2942,7 @@ pub(crate) async fn send_asset(
                 payload.donation,
                 payload.fee_rate,
                 payload.min_confirmations,
+                payload.skip_sync,
             )
         })
         .await

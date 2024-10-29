@@ -1922,6 +1922,9 @@ components:
           items:
             type: string
             example: rpcs://proxy.iriswallet.com/0.2/json-rpc
+        skip_sync:
+          type: boolean
+          example: false
     SendAssetResponse:
       type: object
       properties:
