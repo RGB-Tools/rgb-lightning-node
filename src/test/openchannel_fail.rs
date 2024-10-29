@@ -22,6 +22,32 @@ async fn open_fail() {
 
     let node2_pubkey = node2_info.pubkey;
 
+    // open with unknown asset
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        capacity_sat: 100_000,
+        push_msat: 3_500_000,
+        asset_amount: Some(100),
+        asset_id: Some(s!("rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U")),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "Unknown RGB contract ID",
+    )
+    .await;
+
     // open with bad asset amount
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
