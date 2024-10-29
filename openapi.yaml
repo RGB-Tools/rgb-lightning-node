@@ -720,7 +720,7 @@ paths:
       description: Refresh RGB pending transfers
       requestBody:
         content:
-          multipart/form-data:
+          application/json:
             schema:
               $ref: '#/components/schemas/RefreshRequest'
       responses:
