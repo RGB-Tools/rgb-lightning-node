@@ -91,7 +91,7 @@ pub enum APIError {
     #[error("Not enough assets")]
     InsufficientAssets,
 
-    #[error("Not enough funds, call getaddress and send {0} satoshis")]
+    #[error("Not enough funds, get an address and send {0} sats there")]
     InsufficientFunds(u64),
 
     #[error("Invalid amount: {0}")]
