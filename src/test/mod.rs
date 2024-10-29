@@ -1,5 +1,6 @@
 use amplify::s;
 use electrum_client::ElectrumApi;
+use lazy_static::lazy_static;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use rgb_lib::BitcoinNetwork;
@@ -7,7 +8,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::sync::{Once, RwLock};
+use std::sync::{Mutex, Once, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
@@ -1592,6 +1593,20 @@ pub(crate) fn initialize() {
             panic!("failed to start test services");
         }
     });
+}
+
+lazy_static! {
+    static ref MOCK_FEE: Mutex<Option<u32>> = Mutex::new(None);
+}
+
+pub fn mock_fee(fee: u32) -> u32 {
+    let mock = MOCK_FEE.lock().unwrap().take();
+    if let Some(fee) = mock {
+        println!("mocking fee");
+        fee
+    } else {
+        fee
+    }
 }
 
 mod backup_and_restore;

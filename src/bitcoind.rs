@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::disk::FilesystemLogger;
+#[cfg(test)]
+use crate::test::mock_fee;
 
 pub struct BitcoindClient {
     pub(crate) bitcoind_rpc_client: Arc<RpcClient>,
@@ -277,10 +279,14 @@ impl BitcoindClient {
 
 impl FeeEstimator for BitcoindClient {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        self.fees
+        let fee = self
+            .fees
             .get(&confirmation_target)
             .unwrap()
-            .load(Ordering::Acquire)
+            .load(Ordering::Acquire);
+        #[cfg(test)]
+        let fee = mock_fee(fee);
+        fee
     }
 }
 

@@ -91,6 +91,9 @@ pub enum APIError {
     #[error("Not enough assets")]
     InsufficientAssets,
 
+    #[error("Insufficient capacity to cover the commitment transaction fees ({0} sat)")]
+    InsufficientCapacity(u64),
+
     #[error("Not enough funds, get an address and send {0} sats there")]
     InsufficientFunds(u64),
 
@@ -305,6 +308,7 @@ impl IntoResponse for APIError {
             | APIError::FailedBitcoindConnection(_)
             | APIError::Indexer(_)
             | APIError::InsufficientAssets
+            | APIError::InsufficientCapacity(_)
             | APIError::InsufficientFunds(_)
             | APIError::InvalidIndexer(_)
             | APIError::InvalidProxyEndpoint

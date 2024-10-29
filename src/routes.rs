@@ -32,13 +32,14 @@ use lightning::{
         router::{PaymentParameters, RouteParameters},
     },
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
-    util::IS_SWAP_SCID,
+    util::{errors::APIError as LDKAPIError, IS_SWAP_SCID},
 };
 use lightning_invoice::payment::{
     payment_parameters_from_invoice, payment_parameters_from_zero_amount_invoice,
 };
 use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
+use regex::Regex;
 use rgb_lib::{
     generate_keys,
     utils::recipient_id_from_script_buf,
@@ -2765,7 +2766,23 @@ pub(crate) async fn open_channel(
             .map_err(|e| {
                 *unlocked_state.rgb_send_lock.lock().unwrap() = false;
                 tracing::debug!("RGB send lock set to false (open channel failure: {e:?})");
-                APIError::FailedOpenChannel(format!("{:?}", e))
+                match e {
+                    LDKAPIError::APIMisuseError { err }
+                        if err.contains("fee for initial commitment transaction") =>
+                    {
+                        let mut commitment_tx_fee = 0;
+                        let re =
+                            Regex::new(r"fee for initial commitment transaction fee of (\d+).")
+                                .unwrap();
+                        if let Some(captures) = re.captures(&err) {
+                            if let Some(fee_str) = captures.get(1) {
+                                commitment_tx_fee = fee_str.as_str().parse().unwrap();
+                            }
+                        }
+                        APIError::InsufficientCapacity(commitment_tx_fee)
+                    }
+                    _ => APIError::FailedOpenChannel(format!("{:?}", e)),
+                }
             })?;
         let temporary_channel_id = temporary_channel_id.0.as_hex().to_string();
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
