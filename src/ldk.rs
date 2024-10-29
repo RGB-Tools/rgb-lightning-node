@@ -55,8 +55,8 @@ use rgb_lib::{
     utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
-        AssetIface, DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet,
-        WalletData, WitnessData,
+        DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
+        WitnessData,
     },
     AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
 };
@@ -1288,7 +1288,6 @@ impl OutputSpender for RgbOutputSpender {
             asset_info_map.insert(
                 contract_id,
                 AssetColoringInfo {
-                    iface: AssetIface::RGB20,
                     output_map: HashMap::from_iter([(vout, amt_rgb)]),
                     input_outpoints,
                     static_blinding: None,

@@ -16,7 +16,8 @@ async fn close_coop_zero_balance() {
     fund_and_create_utxos(node1_addr, None).await;
     fund_and_create_utxos(node2_addr, None).await;
 
-    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
+    // issuing uda to be sure we support also channels with assets != nia
+    let asset_id = issue_asset_uda(node1_addr, None).await.asset_id;
 
     let node2_pubkey = node_info(node2_addr).await.pubkey;
 
@@ -26,23 +27,23 @@ async fn close_coop_zero_balance() {
         Some(NODE2_PEER_PORT),
         None,
         None,
-        Some(1000),
+        Some(1),
         Some(&asset_id),
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 0);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
-    wait_for_balance(node1_addr, &asset_id, 1000).await;
+    wait_for_balance(node1_addr, &asset_id, 1).await;
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 0);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 700, recipient_id).await;
+    send_asset(node1_addr, &asset_id, 1, recipient_id).await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
     refresh_transfers(node1_addr).await;
 
-    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 300);
-    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 700);
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 0);
+    assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 1);
 }
