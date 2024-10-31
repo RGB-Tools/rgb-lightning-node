@@ -16,7 +16,7 @@ pub(crate) struct APIErrorResponse {
 /// The error variants returned by APIs
 #[derive(Debug, thiserror::Error)]
 pub enum APIError {
-    #[error("Allocacations already available")]
+    #[error("Allocations already available")]
     AllocationsAlreadyAvailable,
 
     #[error("Node has already been initialized")]
