@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct APIErrorResponse {
     pub(crate) error: String,
     pub(crate) code: u16,
+    pub(crate) name: String,
 }
 
 /// The error variants returned by APIs
@@ -245,12 +246,20 @@ pub enum APIError {
     WrongPassword,
 }
 
+impl APIError {
+    fn name(&self) -> String {
+        format!("{:?}", self).split('(').next().unwrap().to_string()
+    }
+}
+
 impl IntoResponse for APIError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            APIError::JsonExtractorRejection(json_rejection) => {
-                (json_rejection.status(), json_rejection.body_text())
-            }
+        let (status, error, name) = match self {
+            APIError::JsonExtractorRejection(ref json_rejection) => (
+                json_rejection.status(),
+                json_rejection.body_text(),
+                self.name(),
+            ),
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
@@ -263,7 +272,11 @@ impl IntoResponse for APIError {
             | APIError::FailedSendingOnionMessage(_)
             | APIError::FailedStartingLDK(_)
             | APIError::IO(_)
-            | APIError::Unexpected => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            | APIError::Unexpected => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                self.to_string(),
+                self.name(),
+            ),
             APIError::AnchorsRequired
             | APIError::ExpiredSwapOffer
             | APIError::IncompleteRGBInfo
@@ -294,9 +307,9 @@ impl IntoResponse for APIError {
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
             | APIError::UnsupportedBackupVersion { .. } => {
-                (StatusCode::BAD_REQUEST, self.to_string())
+                (StatusCode::BAD_REQUEST, self.to_string(), self.name())
             }
-            APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string()),
+            APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string(), self.name()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::BatchTransferNotFound
@@ -326,13 +339,14 @@ impl IntoResponse for APIError {
             | APIError::UnknownContractId
             | APIError::UnknownLNInvoice
             | APIError::UnknownTemporaryChannelId
-            | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string()),
+            | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string(), self.name()),
         };
 
         let body = Json(
             serde_json::to_value(APIErrorResponse {
-                error: error_message,
+                error,
                 code: status.as_u16(),
+                name,
             })
             .unwrap(),
         );

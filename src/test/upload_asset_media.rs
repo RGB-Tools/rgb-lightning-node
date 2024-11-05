@@ -73,6 +73,7 @@ async fn fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Media file has not been provided",
+        "MediaFileNotProvided",
     )
     .await;
 
@@ -86,7 +87,13 @@ async fn fail() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Media file is empty").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Media file is empty",
+        "MediaFileEmpty",
+    )
+    .await;
 
     // upload asset media bigger than the size limit
     let file_bytes = vec![4; 3 * 1024 * 1024];

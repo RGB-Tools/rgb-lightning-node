@@ -78,6 +78,7 @@ async fn issue() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid media digest",
+        "InvalidMediaDigest",
     )
     .await;
 
@@ -92,6 +93,7 @@ async fn issue() {
         res,
         reqwest::StatusCode::INTERNAL_SERVER_ERROR,
         "IO error: Is a directory (os error 21)",
+        "IO",
     )
     .await;
 }

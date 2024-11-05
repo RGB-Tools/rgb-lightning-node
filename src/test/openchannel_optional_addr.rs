@@ -46,6 +46,7 @@ async fn openchannel_optional_addr_forward() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid peer info: cannot find the address for the provided pubkey",
+        "InvalidPeerInfo",
     )
     .await;
 
@@ -128,6 +129,7 @@ async fn openchannel_optional_addr_reverse() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid peer info: cannot find the address for the provided pubkey",
+        "InvalidPeerInfo",
     )
     .await;
 

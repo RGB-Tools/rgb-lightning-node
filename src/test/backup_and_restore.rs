@@ -60,7 +60,13 @@ async fn backup_and_restore() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid backup path").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid backup path",
+        "InvalidBackupPath",
+    )
+    .await;
 
     shutdown(&[node1_addr, node2_addr]).await;
 

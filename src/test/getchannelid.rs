@@ -75,7 +75,13 @@ async fn getchannelid_fail() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid channel ID").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid channel ID",
+        "InvalidChannelID",
+    )
+    .await;
 
     // get channel ID from invalid (short) temporary channel ID
     println!("\ngetting channel ID for a short temporary one");
@@ -89,7 +95,13 @@ async fn getchannelid_fail() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid channel ID").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid channel ID",
+        "InvalidChannelID",
+    )
+    .await;
 
     // get channel ID from unknown temporary channel ID
     println!("\ngetting channel ID for an unknown temporary one");
@@ -108,6 +120,7 @@ async fn getchannelid_fail() {
         res,
         reqwest::StatusCode::FORBIDDEN,
         "Unknown temporary channel ID",
+        "UnknownTemporaryChannelId",
     )
     .await;
 }

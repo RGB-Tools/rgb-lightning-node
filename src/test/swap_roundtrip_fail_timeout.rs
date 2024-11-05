@@ -125,6 +125,7 @@ async fn swap_roundtrip_fail_timeout() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "The swap offer has expired",
+        "ExpiredSwapOffer",
     )
     .await;
 

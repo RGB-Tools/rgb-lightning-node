@@ -88,11 +88,13 @@ async fn check_response_is_nok(
     res: reqwest::Response,
     expected_status: reqwest::StatusCode,
     expected_message: &str,
+    expected_name: &str,
 ) {
     assert_eq!(res.status(), expected_status);
     let api_error_response = res.json::<APIErrorResponse>().await.unwrap();
     assert_eq!(api_error_response.code, expected_status.as_u16());
     assert_eq!(api_error_response.error, expected_message);
+    assert_eq!(api_error_response.name, expected_name);
 }
 
 fn _fund_wallet(address: String) {

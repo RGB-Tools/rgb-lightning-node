@@ -45,6 +45,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::FORBIDDEN,
         "Unknown RGB contract ID",
+        "UnknownContractId",
     )
     .await;
 
@@ -71,6 +72,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid amount: Channel RGB amount must be equal to or higher than 1",
+        "InvalidAmount",
     )
     .await;
 
@@ -102,6 +104,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid asset ID: bad asset ID",
+        "InvalidAssetID",
     )
     .await;
 
@@ -133,6 +136,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid amount: Channel amount must be equal to or higher than 5506 sats",
+        "InvalidAmount",
     )
     .await;
 
@@ -164,6 +168,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Invalid amount: Channel amount must be equal to or less than 16777215 sats",
+        "InvalidAmount",
     )
     .await;
 
@@ -195,6 +200,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::BAD_REQUEST,
         "Anchor outputs are required for RGB channels",
+        "AnchorsRequired",
     )
     .await;
 
@@ -228,6 +234,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::FORBIDDEN,
         "Insufficient capacity to cover the commitment transaction fees (9920 sat)",
+        "InsufficientCapacity",
     )
     .await;
 
@@ -255,7 +262,13 @@ async fn open_fail() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::FORBIDDEN, "Not enough assets").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "Not enough assets",
+        "InsufficientAssets",
+    )
+    .await;
 
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;
@@ -285,6 +298,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::FORBIDDEN,
         "Cannot open channel: InsufficientAllocationSlots",
+        "CannotOpenChannel",
     )
     .await;
 
@@ -312,7 +326,13 @@ async fn open_fail() {
         .send()
         .await
         .unwrap();
-    check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, "Invalid channel ID").await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid channel ID",
+        "InvalidChannelID",
+    )
+    .await;
 
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;
@@ -363,6 +383,7 @@ async fn open_fail() {
         res,
         reqwest::StatusCode::FORBIDDEN,
         "Cannot perform this operation while an open channel operation is in progress",
+        "OpenChannelInProgress",
     )
     .await;
 
