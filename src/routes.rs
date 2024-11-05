@@ -2745,8 +2745,7 @@ pub(crate) async fn open_channel(
                 )
             })
             .await
-            .unwrap()
-            .map_err(|e| APIError::CannotOpenChannel(format!("{:?}", e)))?;
+            .unwrap()?;
         }
 
         *unlocked_state.rgb_send_lock.lock().unwrap() = true;

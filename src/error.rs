@@ -35,9 +35,6 @@ pub enum APIError {
     #[error("Batch transfer cannot be set to failed status")]
     CannotFailBatchTransfer,
 
-    #[error("Cannot open channel: {0}")]
-    CannotOpenChannel(String),
-
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
@@ -315,7 +312,6 @@ impl IntoResponse for APIError {
             | APIError::BatchTransferNotFound
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
-            | APIError::CannotOpenChannel(_)
             | APIError::ChangingState
             | APIError::FailedBroadcast(_)
             | APIError::FailedBitcoindConnection(_)

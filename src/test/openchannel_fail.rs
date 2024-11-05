@@ -297,8 +297,8 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::FORBIDDEN,
-        "Cannot open channel: InsufficientAllocationSlots",
-        "CannotOpenChannel",
+        "No uncolored UTXOs are available (hint: call createutxos)",
+        "NoAvailableUtxos",
     )
     .await;
 
