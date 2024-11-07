@@ -1718,14 +1718,29 @@ pub(crate) async fn start_ldk(
             ));
         }
 
-        init::synchronize_listeners(
-            bitcoind_client.as_ref(),
-            network,
-            &mut cache,
-            chain_listeners,
-        )
-        .await
-        .unwrap()
+        let mut attempts = 3;
+        loop {
+            match init::synchronize_listeners(
+                bitcoind_client.as_ref(),
+                network,
+                &mut cache,
+                chain_listeners.clone(),
+            )
+            .await
+            {
+                Ok(res) => break res,
+                Err(e) => {
+                    tracing::error!("Error synchronizing chain: {:?}", e);
+                    attempts -= 1;
+                    if attempts == 0 {
+                        return Err(APIError::FailedBitcoindConnection(
+                            e.into_inner().to_string(),
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
     } else {
         polled_chain_tip
     };
@@ -1835,7 +1850,9 @@ pub(crate) async fn start_ldk(
             if stop_listen.load(Ordering::Acquire) {
                 return;
             }
-            spv_client.poll_best_tip().await.unwrap();
+            if let Err(e) = spv_client.poll_best_tip().await {
+                tracing::error!("Error while polling best tip: {:?}", e);
+            }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
