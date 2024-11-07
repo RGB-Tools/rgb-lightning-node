@@ -26,6 +26,9 @@ pub enum APIError {
     #[error("Anchor outputs are required for RGB channels")]
     AnchorsRequired,
 
+    #[error("Node has already been unlocked")]
+    AlreadyUnlocked,
+
     #[error("Batch transfer not found")]
     BatchTransferNotFound,
 
@@ -312,6 +315,7 @@ impl IntoResponse for APIError {
             APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string(), self.name()),
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
+            | APIError::AlreadyUnlocked
             | APIError::BatchTransferNotFound
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer

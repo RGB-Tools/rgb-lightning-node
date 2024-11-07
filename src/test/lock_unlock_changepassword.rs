@@ -79,4 +79,14 @@ async fn lock_unlock_changepassword() {
 
     unlock(node1_addr, &new_password).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 1000);
+
+    // unlock an already unlocked node
+    let res = unlock_res(node1_addr, &new_password).await;
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "Node has already been unlocked",
+        "AlreadyUnlocked",
+    )
+    .await;
 }

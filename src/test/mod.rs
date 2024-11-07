@@ -3,6 +3,7 @@ use electrum_client::ElectrumApi;
 use lazy_static::lazy_static;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
+use reqwest::Response;
 use rgb_lib::BitcoinNetwork;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -77,7 +78,7 @@ fn _bitcoin_cli() -> [String; 7] {
     ]
 }
 
-async fn _check_response_is_ok(res: reqwest::Response) -> reqwest::Response {
+async fn _check_response_is_ok(res: Response) -> Response {
     if res.status() != reqwest::StatusCode::OK {
         panic!("reqwest response is not OK: {:?}", res.text().await);
     }
@@ -85,7 +86,7 @@ async fn _check_response_is_ok(res: reqwest::Response) -> reqwest::Response {
 }
 
 async fn check_response_is_nok(
-    res: reqwest::Response,
+    res: Response,
     expected_status: reqwest::StatusCode,
     expected_message: &str,
     expected_name: &str,
@@ -906,7 +907,7 @@ async fn maker_execute_raw(
     swapstring: String,
     payment_secret: String,
     taker_pubkey: String,
-) -> reqwest::Response {
+) -> Response {
     println!("executing swap {swapstring} from node {node_address}");
     let payload = MakerExecuteRequest {
         swapstring,
@@ -1337,7 +1338,7 @@ async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
         .unwrap()
 }
 
-async fn unlock(node_address: SocketAddr, password: &str) {
+async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
     println!("unlocking node {node_address}");
     let payload = UnlockRequest {
         password: password.to_string(),
@@ -1348,12 +1349,17 @@ async fn unlock(node_address: SocketAddr, password: &str) {
         indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
         proxy_endpoint: Some(PROXY_ENDPOINT_REGTEST.to_string()),
     };
-    let res = reqwest::Client::new()
+    reqwest::Client::new()
         .post(format!("http://{}/unlock", node_address))
         .json(&payload)
         .send()
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn unlock(node_address: SocketAddr, password: &str) {
+    println!("unlocking node {node_address}");
+    let res = unlock_res(node_address, password).await;
     _check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()

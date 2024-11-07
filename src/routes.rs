@@ -3315,7 +3315,10 @@ pub(crate) async fn unlock(
                 drop(unlocked_state);
             }
             Err(e) => {
-                return Err(e);
+                return Err(match e {
+                    APIError::UnlockedNode => APIError::AlreadyUnlocked,
+                    _ => e,
+                });
             }
         }
 
