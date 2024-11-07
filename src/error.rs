@@ -267,7 +267,6 @@ impl IntoResponse for APIError {
             | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
             | APIError::FailedPayment(_)
-            | APIError::FailedPeerConnection
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
             | APIError::FailedStartingLDK(_)
@@ -319,6 +318,7 @@ impl IntoResponse for APIError {
             | APIError::ChangingState
             | APIError::FailedBroadcast(_)
             | APIError::FailedBitcoindConnection(_)
+            | APIError::FailedPeerConnection
             | APIError::Indexer(_)
             | APIError::InsufficientAssets
             | APIError::InsufficientCapacity(_)
