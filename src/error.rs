@@ -95,6 +95,9 @@ pub enum APIError {
     #[error("Not enough funds, get an address and send {0} sats there")]
     InsufficientFunds(u64),
 
+    #[error("Invalid address: {0}")]
+    InvalidAddress(String),
+
     #[error("Invalid amount: {0}")]
     InvalidAmount(String),
 
@@ -277,6 +280,7 @@ impl IntoResponse for APIError {
             APIError::AnchorsRequired
             | APIError::ExpiredSwapOffer
             | APIError::IncompleteRGBInfo
+            | APIError::InvalidAddress(_)
             | APIError::InvalidAmount(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidBackupPath

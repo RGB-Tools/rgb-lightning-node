@@ -1172,6 +1172,7 @@ impl From<RgbLibError> for APIError {
             }
             RgbLibError::InsufficientSpendableAssets { .. } => APIError::InsufficientAssets,
             RgbLibError::InsufficientTotalAssets { .. } => APIError::InsufficientAssets,
+            RgbLibError::InvalidAddress { details } => APIError::InvalidAddress(details),
             RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
             RgbLibError::InvalidElectrum { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
