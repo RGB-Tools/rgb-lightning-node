@@ -3,7 +3,7 @@ use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::hash_types::{BlockHash, Txid};
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
-use lightning::log_error;
+use lightning::log_warn;
 use lightning::util::logger::Logger;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::http::JsonResponse;
@@ -171,6 +171,7 @@ impl BitcoindClient {
         BitcoindClient::poll_for_fee_estimates(
             client.fees.clone(),
             client.bitcoind_rpc_client.clone(),
+            client.logger.clone(),
             handle,
         );
         Ok(client)
@@ -179,68 +180,78 @@ impl BitcoindClient {
     fn poll_for_fee_estimates(
         fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
         rpc_client: Arc<RpcClient>,
+        logger: Arc<FilesystemLogger>,
         handle: tokio::runtime::Handle,
     ) {
         handle.spawn(async move {
+            async fn get_estimate(
+                rpc_client: &Arc<RpcClient>,
+                logger: &Arc<FilesystemLogger>,
+                params: &[serde_json::Value],
+                default: u32,
+            ) -> u32 {
+                match rpc_client
+                    .call_method::<FeeResponse>("estimatesmartfee", params)
+                    .await
+                {
+                    Ok(res) => match res.feerate_sat_per_kw {
+                        Some(feerate) => Some(std::cmp::max(feerate, MIN_FEERATE)),
+                        None => {
+                            log_warn!(logger, "Fee estimation unavailable");
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        log_warn!(logger, "Error getting fee estimate: {}", e);
+                        None
+                    }
+                }
+                .unwrap_or(default)
+            }
+
             loop {
                 let mempoolmin_estimate = {
-                    let resp = rpc_client
+                    match rpc_client
                         .call_method::<MempoolMinFeeResponse>("getmempoolinfo", &[])
                         .await
-                        .unwrap();
-                    match resp.feerate_sat_per_kw {
-                        Some(feerate) => std::cmp::max(feerate, MIN_FEERATE),
-                        None => MIN_FEERATE,
+                    {
+                        Ok(res) => match res.feerate_sat_per_kw {
+                            Some(feerate) => Some(std::cmp::max(feerate, MIN_FEERATE)),
+                            None => {
+                                log_warn!(logger, "Mempool info unavailable");
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            log_warn!(logger, "Error getting mepool info: {}", e);
+                            None
+                        }
                     }
+                    .unwrap_or(MIN_FEERATE)
                 };
-                let background_estimate = {
-                    let background_conf_target = serde_json::json!(144);
-                    let background_estimate_mode = serde_json::json!("ECONOMICAL");
-                    let resp = rpc_client
-                        .call_method::<FeeResponse>(
-                            "estimatesmartfee",
-                            &[background_conf_target, background_estimate_mode],
-                        )
-                        .await
-                        .unwrap();
-                    match resp.feerate_sat_per_kw {
-                        Some(feerate) => std::cmp::max(feerate, MIN_FEERATE),
-                        None => MIN_FEERATE,
-                    }
-                };
+                let background_estimate = get_estimate(
+                    &rpc_client,
+                    &logger,
+                    &[serde_json::json!(144), serde_json::json!("ECONOMICAL")],
+                    MIN_FEERATE,
+                )
+                .await;
 
-                let normal_estimate = {
-                    let normal_conf_target = serde_json::json!(18);
-                    let normal_estimate_mode = serde_json::json!("ECONOMICAL");
-                    let resp = rpc_client
-                        .call_method::<FeeResponse>(
-                            "estimatesmartfee",
-                            &[normal_conf_target, normal_estimate_mode],
-                        )
-                        .await
-                        .unwrap();
-                    match resp.feerate_sat_per_kw {
-                        Some(feerate) => std::cmp::max(feerate, MIN_FEERATE),
-                        None => 2000,
-                    }
-                };
+                let normal_estimate = get_estimate(
+                    &rpc_client,
+                    &logger,
+                    &[serde_json::json!(18), serde_json::json!("ECONOMICAL")],
+                    2000,
+                )
+                .await;
 
-                let high_prio_estimate = {
-                    let high_prio_conf_target = serde_json::json!(6);
-                    let high_prio_estimate_mode = serde_json::json!("CONSERVATIVE");
-                    let resp = rpc_client
-                        .call_method::<FeeResponse>(
-                            "estimatesmartfee",
-                            &[high_prio_conf_target, high_prio_estimate_mode],
-                        )
-                        .await
-                        .unwrap();
-
-                    match resp.feerate_sat_per_kw {
-                        Some(feerate) => std::cmp::max(feerate, MIN_FEERATE),
-                        None => 5000,
-                    }
-                };
+                let high_prio_estimate = get_estimate(
+                    &rpc_client,
+                    &logger,
+                    &[serde_json::json!(6), serde_json::json!("CONSERVATIVE")],
+                    5000,
+                )
+                .await;
 
                 fees.get(&ConfirmationTarget::OnChainSweep)
                     .unwrap()
@@ -309,7 +320,7 @@ impl BroadcasterInterface for BitcoindClient {
                         Ok(_) => {}
                         Err(e) => {
                             let err_str = e.get_ref().unwrap().to_string();
-                            log_error!(logger,
+                            log_warn!(logger,
                                        "Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransaction: {}",
                                        err_str,
                                        tx_serialized);
