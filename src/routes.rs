@@ -2645,6 +2645,12 @@ pub(crate) async fn open_channel(
             )));
         }
 
+        if payload.push_msat > payload.capacity_sat * 1000 {
+            return Err(APIError::InvalidAmount(s!(
+                "Channel push amount cannot be higher than the capacity"
+            )));
+        }
+
         if !payload.with_anchors {
             return Err(APIError::AnchorsRequired);
         }

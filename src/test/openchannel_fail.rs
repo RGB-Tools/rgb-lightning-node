@@ -22,6 +22,40 @@ async fn open_fail() {
 
     let node2_pubkey = node2_info.pubkey;
 
+    // open with insufficient allocation slots
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        capacity_sat: 100_000,
+        push_msat: 3_500_000,
+        asset_amount: Some(100),
+        asset_id: Some(asset_id.clone()),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "No uncolored UTXOs are available (hint: call createutxos)",
+        "NoAvailableUtxos",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
+    fund_and_create_utxos(node1_addr, Some(9)).await;
+
     // open with unknown asset
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
@@ -177,6 +211,72 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
+    // open with invalid push BTC amount (too high)
+    println!("setting MOCK_FEE");
+    *MOCK_FEE.lock().unwrap() = Some(1000);
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        capacity_sat: 100_000,
+        push_msat: 100_000_000,
+        asset_amount: Some(100),
+        asset_id: Some(asset_id.clone()),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "Insufficient capacity to cover the commitment transaction fees (1984 sat)",
+        "InsufficientCapacity",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
+    // open with invalid push BTC amount (higher than capacity)
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        capacity_sat: 100_000,
+        push_msat: 100_000_001,
+        asset_amount: Some(100),
+        asset_id: Some(asset_id.clone()),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/openchannel", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid amount: Channel push amount cannot be higher than the capacity",
+        "InvalidAmount",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
     // open an RGB channel with anchors disabled
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
@@ -275,38 +375,6 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
-    // open with insufficient allocation slots
-    let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
-        capacity_sat: 100_000,
-        push_msat: 3_500_000,
-        asset_amount: Some(100),
-        asset_id: Some(asset_id.clone()),
-        public: true,
-        with_anchors: true,
-        fee_base_msat: None,
-        fee_proportional_millionths: None,
-        temporary_channel_id: None,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    check_response_is_nok(
-        res,
-        reqwest::StatusCode::FORBIDDEN,
-        "No uncolored UTXOs are available (hint: call createutxos)",
-        "NoAvailableUtxos",
-    )
-    .await;
-
-    let channels_1 = list_channels(node1_addr).await;
-    let channels_2 = list_channels(node2_addr).await;
-    assert_eq!(channels_1.len(), 0);
-    assert_eq!(channels_2.len(), 0);
-
     // open with an invalid temporary channel id
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
@@ -339,7 +407,6 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
-    fund_and_create_utxos(node1_addr, Some(9)).await;
     // open a 1st channel (success)
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
