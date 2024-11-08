@@ -80,9 +80,6 @@ pub enum APIError {
     #[error("Failed to send onion message: {0}")]
     FailedSendingOnionMessage(String),
 
-    #[error("Failed to start LDK: {0}")]
-    FailedStartingLDK(String),
-
     #[error("For an RGB operation both asset_id and asset_amount must be set")]
     IncompleteRGBInfo,
 
@@ -272,7 +269,6 @@ impl IntoResponse for APIError {
             | APIError::FailedPayment(_)
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
-            | APIError::FailedStartingLDK(_)
             | APIError::IO(_)
             | APIError::Unexpected => (
                 StatusCode::INTERNAL_SERVER_ERROR,

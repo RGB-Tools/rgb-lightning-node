@@ -1614,9 +1614,7 @@ pub(crate) async fn start_ldk(
     })
     .await
     .unwrap();
-    let rgb_online = rgb_wallet
-        .go_online(false, indexer_url.to_string())
-        .map_err(|e| APIError::FailedStartingLDK(e.to_string()))?;
+    let rgb_online = rgb_wallet.go_online(false, indexer_url.to_string())?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
         account_xpub.fingerprint().to_string(),
