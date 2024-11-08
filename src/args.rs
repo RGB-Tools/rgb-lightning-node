@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::error::AppError;
+use crate::utils::check_port_is_available;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -58,8 +59,9 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
     }
 
     let daemon_listening_port = args.daemon_listening_port;
-
+    check_port_is_available(daemon_listening_port)?;
     let ldk_peer_listening_port = args.ldk_peer_listening_port;
+    check_port_is_available(ldk_peer_listening_port)?;
 
     let ldk_announced_node_name = match args.announced_node_name {
         Some(s) => {

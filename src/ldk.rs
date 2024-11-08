@@ -87,8 +87,8 @@ use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLib
 use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
-    connect_peer_if_necessary, do_connect_peer, get_current_timestamp, hex_str, AppState,
-    StaticState, UnlockedAppState, ELECTRUM_URL_REGTEST, ELECTRUM_URL_TESTNET,
+    check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
+    hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_REGTEST, ELECTRUM_URL_TESTNET,
     PROXY_ENDPOINT_REGTEST, PROXY_ENDPOINT_TESTNET,
 };
 
@@ -2072,12 +2072,9 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     }
 
     // connect to the peer port so it can be released
-    let peer_port = &app_state.static_state.ldk_peer_listening_port;
-    let sock_addr = SocketAddr::new(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-        *peer_port,
-    );
-    let _ = std::net::TcpStream::connect(sock_addr);
+    let peer_port = app_state.static_state.ldk_peer_listening_port;
+    let sock_addr = SocketAddr::from(([127, 0, 0, 1], peer_port));
+    let _ = check_port_is_available(peer_port);
     // check the peer port has been released
     let t_0 = OffsetDateTime::now_utc();
     loop {

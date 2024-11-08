@@ -19,7 +19,7 @@ use rgb_lib::{bdk::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
 use std::{
     fmt::Write,
     fs,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     path::PathBuf,
     str::FromStr,
@@ -187,6 +187,13 @@ pub(crate) fn check_channel_id(channel_id_str: &str) -> Result<ChannelId, APIErr
     } else {
         Err(APIError::InvalidChannelID)
     }
+}
+
+pub(crate) fn check_port_is_available(port: u16) -> Result<(), AppError> {
+    if TcpStream::connect(SocketAddr::from(([127, 0, 0, 1], port))).is_ok() {
+        return Err(AppError::UnavailablePort(port));
+    }
+    Ok(())
 }
 
 pub(crate) fn get_mnemonic_path(storage_dir_path: &Path) -> PathBuf {
