@@ -44,6 +44,9 @@ pub enum APIError {
     #[error("The swap offer has expired")]
     ExpiredSwapOffer,
 
+    #[error("Failed to sync BDK: {0}")]
+    FailedBdkSync(String),
+
     #[error("Failed to connect to bitcoind client: {0}")]
     FailedBitcoindConnection(String),
 
@@ -316,8 +319,9 @@ impl IntoResponse for APIError {
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
             | APIError::ChangingState
-            | APIError::FailedBroadcast(_)
+            | APIError::FailedBdkSync(_)
             | APIError::FailedBitcoindConnection(_)
+            | APIError::FailedBroadcast(_)
             | APIError::FailedPeerConnection
             | APIError::Indexer(_)
             | APIError::InsufficientAssets

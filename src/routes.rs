@@ -1163,6 +1163,7 @@ impl From<RgbLibError> for APIError {
             RgbLibError::BatchTransferNotFound { .. } => APIError::BatchTransferNotFound,
             RgbLibError::CannotEstimateFees => APIError::CannotEstimateFees,
             RgbLibError::CannotFailBatchTransfer => APIError::CannotFailBatchTransfer,
+            RgbLibError::FailedBdkSync { details } => APIError::FailedBdkSync(details),
             RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
             RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
             RgbLibError::Indexer { details } => APIError::Indexer(details),
