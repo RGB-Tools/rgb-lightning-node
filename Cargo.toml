@@ -50,6 +50,7 @@ tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 typenum = "1.17.0"
+uuid = { version = "1.11.0", default-features = false, features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "2.2.0", default-features = false, features = ["time", "zstd"] }
 

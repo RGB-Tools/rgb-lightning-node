@@ -15,6 +15,8 @@ mod test;
 use anyhow::Result;
 use axum::{
     extract::DefaultBodyLimit,
+    http::Request,
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -22,8 +24,16 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::trace::{self, TraceLayer};
-use tracing_subscriber::{filter, prelude::*};
+use tower_http::trace::TraceLayer;
+use tracing::Span;
+use tracing_subscriber::{
+    filter,
+    fmt::{
+        format::{DefaultFields, Writer},
+        FormatFields,
+    },
+    prelude::*,
+};
 
 use crate::args::LdkUserInfo;
 use crate::error::AppError;
@@ -46,7 +56,7 @@ async fn main() -> Result<()> {
     let args = args::parse_startup_args()?;
 
     // stdout logger
-    let stdout_log = tracing_subscriber::fmt::layer();
+    let stdout_log = tracing_subscriber::fmt::layer().fmt_fields(TypedFields::default());
 
     // file logger
     let log_dir = args.storage_dir_path.join(LOGS_DIR);
@@ -144,8 +154,21 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/unlock", post(unlock))
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
-                .on_response(trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
+                .make_span_with(|request: &Request<_>| {
+                    tracing::info_span!(
+                        "request",
+                        status_code = tracing::field::Empty,
+                        uri = tracing::field::display(request.uri()),
+                        request_id = tracing::field::display(uuid::Uuid::new_v4()),
+                    )
+                })
+                .on_request(|_request: &Request<_>, _span: &Span| {
+                    tracing::info!("STARTED");
+                })
+                .on_response(|response: &Response, latency: Duration, span: &Span| {
+                    span.record("status_code", tracing::field::display(response.status()));
+                    tracing::info!("ENDED in {:?}", latency);
+                }),
         )
         .layer(CorsLayer::permissive())
         .with_state(app_state.clone());
@@ -205,4 +228,18 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
     stop_ldk(app_state.clone()).await;
+}
+
+// workaround for https://github.com/tokio-rs/tracing/issues/1372
+#[derive(Default)]
+struct TypedFields(DefaultFields);
+
+impl<'writer> FormatFields<'writer> for TypedFields {
+    fn format_fields<R: tracing_subscriber::field::RecordFields>(
+        &self,
+        writer: Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        self.0.format_fields(writer, fields)
+    }
 }

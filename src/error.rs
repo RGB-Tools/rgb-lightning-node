@@ -342,6 +342,10 @@ impl IntoResponse for APIError {
             | APIError::UnlockedNode => (StatusCode::FORBIDDEN, self.to_string(), self.name()),
         };
 
+        let error = error.replace("\n", " ");
+
+        tracing::error!("APIError: {error}");
+
         let body = Json(
             serde_json::to_value(APIErrorResponse {
                 error,
