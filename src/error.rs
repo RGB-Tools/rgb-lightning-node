@@ -251,7 +251,14 @@ pub enum APIError {
 
 impl APIError {
     fn name(&self) -> String {
-        format!("{:?}", self).split('(').next().unwrap().to_string()
+        format!("{:?}", self)
+            .split('(')
+            .next()
+            .unwrap()
+            .split(" {")
+            .next()
+            .unwrap()
+            .to_string()
     }
 }
 
