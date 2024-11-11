@@ -1195,7 +1195,7 @@ impl From<RgbLibError> for APIError {
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
             _ => {
                 tracing::debug!("Unexpected rgb-lib error: {error:?}");
-                APIError::Unexpected
+                APIError::Unexpected(format!("Unmapped rgb-lib error: {error:?}"))
             }
         }
     }
@@ -2837,7 +2837,10 @@ pub(crate) async fn post_asset_media(
             .await
             .map_err(|_| APIError::MediaFileNotProvided)?
         {
-            let file_bytes = field.bytes().await.map_err(|_| APIError::Unexpected)?;
+            let file_bytes = field
+                .bytes()
+                .await
+                .map_err(|e| APIError::Unexpected(format!("Failed to read bytes: {e}")))?;
             if file_bytes.is_empty() {
                 return Err(APIError::MediaFileEmpty);
             }

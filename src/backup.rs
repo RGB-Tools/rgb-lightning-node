@@ -1,3 +1,4 @@
+use amplify::s;
 use chacha20poly1305::aead::{generic_array::GenericArray, stream};
 use chacha20poly1305::{Key, KeyInit, XChaCha20Poly1305};
 use rand::{distributions::Alphanumeric, Rng};
@@ -107,7 +108,7 @@ pub(crate) fn restore_backup(
     tracing::debug!("using retrieved salt: {}", &salt);
     let version = read_to_string(files.version)?
         .parse::<u8>()
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| APIError::Unexpected(format!("Failed to get backup version: {e}")))?;
     tracing::debug!("retrieved version: {}", &version);
     if version != BACKUP_VERSION {
         return Err(APIError::UnsupportedBackupVersion {
@@ -147,7 +148,7 @@ fn _get_parent_path(file: &Path) -> Result<PathBuf, APIError> {
     if let Some(parent) = file.parent() {
         Ok(parent.to_path_buf())
     } else {
-        Err(APIError::Unexpected)
+        Err(APIError::Unexpected(s!("Failed to get parent path")))
     }
 }
 
@@ -164,15 +165,18 @@ fn _zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
         let path = entry.path();
         let name = path
             .strip_prefix(path_in)
-            .map_err(|_| APIError::Unexpected)?;
-        let name_str = name.to_str().ok_or_else(|| APIError::Unexpected)?;
+            .map_err(|e| APIError::Unexpected(format!("Failed to get file name: {e}")))?;
+        let name_str = name
+            .to_str()
+            .ok_or_else(|| APIError::Unexpected(s!("Failed to convert file name to string")))?;
         if path.is_file() {
             if path.ends_with("log") {
                 continue;
             }
             tracing::debug!("adding file {path:?} as {name:?}");
-            zip.start_file(name_str, options)
-                .map_err(|_| APIError::Unexpected)?;
+            zip.start_file(name_str, options).map_err(|e| {
+                APIError::Unexpected(format!("Failed creating file in the archive: {e}"))
+            })?;
             let mut f = File::open(path)?;
             loop {
                 let read_count = f.read(&mut buffer)?;
@@ -187,13 +191,16 @@ fn _zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
                 continue;
             }
             tracing::debug!("adding directory {path:?} as {name:?}");
-            zip.add_directory(name_str, options)
-                .map_err(|_| APIError::Unexpected)?;
+            zip.add_directory(name_str, options).map_err(|e| {
+                APIError::Unexpected(format!("Failed to add directory to zip: {e}"))
+            })?;
         }
     }
 
     // finalize
-    let mut file = zip.finish().map_err(|_| APIError::Unexpected)?;
+    let mut file = zip
+        .finish()
+        .map_err(|e| APIError::Unexpected(format!("Failed to finalize zip: {e}")))?;
     file.flush()?;
     file.sync_all()?;
 
@@ -202,12 +209,16 @@ fn _zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
 
 fn _unzip(zip_path: &PathBuf, path_out: &Path) -> Result<(), APIError> {
     // setup
-    let file = File::open(zip_path).map_err(|_| APIError::Unexpected)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|_| APIError::Unexpected)?;
+    let file =
+        File::open(zip_path).map_err(|e| APIError::Unexpected(format!("Failed to unzip: {e}")))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| APIError::Unexpected(format!("Failed to read zip archive: {e}")))?;
 
     // extract
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|_| APIError::Unexpected)?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| APIError::Unexpected(format!("Failed to get file by index: {e}")))?;
         let outpath = match file.enclosed_name() {
             Some(path) => path_out.join(path),
             None => continue,
@@ -242,11 +253,14 @@ fn _get_cypher_secrets(
 ) -> Result<CypherSecrets, APIError> {
     // hash password using scrypt with the provided salt
     let password_bytes = password.as_bytes();
-    let salt = Salt::from_b64(salt_str).map_err(|_| APIError::Unexpected)?;
+    let salt = Salt::from_b64(salt_str)
+        .map_err(|e| APIError::Unexpected(format!("Failed to create salt: {e}")))?;
     let password_hash = Scrypt
         .hash_password(password_bytes, salt)
-        .map_err(|_| APIError::Unexpected)?;
-    let hash_output = password_hash.hash.ok_or_else(|| APIError::Unexpected)?;
+        .map_err(|e| APIError::Unexpected(format!("Failed to hash password: {e}")))?;
+    let hash_output = password_hash
+        .hash
+        .ok_or_else(|| APIError::Unexpected(s!("Failed to hash password")))?;
     let hash = hash_output.as_bytes();
 
     // get key from password hash
@@ -256,7 +270,7 @@ fn _get_cypher_secrets(
     let nonce_bytes = nonce_str.as_bytes();
     let nonce: [u8; BACKUP_NONCE_LENGTH] = nonce_bytes[0..BACKUP_NONCE_LENGTH]
         .try_into()
-        .map_err(|_| APIError::Unexpected)?;
+        .map_err(|e| APIError::Unexpected(format!("Failed to get nonce: {e}")))?;
 
     Ok(CypherSecrets { key, nonce })
 }
@@ -287,12 +301,12 @@ fn _encrypt_file(
         if read_count == BACKUP_BUFFER_LEN_ENCRYPT {
             let ciphertext = stream_encryptor
                 .encrypt_next(buffer.as_slice())
-                .map_err(|_e| APIError::Unexpected)?;
+                .map_err(|e| APIError::Unexpected(format!("Failed to encrypt next chunk: {e}")))?;
             destination_file.write_all(&ciphertext)?;
         } else {
             let ciphertext = stream_encryptor
                 .encrypt_last(&buffer[..read_count])
-                .map_err(|_e| APIError::Unexpected)?;
+                .map_err(|e| APIError::Unexpected(format!("Failed to encrypt last chunk: {e}")))?;
             destination_file.write_all(&ciphertext)?;
             break;
         }

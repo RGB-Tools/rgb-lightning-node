@@ -227,8 +227,8 @@ pub enum APIError {
     #[error("Temporary channel ID already used")]
     TemporaryChannelIdAlreadyUsed,
 
-    #[error("Unexpected error")]
-    Unexpected,
+    #[error("Unexpected error: {0}")]
+    Unexpected(String),
 
     #[error("Unknown RGB contract ID")]
     UnknownContractId,
@@ -280,7 +280,7 @@ impl IntoResponse for APIError {
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
             | APIError::IO(_)
-            | APIError::Unexpected => (
+            | APIError::Unexpected(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 self.to_string(),
                 self.name(),
