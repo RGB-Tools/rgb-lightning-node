@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rgb_lib::BitcoinNetwork;
+use rgb_lib::{BitcoinNetwork, Error as RgbLibError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -259,6 +259,52 @@ impl APIError {
             .next()
             .unwrap()
             .to_string()
+    }
+}
+
+impl From<RgbLibError> for APIError {
+    fn from(error: RgbLibError) -> Self {
+        match error {
+            RgbLibError::AllocationsAlreadyAvailable => APIError::AllocationsAlreadyAvailable,
+            RgbLibError::AssetNotFound { .. } => APIError::UnknownContractId,
+            RgbLibError::BatchTransferNotFound { .. } => APIError::BatchTransferNotFound,
+            RgbLibError::CannotEstimateFees => APIError::CannotEstimateFees,
+            RgbLibError::CannotFailBatchTransfer => APIError::CannotFailBatchTransfer,
+            RgbLibError::FailedBdkSync { details } => APIError::FailedBdkSync(details),
+            RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
+            RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
+            RgbLibError::Indexer { details } => APIError::Indexer(details),
+            RgbLibError::InsufficientAllocationSlots => APIError::NoAvailableUtxos,
+            RgbLibError::InsufficientBitcoins { needed, available } => {
+                APIError::InsufficientFunds(needed - available)
+            }
+            RgbLibError::InsufficientSpendableAssets { .. } => APIError::InsufficientAssets,
+            RgbLibError::InsufficientTotalAssets { .. } => APIError::InsufficientAssets,
+            RgbLibError::InvalidAddress { details } => APIError::InvalidAddress(details),
+            RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
+            RgbLibError::InvalidElectrum { details } => APIError::InvalidIndexer(details),
+            RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
+            RgbLibError::InvalidIndexer { details } => APIError::InvalidIndexer(details),
+            RgbLibError::InvalidName { details } => APIError::InvalidName(details),
+            RgbLibError::InvalidPrecision { details } => APIError::InvalidPrecision(details),
+            RgbLibError::InvalidProxyProtocol { version } => {
+                APIError::InvalidProxyProtocol(version)
+            }
+            RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
+            RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
+            RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
+            RgbLibError::InvalidTransportEndpoints { details } => {
+                APIError::InvalidTransportEndpoints(details)
+            }
+            RgbLibError::MinFeeNotMet { txid } => APIError::MinFeeNotMet(txid),
+            RgbLibError::Proxy { details } => APIError::Proxy(details),
+            RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
+            RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
+            _ => {
+                tracing::debug!("Unexpected rgb-lib error: {error:?}");
+                APIError::Unexpected(format!("Unmapped rgb-lib error: {error:?}"))
+            }
+        }
     }
 }
 
