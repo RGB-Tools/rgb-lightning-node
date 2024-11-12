@@ -9,7 +9,6 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Network, ScriptBuf};
 use hex::DisplayHex;
-use lightning::impl_writeable_tlv_based_enum;
 use lightning::ln::ChannelId;
 use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
@@ -21,6 +20,7 @@ use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
+use lightning::{impl_writeable_tlv_based_enum, ln::channelmanager::ChannelShutdownState};
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -369,6 +369,7 @@ pub(crate) struct Channel {
     pub(crate) peer_pubkey: String,
     pub(crate) peer_alias: Option<String>,
     pub(crate) short_channel_id: Option<u64>,
+    pub(crate) status: ChannelStatus,
     pub(crate) ready: bool,
     pub(crate) capacity_sat: u64,
     pub(crate) local_balance_msat: u64,
@@ -381,6 +382,14 @@ pub(crate) struct Channel {
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_local_amount: Option<u64>,
     pub(crate) asset_remote_amount: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) enum ChannelStatus {
+    #[default]
+    Opening,
+    Opened,
+    Closing,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1855,9 +1864,20 @@ pub(crate) async fn list_channels(
 
     let mut channels = vec![];
     for chan_info in unlocked_state.channel_manager.list_channels() {
+        let status = match chan_info.channel_shutdown_state.unwrap() {
+            ChannelShutdownState::NotShuttingDown => {
+                if chan_info.is_channel_ready {
+                    ChannelStatus::Opened
+                } else {
+                    ChannelStatus::Opening
+                }
+            }
+            _ => ChannelStatus::Closing,
+        };
         let mut channel = Channel {
             channel_id: chan_info.channel_id.0.as_hex().to_string(),
             peer_pubkey: hex_str(&chan_info.counterparty.node_id.serialize()),
+            status,
             ready: chan_info.is_channel_ready,
             capacity_sat: chan_info.channel_value_satoshis,
             local_balance_msat: chan_info.balance_msat,

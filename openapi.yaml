@@ -1169,6 +1169,8 @@ components:
         short_channel_id:
           type: integer
           example: 120946279120896
+        status:
+          $ref: '#/components/schemas/ChannelStatus'
         ready:
           type: boolean
           example: false
@@ -1205,6 +1207,12 @@ components:
         asset_remote_amount:
           type: integer
           example: 0
+    ChannelStatus:
+      type: string
+      enum:
+        - Opening
+        - Opened
+        - Closing
     CheckIndexerUrlRequest:
       type: object
       properties:
