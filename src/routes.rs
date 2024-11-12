@@ -1443,10 +1443,7 @@ pub(crate) async fn decode_rgb_invoice(
 ) -> Result<Json<DecodeRGBInvoiceResponse>, APIError> {
     let _unlocked_app_state = state.get_unlocked_app_state();
 
-    let invoice_data = match RgbLibInvoice::new(payload.invoice) {
-        Err(e) => return Err(APIError::InvalidInvoice(e.to_string())),
-        Ok(v) => v.invoice_data(),
-    };
+    let invoice_data = RgbLibInvoice::new(payload.invoice)?.invoice_data();
 
     Ok(Json(DecodeRGBInvoiceResponse {
         recipient_id: invoice_data.recipient_id,
