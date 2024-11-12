@@ -2,7 +2,6 @@ use amplify::s;
 use bitcoin::secp256k1::PublicKey;
 use futures::Future;
 use lightning::ln::channelmanager::ChannelDetails;
-use lightning::ln::msgs::SocketAddress;
 use lightning::ln::ChannelId;
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
@@ -77,8 +76,6 @@ impl AppState {
 
 pub(crate) struct StaticState {
     pub(crate) ldk_peer_listening_port: u16,
-    pub(crate) ldk_announced_listen_addr: Vec<SocketAddress>,
-    pub(crate) ldk_announced_node_name: [u8; 32],
     pub(crate) network: BitcoinNetwork,
     pub(crate) storage_dir_path: PathBuf,
     pub(crate) ldk_data_dir: PathBuf,
@@ -350,8 +347,6 @@ pub(crate) async fn start_daemon(args: &LdkUserInfo) -> Result<Arc<AppState>, Ap
 
     let static_state = Arc::new(StaticState {
         ldk_peer_listening_port: args.ldk_peer_listening_port,
-        ldk_announced_listen_addr: args.ldk_announced_listen_addr.clone(),
-        ldk_announced_node_name: args.ldk_announced_node_name,
         network: args.network,
         storage_dir_path: args.storage_dir_path.clone(),
         ldk_data_dir,

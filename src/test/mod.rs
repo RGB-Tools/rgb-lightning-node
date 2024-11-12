@@ -55,8 +55,6 @@ static MINER: Lazy<RwLock<Miner>> = Lazy::new(|| RwLock::new(Miner { no_mine_cou
 impl Default for LdkUserInfo {
     fn default() -> Self {
         Self {
-            ldk_announced_listen_addr: vec![],
-            ldk_announced_node_name: [0; 32],
             network: BitcoinNetwork::Regtest,
             storage_dir_path: PathBuf::from("tmp/test_name/nodeN"),
             daemon_listening_port: 3001,
@@ -1348,6 +1346,8 @@ async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
         bitcoind_rpc_port: 18443,
         indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
         proxy_endpoint: Some(PROXY_ENDPOINT_REGTEST.to_string()),
+        announce_addresses: vec![],
+        announce_alias: Some(s!("RLN_alias")),
     };
     reqwest::Client::new()
         .post(format!("http://{}/unlock", node_address))

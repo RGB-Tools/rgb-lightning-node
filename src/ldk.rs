@@ -1,4 +1,4 @@
-use amplify::map;
+use amplify::{map, s};
 use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::network::constants::Network;
 use bitcoin::psbt::Psbt;
@@ -13,6 +13,7 @@ use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
 };
+use lightning::ln::msgs::SocketAddress;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
 use lightning::ln::{ChannelId, PaymentHash, PaymentPreimage, PaymentSecret};
 use lightning::onion_message::messenger::{DefaultMessageRouter, SimpleArcOnionMessenger};
@@ -1377,8 +1378,6 @@ pub(crate) async fn start_ldk(
     let bitcoin_network = static_state.network;
     let network: Network = bitcoin_network.into();
     let ldk_peer_listening_port = static_state.ldk_peer_listening_port;
-    let ldk_announced_listen_addr = static_state.ldk_announced_listen_addr.clone();
-    let ldk_announced_node_name = static_state.ldk_announced_node_name;
 
     // Initialize our bitcoind client.
     let bitcoind_client = match BitcoindClient::new(
@@ -1998,6 +1997,32 @@ pub(crate) async fn start_ldk(
 
     // Regularly broadcast our node_announcement. This is only required (or possible) if we have
     // some public channels.
+    let mut ldk_announced_listen_addr = Vec::new();
+    for addr in unlock_request.announce_addresses {
+        match SocketAddress::from_str(&addr) {
+            Ok(sa) => {
+                ldk_announced_listen_addr.push(sa);
+            }
+            Err(_) => {
+                return Err(APIError::InvalidAnnounceAddresses(format!(
+                    "failed to parse address '{addr}'"
+                )))
+            }
+        }
+    }
+    let ldk_announced_node_name = match unlock_request.announce_alias {
+        Some(s) => {
+            if s.len() > 32 {
+                return Err(APIError::InvalidAnnounceAlias(s!(
+                    "cannot be longer than 32 bytes"
+                )));
+            }
+            let mut bytes = [0; 32];
+            bytes[..s.len()].copy_from_slice(s.as_bytes());
+            bytes
+        }
+        None => [0; 32],
+    };
     let peer_man = Arc::clone(&peer_manager);
     let chan_man = Arc::clone(&channel_manager);
     tokio::spawn(async move {

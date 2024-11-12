@@ -2217,6 +2217,14 @@ components:
         proxy_endpoint:
           type: string
           example: rpc://127.0.0.1:3000/json-rpc
+        announce_addresses:
+          type: array
+          items:
+            type: string
+            example: pub.addr.example.com:9735
+        announce_alias:
+          type: string
+          example: nodeAlias
     Unspent:
       type: object
       properties:

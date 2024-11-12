@@ -102,6 +102,12 @@ pub enum APIError {
     #[error("Invalid amount: {0}")]
     InvalidAmount(String),
 
+    #[error("Invalid announce addresses: {0}")]
+    InvalidAnnounceAddresses(String),
+
+    #[error("Invalid announce alias: {0}")]
+    InvalidAnnounceAlias(String),
+
     #[error("Invalid asset ID: {0}")]
     InvalidAssetID(String),
 
@@ -389,6 +395,8 @@ impl IntoResponse for APIError {
             | APIError::IncompleteRGBInfo
             | APIError::InvalidAddress(_)
             | APIError::InvalidAmount(_)
+            | APIError::InvalidAnnounceAddresses(_)
+            | APIError::InvalidAnnounceAlias(_)
             | APIError::InvalidAssetID(_)
             | APIError::InvalidAttachments(_)
             | APIError::InvalidBackupPath
@@ -485,12 +493,6 @@ impl IntoResponse for APIError {
 /// The error variants returned by the app
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Invalid announced listen addresses: {0}")]
-    InvalidAnnouncedListenAddresses(String),
-
-    #[error("Invalid node alias: {0}")]
-    InvalidNodeAlias(String),
-
     #[error("Port {0} is unavailable")]
     UnavailablePort(u16),
 
