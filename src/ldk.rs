@@ -596,6 +596,7 @@ async fn handle_ldk_events(
             {
                 tracing::error!(
                         "ERROR: Channel went away before we could fund it. The peer disconnected or refused the channel.");
+                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
             }
         }
         Event::PaymentClaimable {
@@ -1015,6 +1016,10 @@ async fn handle_ldk_events(
         Event::DiscardFunding { channel_id, .. } => {
             // A "real" node should probably "lock" the UTXOs spent in funding transactions until
             // the funding transaction either confirms, or this event is generated.
+            tracing::info!(
+                "EVENT: Discarded funding for channel with ID {}",
+                channel_id
+            );
 
             *unlocked_state.rgb_send_lock.lock().unwrap() = false;
 
