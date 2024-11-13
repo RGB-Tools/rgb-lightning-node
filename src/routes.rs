@@ -126,6 +126,18 @@ pub(crate) struct AssetBalanceResponse {
     pub(crate) offchain_inbound: u64,
 }
 
+impl From<RgbLibBalance> for AssetBalanceResponse {
+    fn from(value: RgbLibBalance) -> Self {
+        Self {
+            settled: value.settled,
+            future: value.future,
+            spendable: value.spendable,
+            offchain_outbound: 0,
+            offchain_inbound: 0,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetMetadataRequest {
     pub(crate) asset_id: String,
@@ -154,7 +166,7 @@ pub(crate) struct AssetCFA {
     pub(crate) issued_supply: u64,
     pub(crate) timestamp: i64,
     pub(crate) added_at: i64,
-    pub(crate) balance: BtcBalance,
+    pub(crate) balance: AssetBalanceResponse,
     pub(crate) media: Option<Media>,
 }
 
@@ -203,7 +215,7 @@ pub(crate) struct AssetNIA {
     pub(crate) issued_supply: u64,
     pub(crate) timestamp: i64,
     pub(crate) added_at: i64,
-    pub(crate) balance: BtcBalance,
+    pub(crate) balance: AssetBalanceResponse,
     pub(crate) media: Option<Media>,
 }
 
@@ -263,7 +275,7 @@ pub(crate) struct AssetUDA {
     pub(crate) issued_supply: u64,
     pub(crate) timestamp: i64,
     pub(crate) added_at: i64,
-    pub(crate) balance: BtcBalance,
+    pub(crate) balance: AssetBalanceResponse,
     pub(crate) token: Option<TokenLight>,
 }
 
@@ -333,16 +345,6 @@ pub(crate) struct BtcBalance {
     pub(crate) settled: u64,
     pub(crate) future: u64,
     pub(crate) spendable: u64,
-}
-
-impl From<RgbLibBalance> for BtcBalance {
-    fn from(value: RgbLibBalance) -> Self {
-        Self {
-            settled: value.settled,
-            future: value.future,
-            spendable: value.spendable,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1844,15 +1846,65 @@ pub(crate) async fn list_assets(
             .collect(),
     )?;
 
-    let nia = rgb_assets
-        .nia
-        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
-    let uda = rgb_assets
-        .uda
-        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
-    let cfa = rgb_assets
-        .cfa
-        .map(|assets| assets.into_iter().map(|a| a.into()).collect());
+    let mut offchain_balances = HashMap::new();
+    for chan_info in unlocked_state.channel_manager.list_channels() {
+        let info_file_path = get_rgb_channel_info_path(
+            &chan_info.channel_id.0.as_hex().to_string(),
+            &state.static_state.ldk_data_dir,
+            false,
+        );
+        if !info_file_path.exists() {
+            continue;
+        }
+        let rgb_info = parse_rgb_channel_info(&info_file_path);
+        offchain_balances
+            .entry(rgb_info.contract_id.to_string())
+            .and_modify(|(offchain_outbound, offchain_inbound)| {
+                *offchain_outbound += rgb_info.local_rgb_amount;
+                *offchain_inbound += rgb_info.remote_rgb_amount;
+            })
+            .or_insert((rgb_info.local_rgb_amount, rgb_info.remote_rgb_amount));
+    }
+
+    let nia = rgb_assets.nia.map(|assets| {
+        assets
+            .into_iter()
+            .map(|a| {
+                let mut asset: AssetNIA = a.into();
+                (
+                    asset.balance.offchain_outbound,
+                    asset.balance.offchain_inbound,
+                ) = *offchain_balances.get(&asset.asset_id).unwrap_or(&(0, 0));
+                asset
+            })
+            .collect()
+    });
+    let uda = rgb_assets.uda.map(|assets| {
+        assets
+            .into_iter()
+            .map(|a| {
+                let mut asset: AssetUDA = a.into();
+                (
+                    asset.balance.offchain_outbound,
+                    asset.balance.offchain_inbound,
+                ) = *offchain_balances.get(&asset.asset_id).unwrap_or(&(0, 0));
+                asset
+            })
+            .collect()
+    });
+    let cfa = rgb_assets.cfa.map(|assets| {
+        assets
+            .into_iter()
+            .map(|a| {
+                let mut asset: AssetCFA = a.into();
+                (
+                    asset.balance.offchain_outbound,
+                    asset.balance.offchain_inbound,
+                ) = *offchain_balances.get(&asset.asset_id).unwrap_or(&(0, 0));
+                asset
+            })
+            .collect()
+    });
 
     Ok(Json(ListAssetsResponse { nia, uda, cfa }))
 }

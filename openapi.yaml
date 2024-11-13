@@ -1010,7 +1010,7 @@ components:
           type: integer
           example: 1691161979
         balance:
-          $ref: '#/components/schemas/BtcBalance'
+          $ref: '#/components/schemas/AssetBalanceResponse'
         media:
           $ref: '#/components/schemas/Media'
     AssetIface:
@@ -1049,7 +1049,7 @@ components:
           type: integer
           example: 1691161979
         balance:
-          $ref: '#/components/schemas/BtcBalance'
+          $ref: '#/components/schemas/AssetBalanceResponse'
         media:
           $ref: '#/components/schemas/Media'
     AssetSchema:
@@ -1088,7 +1088,7 @@ components:
           type: integer
           example: 1691161979
         balance:
-          $ref: '#/components/schemas/BtcBalance'
+          $ref: '#/components/schemas/AssetBalanceResponse'
         token:
           $ref: '#/components/schemas/TokenLight'
     BackupRequest:
