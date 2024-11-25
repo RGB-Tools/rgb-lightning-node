@@ -110,6 +110,8 @@ pub(crate) struct PaymentInfo {
     pub(crate) secret: Option<PaymentSecret>,
     pub(crate) status: HTLCStatus,
     pub(crate) amt_msat: Option<u64>,
+    pub(crate) created_at: u64,
+    pub(crate) updated_at: u64,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -117,6 +119,8 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (2, secret, required),
     (4, status, required),
     (6, amt_msat, required),
+    (8, created_at, required),
+    (10, updated_at, required),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -234,6 +238,7 @@ impl UnlockedAppState {
 
     fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {
         let mut outbound = self.get_outbound_payments();
+        let mut failed = false;
         for (payment_id, payment_info) in outbound
             .payments
             .iter_mut()
@@ -241,9 +246,13 @@ impl UnlockedAppState {
         {
             if !recent_payments_payment_ids.contains(payment_id) {
                 payment_info.status = HTLCStatus::Failed;
+                payment_info.updated_at = get_current_timestamp();
+                failed = true;
             }
         }
-        self.save_outbound_payments(outbound);
+        if failed {
+            self.save_outbound_payments(outbound);
+        }
     }
 
     pub(crate) fn inbound_payments(&self) -> HashMap<PaymentHash, PaymentInfo> {
@@ -277,17 +286,21 @@ impl UnlockedAppState {
         let mut inbound = self.get_inbound_payments();
         match inbound.payments.entry(payment_hash) {
             Entry::Occupied(mut e) => {
-                let payment = e.get_mut();
-                payment.status = status;
-                payment.preimage = preimage;
-                payment.secret = secret;
+                let payment_info = e.get_mut();
+                payment_info.status = status;
+                payment_info.preimage = preimage;
+                payment_info.secret = secret;
+                payment_info.updated_at = get_current_timestamp();
             }
             Entry::Vacant(e) => {
+                let created_at = get_current_timestamp();
                 e.insert(PaymentInfo {
                     preimage,
                     secret,
                     status,
                     amt_msat,
+                    created_at,
+                    updated_at: created_at,
                 });
             }
         }
@@ -301,18 +314,20 @@ impl UnlockedAppState {
         preimage: Option<PaymentPreimage>,
     ) -> PaymentInfo {
         let mut outbound = self.get_outbound_payments();
-        let outbound_payment = outbound.payments.get_mut(&payment_id).unwrap();
-        outbound_payment.status = status;
-        outbound_payment.preimage = preimage;
-        let payment = (*outbound_payment).clone();
+        let payment_info = outbound.payments.get_mut(&payment_id).unwrap();
+        payment_info.status = status;
+        payment_info.preimage = preimage;
+        payment_info.updated_at = get_current_timestamp();
+        let payment = (*payment_info).clone();
         self.save_outbound_payments(outbound);
         payment
     }
 
     pub(crate) fn update_outbound_payment_status(&self, payment_id: PaymentId, status: HTLCStatus) {
         let mut outbound = self.get_outbound_payments();
-        let payment = outbound.payments.get_mut(&payment_id).unwrap();
-        payment.status = status;
+        let payment_info = outbound.payments.get_mut(&payment_id).unwrap();
+        payment_info.status = status;
+        payment_info.updated_at = get_current_timestamp();
         self.save_outbound_payments(outbound);
     }
 
@@ -322,8 +337,9 @@ impl UnlockedAppState {
         status: HTLCStatus,
     ) {
         let mut inbound = self.get_inbound_payments();
-        let payment = inbound.payments.get_mut(&payment_hash).unwrap();
-        payment.status = status;
+        let payment_info = inbound.payments.get_mut(&payment_hash).unwrap();
+        payment_info.status = status;
+        payment_info.updated_at = get_current_timestamp();
         self.save_inbound_payments(inbound);
     }
 
