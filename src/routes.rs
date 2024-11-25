@@ -814,6 +814,7 @@ pub(crate) struct Payment {
     pub(crate) status: HTLCStatus,
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
+    pub(crate) payee_pubkey: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1802,6 +1803,7 @@ pub(crate) async fn keysend(
                 amt_msat: Some(amt_msat),
                 created_at,
                 updated_at: created_at,
+                payee_pubkey: dest_pubkey,
             },
         );
         let status = match unlocked_state
@@ -2013,6 +2015,7 @@ pub(crate) async fn list_payments(
             status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
+            payee_pubkey: payment_info.payee_pubkey.to_string(),
         });
     }
 
@@ -2038,6 +2041,7 @@ pub(crate) async fn list_payments(
             status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
+            payee_pubkey: payment_info.payee_pubkey.to_string(),
         });
     }
 
@@ -2266,6 +2270,7 @@ pub(crate) async fn ln_invoice(
                 amt_msat: payload.amt_msat,
                 created_at,
                 updated_at: created_at,
+                payee_pubkey: unlocked_state.channel_manager.get_our_node_id(),
             },
         );
 
@@ -3145,6 +3150,7 @@ pub(crate) async fn send_payment(
                     amt_msat: Some(amt_msat),
                     created_at,
                     updated_at: created_at,
+                    payee_pubkey: offer.signing_pubkey().ok_or(APIError::InvalidInvoice(s!("missing signing pubkey")))?,
                 },
             );
 
@@ -3234,6 +3240,7 @@ pub(crate) async fn send_payment(
                     amt_msat: invoice.amount_milli_satoshis(),
                     created_at,
                     updated_at: created_at,
+                    payee_pubkey: invoice.get_payee_pub_key(),
                 },
             );
 

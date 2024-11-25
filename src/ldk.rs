@@ -2,7 +2,7 @@ use amplify::{map, s};
 use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::network::constants::Network;
 use bitcoin::psbt::Psbt;
-use bitcoin::secp256k1::Secp256k1;
+use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use bitcoin::{BlockHash, TxOut};
 use bitcoin_bech32::WitnessProgram;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
@@ -112,6 +112,7 @@ pub(crate) struct PaymentInfo {
     pub(crate) amt_msat: Option<u64>,
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
+    pub(crate) payee_pubkey: PublicKey,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -121,6 +122,7 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (6, amt_msat, required),
     (8, created_at, required),
     (10, updated_at, required),
+    (12, payee_pubkey, required),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -282,6 +284,7 @@ impl UnlockedAppState {
         preimage: Option<PaymentPreimage>,
         secret: Option<PaymentSecret>,
         amt_msat: Option<u64>,
+        payee_pubkey: PublicKey,
     ) {
         let mut inbound = self.get_inbound_payments();
         match inbound.payments.entry(payment_hash) {
@@ -301,6 +304,7 @@ impl UnlockedAppState {
                     amt_msat,
                     created_at,
                     updated_at: created_at,
+                    payee_pubkey,
                 });
             }
         }
@@ -651,7 +655,7 @@ async fn handle_ldk_events(
             payment_hash,
             purpose,
             amount_msat,
-            receiver_node_id: _,
+            receiver_node_id,
             htlcs: _,
             sender_intended_total_msat: _,
         } => {
@@ -690,6 +694,7 @@ async fn handle_ldk_events(
                     payment_preimage,
                     payment_secret,
                     Some(amount_msat),
+                    receiver_node_id.unwrap(),
                 );
             }
         }
