@@ -1938,7 +1938,7 @@ components:
           type: array
           items:
             type: string
-            example: rpcs://proxy.iriswallet.com/0.2/json-rpc
+            example: rpc://127.0.0.1:3000/json-rpc
         skip_sync:
           type: boolean
           example: false
