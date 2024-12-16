@@ -35,7 +35,7 @@ git clone https://github.com/RGB-Tools/rgb-lightning-node --recurse-submodules -
 Then, from the project root, install the `rgb-lightning-node` binary by
 running:
 ```sh
-cargo install --debug --path .
+cargo install --locked --debug --path .
 ```
 
 ## Run
