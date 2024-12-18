@@ -54,7 +54,7 @@ async fn send_receive() {
     assert_eq!(decoded.amount, None);
     assert!(matches!(decoded.network, BitcoinNetwork::Regtest));
     assert!(decoded.expiration_timestamp.is_some());
-    assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_REGTEST]);
+    assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_LOCAL]);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
     send_asset(node1_addr, &asset_id, 200, recipient_id).await;
