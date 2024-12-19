@@ -63,6 +63,7 @@ async fn refuse_high_fees() {
         Some(2_000_000),
         None,
         None,
+        true,
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);

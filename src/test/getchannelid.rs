@@ -38,6 +38,7 @@ async fn getchannelid_success() {
         None,
         None,
         Some(&temporary_channel_id),
+        true,
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);

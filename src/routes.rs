@@ -2693,7 +2693,7 @@ pub(crate) async fn open_channel(
             )));
         }
 
-        if !payload.with_anchors {
+        if colored_info.is_some() && !payload.with_anchors {
             return Err(APIError::AnchorsRequired);
         }
 

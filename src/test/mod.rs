@@ -1000,6 +1000,7 @@ async fn open_channel(
         None,
         None,
         None,
+        true,
     )
     .await
 }
@@ -1016,6 +1017,7 @@ async fn open_channel_with_custom_data(
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
+    with_anchors: bool,
 ) -> Channel {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
@@ -1034,7 +1036,7 @@ async fn open_channel_with_custom_data(
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
         public: true,
-        with_anchors: true,
+        with_anchors,
         fee_base_msat,
         fee_proportional_millionths,
         temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
