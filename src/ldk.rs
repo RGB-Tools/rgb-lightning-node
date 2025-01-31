@@ -337,18 +337,6 @@ impl UnlockedAppState {
         self.save_outbound_payments(outbound);
     }
 
-    pub(crate) fn update_inbound_payment_status(
-        &self,
-        payment_hash: PaymentHash,
-        status: HTLCStatus,
-    ) {
-        let mut inbound = self.get_inbound_payments();
-        let payment_info = inbound.payments.get_mut(&payment_hash).unwrap();
-        payment_info.status = status;
-        payment_info.updated_at = get_current_timestamp();
-        self.save_inbound_payments(inbound);
-    }
-
     pub(crate) fn channel_ids(&self) -> HashMap<ChannelId, ChannelId> {
         self.get_channel_ids_map().channel_ids.clone()
     }
@@ -1032,21 +1020,6 @@ async fn handle_ldk_events(
                     .unwrap_or("".to_owned()),
                 reason
             );
-
-            let inbound_payments = unlocked_state.inbound_payments();
-            let outbound_payments = unlocked_state.outbound_payments();
-
-            for (payment_hash, payment_info) in &inbound_payments {
-                if payment_info.status == HTLCStatus::Pending {
-                    unlocked_state.update_inbound_payment_status(*payment_hash, HTLCStatus::Failed);
-                }
-            }
-
-            for (payment_id, payment_info) in &outbound_payments {
-                if payment_info.status == HTLCStatus::Pending {
-                    unlocked_state.update_outbound_payment_status(*payment_id, HTLCStatus::Failed);
-                }
-            }
 
             unlocked_state.delete_channel_id(channel_id);
         }
