@@ -1,20 +1,19 @@
-use bitcoin::address::{Address, Payload, WitnessVersion};
 use bitcoin::blockdata::constants::WITNESS_SCALE_FACTOR;
 use bitcoin::blockdata::script::ScriptBuf;
 use bitcoin::hashes::Hash;
 use bitcoin::key::XOnlyPublicKey;
-use bitcoin::psbt::PartiallySignedTransaction;
-use bitcoin::{Network, OutPoint, Transaction, TxOut, WPubkeyHash};
+use bitcoin::psbt::Psbt;
+use bitcoin::{Address, Network, OutPoint, Transaction, TxOut, WPubkeyHash};
 use hex::DisplayHex;
 use lightning::events::bump_transaction::{Utxo, WalletSource};
-use lightning::ln::ChannelId;
+use lightning::ln::types::ChannelId;
 use lightning::rgb_utils::{
     get_rgb_channel_info_path, is_channel_rgb, parse_rgb_channel_info, RgbInfo,
 };
 use lightning::sign::ChangeDestinationSource;
 use rgb_lib::{
-    bdk::SignOptions,
-    bitcoin::psbt::PartiallySignedTransaction as BitcoinPsbt,
+    bdk_wallet::SignOptions,
+    bitcoin::psbt::Psbt as BitcoinPsbt,
     wallet::{
         rust_only::{check_proxy_url, ColoringInfo},
         AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online, ReceiveData,
@@ -52,7 +51,7 @@ impl UnlockedAppState {
         up_to: bool,
         num: u8,
         size: u32,
-        fee_rate: f32,
+        fee_rate: u64,
         skip_sync: bool,
     ) -> Result<u8, RgbLibError> {
         self.rgb_wallet_wrapper
@@ -227,7 +226,7 @@ impl UnlockedAppState {
         &self,
         recipient_map: HashMap<String, Vec<Recipient>>,
         donation: bool,
-        fee_rate: f32,
+        fee_rate: u64,
         min_confirmations: u8,
         skip_sync: bool,
     ) -> Result<SendResult, RgbLibError> {
@@ -244,7 +243,7 @@ impl UnlockedAppState {
         &self,
         recipient_map: HashMap<String, Vec<Recipient>>,
         donation: bool,
-        fee_rate: f32,
+        fee_rate: u64,
         min_confirmations: u8,
     ) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper
@@ -255,7 +254,7 @@ impl UnlockedAppState {
         &self,
         address: String,
         amount: u64,
-        fee_rate: f32,
+        fee_rate: u64,
         skip_sync: bool,
     ) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper
@@ -266,7 +265,7 @@ impl UnlockedAppState {
         &self,
         address: String,
         amount: u64,
-        fee_rate: f32,
+        fee_rate: u64,
     ) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper
             .send_btc_begin(address, amount, fee_rate)
@@ -337,7 +336,7 @@ impl RgbLibWalletWrapper {
         up_to: bool,
         num: u8,
         size: u32,
-        fee_rate: f32,
+        fee_rate: u64,
         skip_sync: bool,
     ) -> Result<u8, RgbLibError> {
         self.get_rgb_wallet().create_utxos(
@@ -550,7 +549,7 @@ impl RgbLibWalletWrapper {
         &self,
         recipient_map: HashMap<String, Vec<Recipient>>,
         donation: bool,
-        fee_rate: f32,
+        fee_rate: u64,
         min_confirmations: u8,
         skip_sync: bool,
     ) -> Result<SendResult, RgbLibError> {
@@ -568,7 +567,7 @@ impl RgbLibWalletWrapper {
         &self,
         recipient_map: HashMap<String, Vec<Recipient>>,
         donation: bool,
-        fee_rate: f32,
+        fee_rate: u64,
         min_confirmations: u8,
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet().send_begin(
@@ -584,7 +583,7 @@ impl RgbLibWalletWrapper {
         &self,
         address: String,
         amount: u64,
-        fee_rate: f32,
+        fee_rate: u64,
         skip_sync: bool,
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
@@ -595,7 +594,7 @@ impl RgbLibWalletWrapper {
         &self,
         address: String,
         amount: u64,
-        fee_rate: f32,
+        fee_rate: u64,
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
             .send_btc_begin(self.online.clone(), address, amount, fee_rate, false)
@@ -645,29 +644,32 @@ impl WalletSource for RgbLibWalletWrapper {
     fn list_confirmed_utxos(&self) -> Result<Vec<Utxo>, ()> {
         let network =
             Network::from_str(&self.bitcoin_network().to_string().to_lowercase()).unwrap();
-        let wallet = self.wallet.lock().unwrap();
+        let mut wallet = self.wallet.lock().unwrap();
         Ok(wallet.list_unspents_vanilla(self.online.clone(), 1, false).unwrap().iter().filter_map(|u| {
             let script = u.txout.script_pubkey.clone().into_boxed_script();
             let address = Address::from_script(&script, network).unwrap();
             let outpoint = OutPoint::from_str(&u.outpoint.to_string()).unwrap();
-            match address.payload {
-                Payload::WitnessProgram(wp) => match wp.version() {
-                    WitnessVersion::V0 => WPubkeyHash::from_slice(wp.program().as_bytes())
-                        .map(|wpkh| Utxo::new_v0_p2wpkh(outpoint, u.txout.value, &wpkh))
-                        .ok(),
+            let value = u.txout.value;
+            match address.witness_program() {
+                Some(prog) if prog.is_p2wpkh() => {
+                    WPubkeyHash::from_slice(prog.program().as_bytes())
+                        .map(|wpkh| Utxo::new_v0_p2wpkh(outpoint, value, &wpkh))
+                        .ok()
+                },
+                Some(prog) if prog.is_p2tr() => {
                     // TODO: Add `Utxo::new_v1_p2tr` upstream.
-                    WitnessVersion::V1 => XOnlyPublicKey::from_slice(wp.program().as_bytes())
+                    XOnlyPublicKey::from_slice(prog.program().as_bytes())
                         .map(|_| Utxo {
                             outpoint,
                             output: TxOut {
-                                value: u.txout.value,
-                                script_pubkey: ScriptBuf::new_witness_program(&wp),
+                                value,
+                                script_pubkey: ScriptBuf::new_witness_program(&prog),
                             },
-                            satisfaction_weight: WITNESS_SCALE_FACTOR as u64 +
+                            #[allow(clippy::identity_op)]
+                            satisfaction_weight: 1 /* empty script_sig */ * WITNESS_SCALE_FACTOR as u64 +
                                 1 /* witness items */ + 1 /* schnorr sig len */ + 64, /* schnorr sig */
                         })
-                        .ok(),
-                    _ => None,
+                        .ok()
                 },
                 _ => None,
             }
@@ -684,7 +686,7 @@ impl WalletSource for RgbLibWalletWrapper {
         )
     }
 
-    fn sign_psbt(&self, tx: PartiallySignedTransaction) -> Result<Transaction, ()> {
+    fn sign_psbt(&self, tx: Psbt) -> Result<Transaction, ()> {
         let sign_options = SignOptions {
             trust_witness_utxo: true,
             ..Default::default()
@@ -695,9 +697,7 @@ impl WalletSource for RgbLibWalletWrapper {
             .unwrap()
             .sign_psbt(tx.to_string(), Some(sign_options))
             .unwrap();
-        Ok(PartiallySignedTransaction::from_str(&signed)
-            .unwrap()
-            .extract_tx())
+        Ok(Psbt::from_str(&signed).unwrap().extract_tx().unwrap())
     }
 }
 

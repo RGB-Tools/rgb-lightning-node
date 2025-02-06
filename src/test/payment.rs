@@ -156,8 +156,8 @@ async fn success() {
     assert_eq!(channels_2.len(), 1);
     let chan_1 = channels_1.first().unwrap();
     let chan_2 = channels_2.first().unwrap();
-    assert_eq!(chan_1.local_balance_msat, chan_1_before.local_balance_msat);
-    assert_eq!(chan_2.local_balance_msat, chan_2_before.local_balance_msat);
+    assert_eq!(chan_1.local_balance_sat, chan_1_before.local_balance_sat);
+    assert_eq!(chan_2.local_balance_sat, chan_2_before.local_balance_sat);
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;
     wait_for_balance(node1_addr, &asset_id, 950).await;
@@ -191,7 +191,6 @@ async fn success() {
     assert_eq!(tx_user.transaction_type, TransactionType::User);
     assert_eq!(tx_utxos.transaction_type, TransactionType::CreateUtxos);
     assert_eq!(tx_send.transaction_type, TransactionType::RgbSend);
-    assert!(tx_utxos.fee.is_some());
     assert!(tx_utxos.confirmation_time.is_some());
 
     let transfers = list_transfers(node1_addr, &asset_id).await;

@@ -66,9 +66,6 @@ pub enum APIError {
     #[error("Unable to create keys seed file {0}: {1}")]
     FailedKeysCreation(String, String),
 
-    #[error("Failed to sign message: {0}")]
-    FailedMessageSigning(String),
-
     #[error("Failed to open channel: {0}")]
     FailedOpenChannel(String),
 
@@ -379,7 +376,6 @@ impl IntoResponse for APIError {
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
             | APIError::FailedKeysCreation(_, _)
-            | APIError::FailedMessageSigning(_)
             | APIError::FailedOpenChannel(_)
             | APIError::FailedPayment(_)
             | APIError::FailedPeerDisconnection(_)

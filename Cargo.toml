@@ -2,7 +2,7 @@
 name = "rgb-lightning-node"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77.0"
+rust-version = "1.81.0"
 
 [[bin]]
 name = "rgb-lightning-node"
@@ -15,7 +15,7 @@ axum-extra = "0.9.4"
 # axum-macros = "0.4.2"  # uncomment to use debug_handler
 baid58 = "0.4.4"
 base64 = "0.22.1"
-bitcoin = "0.30.2"
+bitcoin = "0.32"
 bitcoin-bech32 = "0.13"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -23,20 +23,20 @@ clap = "4.5.20"
 dirs = "5.0.1"
 futures = "0.3"
 hex = { package = "hex-conservative", version = "0.3.0", default-features = false }
-lightning = { version = "0.0.123", features = ["max_level_trace"], path = "./rust-lightning/lightning" }
-lightning-background-processor = { version = "0.0.123", features = ["futures"], path = "./rust-lightning/lightning-background-processor" }
-lightning-block-sync = { version = "0.0.123", features = ["rpc-client", "tokio"] }
-lightning-invoice = { version = "0.31.0", path = "./rust-lightning/lightning-invoice" }
-lightning-net-tokio = { version = "0.0.123" }
-lightning-persister = { version = "0.0.123", path = "./rust-lightning/lightning-persister" }
-lightning-rapid-gossip-sync = { version = "0.0.123", path = "./rust-lightning/lightning-rapid-gossip-sync" }
+lightning = { version = "0.0.125", features = ["max_level_trace"], path = "./rust-lightning/lightning" }
+lightning-background-processor = { version = "0.0.125", features = ["futures"], path = "./rust-lightning/lightning-background-processor" }
+lightning-block-sync = { version = "0.0.125", features = ["rpc-client", "tokio"] }
+lightning-invoice = { version = "0.32.0", features = ["std"], path = "./rust-lightning/lightning-invoice" }
+lightning-net-tokio = { version = "0.0.125" }
+lightning-persister = { version = "0.0.125", path = "./rust-lightning/lightning-persister" }
+lightning-rapid-gossip-sync = { version = "0.0.125", path = "./rust-lightning/lightning-rapid-gossip-sync" }
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
 rgb-lib = { version = "0.3.0-alpha.11", features = [
     "electrum",
     "esplora",
-] }
+], git = "https://github.com/RGB-Tools/rgb-lib.git", rev = "952cd185" }
 scrypt = "0.11.0"
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -66,3 +66,6 @@ tracing-test = "0.2.5"
 [patch.crates-io]
 lightning = { path = "./rust-lightning/lightning" }
 lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
+
+[lints.rust.unexpected_cfgs]
+level = "allow"

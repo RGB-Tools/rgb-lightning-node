@@ -239,39 +239,40 @@ async fn swap_roundtrip_multihop_sell() {
         .iter()
         .find(|c| c.channel_id == channel_32.channel_id)
         .unwrap();
-    let btc_leg_diff = HTLC_MIN_MSAT + qty_to;
-    let fees = 1000;
+    let btc_leg_diff = (HTLC_MIN_MSAT + qty_to) / 1000;
+    let htlc_min_sat = HTLC_MIN_MSAT / 1000;
+    let fees = 1;
     assert_eq!(
-        chan_3_32.local_balance_msat,
-        chan_3_32_before.local_balance_msat - btc_leg_diff - (fees * 2)
+        chan_3_32.local_balance_sat,
+        chan_3_32_before.local_balance_sat - btc_leg_diff - (fees * 3)
     );
     assert_eq!(
-        chan_2_32.local_balance_msat,
-        chan_2_32_before.local_balance_msat + btc_leg_diff + (fees * 2)
+        chan_2_32.local_balance_sat,
+        chan_2_32_before.local_balance_sat + btc_leg_diff + (fees * 2)
     );
     assert_eq!(
-        chan_2_21.local_balance_msat,
-        chan_2_21_before.local_balance_msat - btc_leg_diff - fees
+        chan_2_21.local_balance_sat,
+        chan_2_21_before.local_balance_sat - btc_leg_diff - (fees * 2)
     );
     assert_eq!(
-        chan_1_21.local_balance_msat,
-        chan_1_21_before.local_balance_msat + btc_leg_diff + fees
+        chan_1_21.local_balance_sat,
+        chan_1_21_before.local_balance_sat + btc_leg_diff + fees
     );
     assert_eq!(
-        chan_1_12.local_balance_msat,
-        chan_1_12_before.local_balance_msat - HTLC_MIN_MSAT - fees
+        chan_1_12.local_balance_sat,
+        chan_1_12_before.local_balance_sat - htlc_min_sat - fees
     );
     assert_eq!(
-        chan_2_12.local_balance_msat,
-        chan_2_12_before.local_balance_msat + HTLC_MIN_MSAT + fees
+        chan_2_12.local_balance_sat,
+        chan_2_12_before.local_balance_sat + htlc_min_sat + fees
     );
     assert_eq!(
-        chan_2_23.local_balance_msat,
-        chan_2_23_before.local_balance_msat - HTLC_MIN_MSAT
+        chan_2_23.local_balance_sat,
+        chan_2_23_before.local_balance_sat - htlc_min_sat
     );
     assert_eq!(
-        chan_3_23.local_balance_msat,
-        chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT
+        chan_3_23.local_balance_sat,
+        chan_3_23_before.local_balance_sat + htlc_min_sat
     );
 
     println!("\nclose channels");

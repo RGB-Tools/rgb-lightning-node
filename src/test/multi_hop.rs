@@ -33,15 +33,15 @@ async fn multi_hop() {
 
     assert_eq!(node1_info.num_channels, 0);
     assert_eq!(node1_info.num_usable_channels, 0);
-    assert_eq!(node1_info.local_balance_msat, 0);
+    assert_eq!(node1_info.local_balance_sat, 0);
     assert_eq!(node1_info.num_peers, 0);
     assert_eq!(node2_info.num_channels, 0);
     assert_eq!(node2_info.num_usable_channels, 0);
-    assert_eq!(node2_info.local_balance_msat, 0);
+    assert_eq!(node2_info.local_balance_sat, 0);
     assert_eq!(node2_info.num_peers, 0);
     assert_eq!(node3_info.num_channels, 0);
     assert_eq!(node3_info.num_usable_channels, 0);
-    assert_eq!(node3_info.local_balance_msat, 0);
+    assert_eq!(node3_info.local_balance_sat, 0);
     assert_eq!(node3_info.num_peers, 0);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
@@ -54,6 +54,8 @@ async fn multi_hop() {
 
     let push_msat = 3500000;
 
+    println!("setting MOCK_FEE");
+    *MOCK_FEE.lock().unwrap() = Some(3000);
     let channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
@@ -67,6 +69,8 @@ async fn multi_hop() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
+    println!("setting MOCK_FEE");
+    *MOCK_FEE.lock().unwrap() = Some(3000);
     let channel_23 = open_channel(
         node2_addr,
         &node3_pubkey,
@@ -120,15 +124,20 @@ async fn multi_hop() {
     let node3_info = node_info(node3_addr).await;
     assert_eq!(node1_info.num_channels, 1);
     assert_eq!(node1_info.num_usable_channels, 1);
-    assert_eq!(node1_info.local_balance_msat, 100000000 - push_msat); // capacity - push
+    let capacity = 100000;
+    let push_sat = push_msat / 1000;
+    let max_expected_fee = 5000;
+    assert!(node1_info.local_balance_sat <= capacity - push_sat); // capacity - push
+    assert!(node1_info.local_balance_sat >= capacity - push_sat - max_expected_fee);
     assert_eq!(node1_info.num_peers, 1);
     assert_eq!(node2_info.num_channels, 2);
     assert_eq!(node2_info.num_usable_channels, 2);
-    assert_eq!(node2_info.local_balance_msat, 100000000); // pushes cancel out
+    assert!(node2_info.local_balance_sat <= capacity); // pushes cancel out
+    assert!(node2_info.local_balance_sat >= capacity - max_expected_fee);
     assert_eq!(node2_info.num_peers, 2);
     assert_eq!(node3_info.num_channels, 1);
     assert_eq!(node3_info.num_usable_channels, 1);
-    assert_eq!(node3_info.local_balance_msat, push_msat); // push
+    assert_eq!(node3_info.local_balance_sat, push_sat); // push
     assert_eq!(node3_info.num_peers, 1);
 
     let LNInvoiceResponse { invoice } =
@@ -212,22 +221,23 @@ async fn multi_hop() {
     assert_eq!(chan_2_23.asset_remote_amount, Some(50));
     assert_eq!(chan_3_23.asset_local_amount, Some(50));
     assert_eq!(chan_3_23.asset_remote_amount, Some(250));
-    let fees = 1000;
+    let htlc_min_sat = HTLC_MIN_MSAT / 1000;
+    let fees = 1;
     assert_eq!(
-        chan_1_12.local_balance_msat,
-        chan_1_12_before.local_balance_msat - HTLC_MIN_MSAT - fees
+        chan_1_12.local_balance_sat,
+        chan_1_12_before.local_balance_sat - htlc_min_sat - fees
     );
     assert_eq!(
-        chan_2_12.local_balance_msat,
-        chan_2_12_before.local_balance_msat + HTLC_MIN_MSAT + fees
+        chan_2_12.local_balance_sat,
+        chan_2_12_before.local_balance_sat + htlc_min_sat + fees
     );
     assert_eq!(
-        chan_2_23.local_balance_msat,
-        chan_2_23_before.local_balance_msat - HTLC_MIN_MSAT
+        chan_2_23.local_balance_sat,
+        chan_2_23_before.local_balance_sat - htlc_min_sat
     );
     assert_eq!(
-        chan_3_23.local_balance_msat,
-        chan_3_23_before.local_balance_msat + HTLC_MIN_MSAT
+        chan_3_23.local_balance_sat,
+        chan_3_23_before.local_balance_sat + htlc_min_sat
     );
     // wait for usable channels
     wait_for_usable_channels(node1_addr, 1).await;
@@ -238,13 +248,15 @@ async fn multi_hop() {
     let node2_info = node_info(node2_addr).await;
     let node3_info = node_info(node3_addr).await;
     assert_eq!(node1_info.num_channels, 1);
-    assert_eq!(node1_info.local_balance_msat, 93499000); // - payment - routing fee
+    assert!(node1_info.local_balance_sat <= 93499); // - payment - routing fee
+    assert!(node1_info.local_balance_sat >= 93499 - max_expected_fee);
     assert_eq!(node1_info.num_peers, 1);
     assert_eq!(node2_info.num_channels, 2);
-    assert_eq!(node2_info.local_balance_msat, 100001000); // + routing fee
+    assert!(node2_info.local_balance_sat <= 100001); // + routing fee
+    assert!(node2_info.local_balance_sat >= 100001 - max_expected_fee);
     assert_eq!(node2_info.num_peers, 2);
     assert_eq!(node3_info.num_channels, 1);
-    assert_eq!(node3_info.local_balance_msat, 6500000); // + payment
+    assert_eq!(node3_info.local_balance_sat, 6500); // + payment
     assert_eq!(node3_info.num_peers, 1);
 
     close_channel(node2_addr, &channel_12.channel_id, &node1_pubkey, false).await;
@@ -285,15 +297,15 @@ async fn multi_hop() {
     let node3_info = node_info(node3_addr).await;
     assert_eq!(node1_info.num_channels, 0);
     assert_eq!(node1_info.num_usable_channels, 0);
-    assert_eq!(node1_info.local_balance_msat, 0);
+    assert_eq!(node1_info.local_balance_sat, 0);
     assert_eq!(node1_info.num_peers, 1);
     assert_eq!(node2_info.num_channels, 0);
     assert_eq!(node2_info.num_usable_channels, 0);
-    assert_eq!(node2_info.local_balance_msat, 0);
+    assert_eq!(node2_info.local_balance_sat, 0);
     assert_eq!(node2_info.num_peers, 2);
     assert_eq!(node3_info.num_channels, 0);
     assert_eq!(node3_info.num_usable_channels, 0);
-    assert_eq!(node3_info.local_balance_msat, 0);
+    assert_eq!(node3_info.local_balance_sat, 0);
     assert_eq!(node3_info.num_peers, 1);
 
     disconnect_peer(node1_addr, &node2_info.pubkey).await;

@@ -9,7 +9,11 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Network, ScriptBuf};
 use hex::DisplayHex;
-use lightning::ln::ChannelId;
+use lightning::ln::bolt11_payment::{
+    payment_parameters_from_invoice, payment_parameters_from_zero_amount_invoice,
+};
+use lightning::ln::invoice_utils::create_invoice_from_channelmanager;
+use lightning::ln::types::ChannelId;
 use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
 use lightning::rgb_utils::{
@@ -20,7 +24,10 @@ use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
-use lightning::{impl_writeable_tlv_based_enum, ln::channelmanager::ChannelShutdownState};
+use lightning::{chain::channelmonitor::Balance, impl_writeable_tlv_based_enum};
+use lightning::{
+    ln::channel_state::ChannelShutdownState, onion_message::messenger::MessageSendInstructions,
+};
 use lightning::{
     ln::{
         channelmanager::{PaymentId, RecipientOnionFields, Retry},
@@ -34,10 +41,7 @@ use lightning::{
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
     util::{errors::APIError as LDKAPIError, IS_SWAP_SCID},
 };
-use lightning_invoice::payment::{
-    payment_parameters_from_invoice, payment_parameters_from_zero_amount_invoice,
-};
-use lightning_invoice::{utils::create_invoice_from_channelmanager, Currency};
+use lightning_invoice::Currency;
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use regex::Regex;
 use rgb_lib::{
@@ -63,7 +67,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 use tokio::{
     fs::File,
@@ -374,7 +378,7 @@ pub(crate) struct Channel {
     pub(crate) status: ChannelStatus,
     pub(crate) ready: bool,
     pub(crate) capacity_sat: u64,
-    pub(crate) local_balance_msat: u64,
+    pub(crate) local_balance_sat: u64,
     pub(crate) outbound_balance_msat: u64,
     pub(crate) inbound_balance_msat: u64,
     pub(crate) next_outbound_htlc_limit_msat: u64,
@@ -426,7 +430,7 @@ pub(crate) struct CreateUtxosRequest {
     pub(crate) up_to: bool,
     pub(crate) num: Option<u8>,
     pub(crate) size: Option<u32>,
-    pub(crate) fee_rate: f32,
+    pub(crate) fee_rate: u64,
     pub(crate) skip_sync: bool,
 }
 
@@ -539,7 +543,7 @@ pub(crate) enum HTLCStatus {
 impl_writeable_tlv_based_enum!(HTLCStatus,
     (0, Pending) => {},
     (1, Succeeded) => {},
-    (2, Failed) => {};
+    (2, Failed) => {},
 );
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -773,7 +777,9 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) pubkey: String,
     pub(crate) num_channels: usize,
     pub(crate) num_usable_channels: usize,
-    pub(crate) local_balance_msat: u64,
+    pub(crate) local_balance_sat: u64,
+    pub(crate) eventual_close_fees_sat: u64,
+    pub(crate) pending_outbound_payments_sat: u64,
     pub(crate) num_peers: usize,
     pub(crate) onchain_pubkey: String,
     pub(crate) max_media_upload_size_mb: u16,
@@ -783,6 +789,8 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) channel_capacity_max_sat: u64,
     pub(crate) channel_asset_min_amount: u64,
     pub(crate) channel_asset_max_amount: u64,
+    pub(crate) network_nodes: usize,
+    pub(crate) network_channels: usize,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -881,7 +889,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) amount: u64,
     pub(crate) recipient_id: String,
     pub(crate) donation: bool,
-    pub(crate) fee_rate: f32,
+    pub(crate) fee_rate: u64,
     pub(crate) min_confirmations: u8,
     pub(crate) transport_endpoints: Vec<String>,
     pub(crate) skip_sync: bool,
@@ -896,7 +904,7 @@ pub(crate) struct SendAssetResponse {
 pub(crate) struct SendBtcRequest {
     pub(crate) amount: u64,
     pub(crate) address: String,
-    pub(crate) fee_rate: f32,
+    pub(crate) fee_rate: u64,
     pub(crate) skip_sync: bool,
 }
 
@@ -964,7 +972,7 @@ impl_writeable_tlv_based_enum!(SwapStatus,
     (1, Pending) => {},
     (2, Succeeded) => {},
     (3, Expired) => {},
-    (4, Failed) => {};
+    (4, Failed) => {},
 );
 
 #[derive(Deserialize, Serialize)]
@@ -1040,7 +1048,7 @@ pub(crate) struct Transaction {
     pub(crate) txid: String,
     pub(crate) received: u64,
     pub(crate) sent: u64,
-    pub(crate) fee: Option<u64>,
+    pub(crate) fee: u64,
     pub(crate) confirmation_time: Option<BlockTime>,
 }
 
@@ -1356,8 +1364,11 @@ pub(crate) async fn close_channel(
         if payload.force {
             match unlocked_state
                 .channel_manager
-                .force_close_broadcasting_latest_txn(&ChannelId(channel_id), &peer_pubkey)
-            {
+                .force_close_broadcasting_latest_txn(
+                    &ChannelId(channel_id),
+                    &peer_pubkey,
+                    "Manually force-closed".to_string(),
+                ) {
                 Ok(()) => tracing::info!("EVENT: initiating channel force-close"),
                 Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
             }
@@ -1439,11 +1450,7 @@ pub(crate) async fn decode_ln_invoice(
     Ok(Json(DecodeLNInvoiceResponse {
         amt_msat: invoice.amount_milli_satoshis(),
         expiry_sec: invoice.expiry_time().as_secs(),
-        timestamp: invoice
-            .timestamp()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
+        timestamp: invoice.duration_since_epoch().as_secs(),
         asset_id: invoice.rgb_contract_id().map(|c| c.to_string()),
         asset_amount: invoice.rgb_amount(),
         payment_hash: hex_str(&invoice.payment_hash().to_byte_array()),
@@ -1939,18 +1946,24 @@ pub(crate) async fn list_channels(
             status,
             ready: chan_info.is_channel_ready,
             capacity_sat: chan_info.channel_value_satoshis,
-            local_balance_msat: chan_info.balance_msat,
             outbound_balance_msat: chan_info.outbound_capacity_msat,
             inbound_balance_msat: chan_info.inbound_capacity_msat,
             next_outbound_htlc_limit_msat: chan_info.next_outbound_htlc_limit_msat,
             next_outbound_htlc_minimum_msat: chan_info.next_outbound_htlc_minimum_msat,
             is_usable: chan_info.is_usable,
-            public: chan_info.is_public,
+            public: chan_info.is_announced,
             ..Default::default()
         };
 
         if let Some(funding_txo) = chan_info.funding_txo {
             channel.funding_txid = Some(funding_txo.txid.to_string());
+            if let Ok(chan_monitor) = unlocked_state.chain_monitor.get_monitor(funding_txo) {
+                channel.local_balance_sat = chan_monitor
+                    .get_claimable_balances()
+                    .iter()
+                    .map(|b| b.claimable_amount_satoshis())
+                    .sum::<u64>();
+            }
         }
 
         if let Some(node_info) = unlocked_state
@@ -1960,7 +1973,7 @@ pub(crate) async fn list_channels(
             .get(&NodeId::from_pubkey(&chan_info.counterparty.node_id))
         {
             if let Some(announcement) = &node_info.announcement_info {
-                channel.peer_alias = Some(announcement.alias.to_string());
+                channel.peer_alias = Some(announcement.alias().to_string());
             }
         }
 
@@ -2617,11 +2630,48 @@ pub(crate) async fn node_info(
 
     let chans = unlocked_state.channel_manager.list_channels();
 
+    let balances = unlocked_state.chain_monitor.get_claimable_balances(&[]);
+    let local_balance_sat = balances
+        .iter()
+        .map(|b| b.claimable_amount_satoshis())
+        .sum::<u64>();
+
+    let close_fees_map = |b| match b {
+        &Balance::ClaimableOnChannelClose {
+            transaction_fee_satoshis,
+            ..
+        } => transaction_fee_satoshis,
+        _ => 0,
+    };
+    let eventual_close_fees_sat = balances.iter().map(close_fees_map).sum::<u64>();
+
+    let pending_payments_map = |b| match b {
+        &Balance::MaybeTimeoutClaimableHTLC {
+            amount_satoshis,
+            outbound_payment,
+            ..
+        } => {
+            if outbound_payment {
+                amount_satoshis
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    };
+    let pending_outbound_payments_sat = balances.iter().map(pending_payments_map).sum::<u64>();
+
+    let graph_lock = unlocked_state.network_graph.read_only();
+    let network_nodes = graph_lock.nodes().len();
+    let network_channels = graph_lock.channels().len();
+
     Ok(Json(NodeInfoResponse {
         pubkey: unlocked_state.channel_manager.get_our_node_id().to_string(),
         num_channels: chans.len(),
         num_usable_channels: chans.iter().filter(|c| c.is_usable).count(),
-        local_balance_msat: chans.iter().map(|c| c.balance_msat).sum::<u64>(),
+        local_balance_sat,
+        eventual_close_fees_sat,
+        pending_outbound_payments_sat,
         num_peers: unlocked_state.peer_manager.list_peers().len(),
         onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
@@ -2631,6 +2681,8 @@ pub(crate) async fn node_info(
         channel_capacity_max_sat: OPENCHANNEL_MAX_SAT,
         channel_asset_min_amount: OPENCHANNEL_MIN_RGB_AMT,
         channel_asset_max_amount: u64::MAX,
+        network_nodes,
+        network_channels,
     }))
 }
 
@@ -2744,7 +2796,7 @@ pub(crate) async fn open_channel(
                 ..Default::default()
             },
             channel_handshake_config: ChannelHandshakeConfig {
-                announced_channel: payload.public,
+                announce_for_forwarding: payload.public,
                 our_htlc_minimum_msat: HTLC_MIN_MSAT,
                 minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
                 negotiate_anchors_zero_fee_htlc_tx: payload.with_anchors,
@@ -3088,6 +3140,7 @@ pub(crate) async fn send_onion_message(
             .ok_or(APIError::InvalidOnionData(s!("need a hex data string")))?;
 
         let destination = Destination::Node(intermediate_nodes.pop().unwrap());
+        let message_send_instructions = MessageSendInstructions::WithoutReplyPath { destination };
 
         unlocked_state
             .onion_messenger
@@ -3096,8 +3149,7 @@ pub(crate) async fn send_onion_message(
                     tlv_type: payload.tlv_type,
                     data,
                 },
-                destination,
-                None,
+                message_send_instructions,
             )
             .map_err(|e| APIError::FailedSendingOnionMessage(format!("{:?}", e)))?;
 
@@ -3123,7 +3175,7 @@ pub(crate) async fn send_payment(
             let payment_id = PaymentId(random_bytes);
 
             let amt_msat = match (offer.amount(), payload.amt_msat) {
-                (Some(offer::Amount::Bitcoin { amount_msats }), _) => *amount_msats,
+                (Some(offer::Amount::Bitcoin { amount_msats }), _) => amount_msats,
                 (_, Some(amt)) => amt,
                 (amt, _) => {
                     return Err(APIError::InvalidAmount(format!(
@@ -3303,8 +3355,7 @@ pub(crate) async fn sign_message(
     let signed_message = lightning::util::message_signing::sign(
         &message.as_bytes()[message.len()..],
         &unlocked_state.keys_manager.get_node_secret_key(),
-    )
-    .map_err(|e| APIError::FailedMessageSigning(e.to_string()))?;
+    );
 
     Ok(Json(SignMessageResponse { signed_message }))
 }

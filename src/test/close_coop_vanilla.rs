@@ -23,7 +23,7 @@ async fn with_anchors() {
     fund_and_create_utxos(node2_addr, None).await;
     fund_and_create_utxos(node3_addr, None).await;
 
-    let initial_balance = 99676206;
+    let initial_balance = 99676210;
 
     assert_eq!(
         btc_balance(node1_addr).await.vanilla.spendable,
@@ -98,7 +98,7 @@ async fn without_anchors() {
     fund_and_create_utxos(node2_addr, None).await;
     fund_and_create_utxos(node3_addr, None).await;
 
-    let initial_balance = 99676206;
+    let initial_balance = 99676210;
 
     assert_eq!(
         btc_balance(node1_addr).await.vanilla.spendable,

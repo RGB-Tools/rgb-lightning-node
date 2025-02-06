@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
-use bitcoin::hash_types::{BlockHash, Txid};
+use bitcoin::hash_types::BlockHash;
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::log_warn;
 use lightning::util::logger::Logger;
@@ -136,7 +136,11 @@ impl BitcoindClient {
                 "failed to make initial call to bitcoind - please check your RPC user/password and access settings")
             })?;
         let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
-        fees.insert(ConfirmationTarget::OnChainSweep, AtomicU32::new(5000));
+        fees.insert(
+            ConfirmationTarget::MaximumFeeEstimate,
+            AtomicU32::new(50000),
+        );
+        fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));
         fees.insert(
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             AtomicU32::new(MIN_FEERATE),
@@ -253,7 +257,18 @@ impl BitcoindClient {
                 )
                 .await;
 
-                fees.get(&ConfirmationTarget::OnChainSweep)
+                let very_high_prio_estimate = get_estimate(
+                    &rpc_client,
+                    &logger,
+                    &[serde_json::json!(2), serde_json::json!("CONSERVATIVE")],
+                    50000,
+                )
+                .await;
+
+                fees.get(&ConfirmationTarget::MaximumFeeEstimate)
+                    .unwrap()
+                    .store(very_high_prio_estimate, Ordering::Release);
+                fees.get(&ConfirmationTarget::UrgentOnChainSweep)
                     .unwrap()
                     .store(high_prio_estimate, Ordering::Release);
                 fees.get(&ConfirmationTarget::MinAllowedAnchorChannelRemoteFee)
@@ -273,7 +288,7 @@ impl BitcoindClient {
                     .store(background_estimate, Ordering::Release);
                 fees.get(&ConfirmationTarget::OutputSpendingFee)
                     .unwrap()
-                    .store(mempoolmin_estimate + 100, Ordering::Release);
+                    .store(background_estimate, Ordering::Release);
 
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
@@ -303,31 +318,41 @@ impl FeeEstimator for BitcoindClient {
 
 impl BroadcasterInterface for BitcoindClient {
     fn broadcast_transactions(&self, txs: &[&Transaction]) {
-        // TODO: Rather than calling `sendrawtransaction` in a a loop, we should probably use
-        // `submitpackage` once it becomes available.
-        for tx in txs {
-            let bitcoind_rpc_client = Arc::clone(&self.bitcoind_rpc_client);
-            let tx_serialized = encode::serialize_hex(tx);
-            let tx_json = serde_json::json!(tx_serialized);
-            let logger = Arc::clone(&self.logger);
-            self.handle.spawn(async move {
-                // This may error due to RL calling `broadcast_transactions` with the same transaction
-                // multiple times, but the error is safe to ignore.
-                match bitcoind_rpc_client
-                    .call_method::<Txid>("sendrawtransaction", &[tx_json])
-                    .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            let err_str = e.get_ref().unwrap().to_string();
-                            log_warn!(logger,
-                                       "Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransaction: {}",
-                                       err_str,
-                                       tx_serialized);
-                            print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\n> ", err_str);
-                        }
-                    }
-            });
-        }
+        // As of Bitcoin Core 28, using `submitpackage` allows us to broadcast multiple
+        // transactions at once and have them propagate through the network as a whole, avoiding
+        // some pitfalls with anchor channels where the first transaction doesn't make it into the
+        // mempool at all. Several older versions of Bitcoin Core also support `submitpackage`,
+        // however, so we just use it unconditionally here.
+        // Sadly, Bitcoin Core has an arbitrary restriction on `submitpackage` - it must actually
+        // contain a package (see https://github.com/bitcoin/bitcoin/issues/31085).
+        let txn = txs.iter().map(encode::serialize_hex).collect::<Vec<_>>();
+        let bitcoind_rpc_client = Arc::clone(&self.bitcoind_rpc_client);
+        let logger = Arc::clone(&self.logger);
+        self.handle.spawn(async move {
+			let res = if txn.len() == 1 {
+				let tx_json = serde_json::json!(txn[0]);
+				bitcoind_rpc_client
+					.call_method::<serde_json::Value>("sendrawtransaction", &[tx_json])
+					.await
+			} else {
+				let tx_json = serde_json::json!(txn);
+				bitcoind_rpc_client
+					.call_method::<serde_json::Value>("submitpackage", &[tx_json])
+					.await
+			};
+			// This may error due to RL calling `broadcast_transactions` with the same transaction
+			// multiple times, but the error is safe to ignore.
+			match res {
+				Ok(_) => {}
+				Err(e) => {
+					let err_str = e.get_ref().unwrap().to_string();
+					log_warn!(logger,
+						"Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransactions: {:?}",
+						err_str,
+						txn);
+					print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\n> ", err_str);
+				}
+			}
+		});
     }
 }

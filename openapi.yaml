@@ -1177,9 +1177,9 @@ components:
         capacity_sat:
           type: integer
           example: 30010
-        local_balance_msat:
+        local_balance_sat:
           type: integer
-          example: 28616000
+          example: 28616
         outbound_balance_msat:
           type: integer
           example: 21616000
@@ -1262,7 +1262,7 @@ components:
           example: 32500
         fee_rate:
           type: number
-          example: 4.2
+          example: 5
         skip_sync:
           type: boolean
           example: false
@@ -1732,9 +1732,15 @@ components:
         num_usable_channels:
           type: integer
           example: 0
-        local_balance_msat:
+        local_balance_sat:
           type: integer
-          example: 28616000
+          example: 28616
+        eventual_close_fees_sat:
+          type: integer
+          example: 892
+        pending_outbound_payments_sat:
+          type: integer
+          example: 7852
         num_peers:
           type: integer
           example: 1
@@ -1762,6 +1768,12 @@ components:
         channel_asset_max_amount:
           type: integer
           example: 18446744073709551615
+        network_nodes:
+          type: integer
+          example: 987226
+        network_channels:
+          type: integer
+          example: 7812821
     OpenChannelRequest:
       type: object
       properties:
@@ -1930,7 +1942,7 @@ components:
           example: false
         fee_rate:
           type: number
-          example: 4.2
+          example: 5
         min_confirmations:
           type: integer
           example: 1
@@ -1959,7 +1971,7 @@ components:
           example: bcrt1qwxht5tut39dws8tjcf649tp908r8fr2j75c94k
         fee_rate:
           type: number
-          example: 4.2
+          example: 5
         skip_sync:
           type: boolean
           example: false

@@ -69,12 +69,12 @@ async fn vanilla_payment_on_rgb_channel() {
     let chan_1 = channels_1.first().unwrap();
     let chan_2 = channels_2.first().unwrap();
     assert_eq!(
-        chan_1.local_balance_msat,
-        chan_1_before.local_balance_msat - amount
+        chan_1.local_balance_sat,
+        chan_1_before.local_balance_sat - amount / 1000
     );
     assert_eq!(
-        chan_2.local_balance_msat,
-        chan_2_before.local_balance_msat + amount
+        chan_2.local_balance_sat,
+        chan_2_before.local_balance_sat + amount / 1000
     );
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;

@@ -60,7 +60,7 @@ async fn concurrent_btc_payments() {
     let channels = list_channels(node1_addr).await;
     assert_eq!(channels.len(), 1);
     let channel = channels.first().unwrap();
-    assert_eq!(channel.local_balance_msat, 0);
+    assert_eq!(channel.local_balance_sat, 0);
 
     let amt_msat_1 = 4000000;
     let amt_msat_2 = 5000000;
@@ -160,5 +160,5 @@ async fn concurrent_btc_payments() {
     let channels = list_channels(node1_addr).await;
     assert_eq!(channels.len(), 1);
     let channel = channels.first().unwrap();
-    assert_eq!(channel.local_balance_msat, amt_msat_1 + amt_msat_2);
+    assert_eq!(channel.local_balance_sat * 1000, amt_msat_1 + amt_msat_2);
 }

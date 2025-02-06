@@ -1,11 +1,12 @@
 use amplify::s;
+use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
 use futures::Future;
-use lightning::ln::channelmanager::ChannelDetails;
-use lightning::ln::ChannelId;
+use lightning::ln::channel_state::ChannelDetails;
+use lightning::ln::types::ChannelId;
 use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
-    DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
+    DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA, MAX_PATH_LENGTH_ESTIMATE,
 };
 use lightning::{
     onion_message::packet::OnionMessageContents,
@@ -14,7 +15,7 @@ use lightning::{
 };
 use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use rgb_lib::{bdk::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
+use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
 use std::{
     fmt::Write,
     fs,
@@ -36,9 +37,9 @@ use crate::{
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
-        BumpTxEventHandler, ChannelManager, InboundPaymentInfoStorage, LdkBackgroundServices,
-        NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage, OutputSweeper, PeerManager,
-        SwapMap,
+        BumpTxEventHandler, ChainMonitor, ChannelManager, InboundPaymentInfoStorage,
+        LdkBackgroundServices, NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage,
+        OutputSweeper, PeerManager, SwapMap,
     },
 };
 
@@ -89,6 +90,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,
+    pub(crate) chain_monitor: Arc<ChainMonitor>,
     pub(crate) onion_messenger: Arc<OnionMessenger>,
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
@@ -136,10 +138,13 @@ impl OnionMessageContents for UserOnionMessageContents {
     fn tlv_type(&self) -> u64 {
         self.tlv_type
     }
+    fn msg_type(&self) -> &'static str {
+        "RLNCustomMessageType"
+    }
 }
 
 impl Writeable for UserOnionMessageContents {
-    fn write<W: Writer>(&self, w: &mut W) -> Result<(), std::io::Error> {
+    fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
         w.write_all(&self.data)
     }
 }
@@ -267,10 +272,7 @@ pub(crate) fn hex_str_to_compressed_pubkey(hex: &str) -> Option<PublicKey> {
     if hex.len() != 33 * 2 {
         return None;
     }
-    let data = match hex_str_to_vec(&hex[0..33 * 2]) {
-        Some(bytes) => bytes,
-        None => return None,
-    };
+    let data = hex_str_to_vec(&hex[0..33 * 2])?;
     match PublicKey::from_slice(&data) {
         Ok(pk) => Some(pk),
         Err(_) => None,
@@ -410,6 +412,7 @@ pub(crate) fn get_route(
         expiry_time: None,
         max_total_cltv_expiry_delta: DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
         max_path_count: 1,
+        max_path_length: MAX_PATH_LENGTH_ESTIMATE,
         max_channel_saturation_power_of_half: 2,
         previously_failed_channels: vec![],
         previously_failed_blinded_path_idxs: vec![],

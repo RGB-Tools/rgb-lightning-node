@@ -140,12 +140,12 @@ async fn swap_roundtrip_buy_same_channel() {
         .find(|c| c.channel_id == channel_12.channel_id)
         .unwrap();
     assert_eq!(
-        chan_1_12.local_balance_msat,
-        chan_1_12_before.local_balance_msat + qty_from
+        chan_1_12.local_balance_sat,
+        chan_1_12_before.local_balance_sat + qty_from / 1000
     );
     assert_eq!(
-        chan_2_12.local_balance_msat,
-        chan_2_12_before.local_balance_msat - qty_from
+        chan_2_12.local_balance_sat,
+        chan_2_12_before.local_balance_sat - qty_from / 1000
     );
 
     println!("\nclose channels");
