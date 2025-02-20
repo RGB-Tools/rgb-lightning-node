@@ -60,7 +60,7 @@ use rgb_lib::{
         DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
         WitnessData,
     },
-    AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
+    AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer, RgbTxid,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -1238,7 +1238,10 @@ impl OutputSpender for RgbOutputSpender {
                 .map_err(|_| ())?;
             let update_res = self
                 .rgb_wallet_wrapper
-                .update_witnesses(closing_height.unwrap())
+                .update_witnesses(
+                    closing_height.unwrap(),
+                    vec![RgbTxid::from_str(&txid_str).unwrap()],
+                )
                 .unwrap();
             if !update_res.failed.is_empty() {
                 return Err(());
@@ -1352,7 +1355,8 @@ impl OutputSpender for RgbOutputSpender {
         for consignment in consignments {
             let contract_id = consignment.contract_id();
 
-            let (vout, _, recipient_id, _) = asset_info[&contract_id].clone();
+            let (mut vout, _, recipient_id, _) = asset_info[&contract_id].clone();
+            vout += 1;
 
             let consignment_path = self
                 .static_state
