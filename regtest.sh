@@ -22,7 +22,7 @@ _start_services() {
     _stop_services
 
     mkdir -p data{core,index,ldk0,ldk1,ldk2}
-    # see docker-compose.yml for the exposed ports
+    # see compose.yaml for the exposed ports
     EXPOSED_PORTS=(3000 50001)
     for port in "${EXPOSED_PORTS[@]}"; do
         if [ -n "$(ss -HOlnt "sport = :$port")" ];then
