@@ -33,5 +33,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{matrix.toolchain}}
+          rustflags: ""
       - name: Build
         run: cargo build

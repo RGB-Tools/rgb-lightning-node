@@ -20,5 +20,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          rustflags: ""
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
