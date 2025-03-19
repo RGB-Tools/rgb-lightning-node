@@ -1091,11 +1091,8 @@ dependencies = [
  "log",
  "nonasync",
  "psbt",
- "serde",
- "serde_yaml",
  "sha2",
  "strict_encoding",
- "toml",
 ]
 
 [[package]]
@@ -3613,8 +3610,7 @@ dependencies = [
 [[package]]
 name = "rgb-lib"
 version = "0.3.0-alpha.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c33dccf880941143884a678c340324f933d03796cbeabad1ae3b8b3c74295b"
+source = "git+https://github.com/RGB-Tools/rgb-lib?rev=fda64400#fda644002768df83292d6398d0638abc4d401208"
 dependencies = [
  "amplify",
  "base64 0.22.1",
@@ -3624,7 +3620,6 @@ dependencies = [
  "bp-core",
  "bp-electrum",
  "bp-esplora",
- "bp-seals",
  "bp-std",
  "chacha20poly1305",
  "commit_verify",
@@ -3633,7 +3628,6 @@ dependencies = [
  "hex",
  "rand",
  "reqwest",
- "rgb-core",
  "rgb-interfaces",
  "rgb-invoice",
  "rgb-lib-migration",
@@ -3661,8 +3655,7 @@ dependencies = [
 [[package]]
 name = "rgb-lib-migration"
 version = "0.3.0-alpha.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf2cfcdf66f3f14db9355eb125d66485d03934056ca3141a10708bbf108e0d69"
+source = "git+https://github.com/RGB-Tools/rgb-lib?rev=fda64400#fda644002768df83292d6398d0638abc4d401208"
 dependencies = [
  "async-std",
  "sea-orm-migration",

@@ -33,7 +33,7 @@ lightning-rapid-gossip-sync = { version = "0.0.125", path = "./rust-lightning/li
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "0.3.0-alpha.12", features = [
+rgb-lib = { git = "https://github.com/RGB-Tools/rgb-lib", rev = "fda64400", features = [
     "electrum",
     "esplora",
 ] }
