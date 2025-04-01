@@ -1424,6 +1424,32 @@ async fn wait_for_usable_channels(node_address: SocketAddr, expected_num_usable_
     }
 }
 
+async fn can_forward_htlc(node_address: SocketAddr, amount_msat: u64) -> bool {
+    println!("checking if node {node_address} can forward HTLC of {amount_msat} msat");
+    let max_limit = max_outbound_htlc_limit(node_address).await;
+    let can_forward = max_limit >= amount_msat;
+    if can_forward {
+        println!(
+            "node can forward {amount_msat} msat (max limit: {} msat)",
+            max_limit
+        );
+    } else {
+        println!(
+            "node cannot forward {amount_msat} msat (max limit: {} msat)",
+            max_limit
+        );
+    }
+    can_forward
+}
+
+async fn max_outbound_htlc_limit(node_address: SocketAddr) -> u64 {
+    println!("getting maximum outbound HTLC limit for node {node_address}");
+    let channels = list_channels(node_address).await;
+    let max_limit = channels.iter().map(|channel| channel.next_outbound_htlc_limit_msat).max().unwrap_or(0);
+    println!("maximum outbound HTLC limit: {} msat", max_limit);
+    max_limit
+}
+
 async fn _wait_for_ln_payment(
     node_address: SocketAddr,
     payment_hash: &str,
@@ -1659,5 +1685,6 @@ mod swap_roundtrip_multihop_asset_asset;
 mod swap_roundtrip_multihop_buy;
 mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
+mod swap_btc_to_asset_with_vanilla_and_asset_channels;
 mod upload_asset_media;
 mod vanilla_payment_on_rgb_channel;
