@@ -995,8 +995,6 @@ components:
     AssetMetadataResponse:
       type: object
       properties:
-        asset_iface:
-          $ref: '#/components/schemas/AssetIface'
         asset_schema:
           $ref: '#/components/schemas/AssetSchema'
         issued_supply:
@@ -1025,8 +1023,6 @@ components:
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
-        asset_iface:
-          $ref: '#/components/schemas/AssetIface'
         name:
           type: string
           example: Collectible
@@ -1049,20 +1045,12 @@ components:
           $ref: '#/components/schemas/AssetBalanceResponse'
         media:
           $ref: '#/components/schemas/Media'
-    AssetIface:
-      type: string
-      enum:
-        - RGB20
-        - RGB21
-        - RGB25
     AssetNIA:
       type: object
       properties:
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
-        asset_iface:
-          $ref: '#/components/schemas/AssetIface'
         ticker:
           type: string
           example: USDT
@@ -1100,8 +1088,6 @@ components:
         asset_id:
           type: string
           example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
-        asset_iface:
-          $ref: '#/components/schemas/AssetIface'
         ticker:
           type: string
           example: UNI
@@ -1349,8 +1335,8 @@ components:
         recipient_id:
           type: string
           example: utxob:2PoDFyk-8aegNHZE4-inHHn4nWz-rNtAX3MWv-sTiVPQYrF-ed2bXM
-        asset_iface:
-          $ref: '#/components/schemas/AssetIface'
+        asset_schema:
+          $ref: '#/components/schemas/AssetSchema'
         asset_id:
           type: string
           example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
@@ -1805,9 +1791,12 @@ components:
         num_peers:
           type: integer
           example: 1
-        onchain_pubkey:
+        account_xpub_vanilla:
           type: string
-          example: tpubDDqiQYzNMGsKVVmWYG4FCPPcbd5S4uW9u7a6zUFkgbh16VmFTvsaNyo37mAgkCku6jStBcU8VaLxG2SE7ab2sEwwagjfbS8U9H82BadjKR1
+          example: tpubDDfzqHEET3ksD81qshMHkw35yp6TuLP1kr5rWWeJcLAqDfMXKDJzmDwAnda6DCqw7kkkhPphuDZFE2a6Sw8h5ZA5NwmtTssEnjMqN7xMzSd
+        account_xpub_colored:
+          type: string
+          example: tpubDDcdKhaxwVV2T6xwigti7dSY1a7LHFwZmKAaLWtNhzrvuTXqjjzo8U7YQkUuPah5yHvnk3cbXmb18ZRFwHEKTFUQmA9dij1nPVA2LCJCiEa
         max_media_upload_size_mb:
           type: integer
           example: 5

@@ -52,11 +52,10 @@ use rgb_lib::{
             check_indexer_url as rgb_lib_check_indexer_url,
             IndexerProtocol as RgbLibIndexerProtocol,
         },
-        AssetCFA as RgbLibAssetCFA, AssetIface as RgbLibAssetIface, AssetNIA as RgbLibAssetNIA,
-        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
-        Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
-        Recipient, RecipientInfo, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
-        WitnessData,
+        AssetCFA as RgbLibAssetCFA, AssetNIA as RgbLibAssetNIA, AssetUDA as RgbLibAssetUDA,
+        Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia, Invoice as RgbLibInvoice,
+        Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves, Recipient, RecipientInfo,
+        Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData,
     },
     AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
 };
@@ -149,7 +148,6 @@ pub(crate) struct AssetMetadataRequest {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetMetadataResponse {
-    pub(crate) asset_iface: AssetIface,
     pub(crate) asset_schema: AssetSchema,
     pub(crate) issued_supply: u64,
     pub(crate) timestamp: i64,
@@ -163,7 +161,6 @@ pub(crate) struct AssetMetadataResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetCFA {
     pub(crate) asset_id: String,
-    pub(crate) asset_iface: AssetIface,
     pub(crate) name: String,
     pub(crate) details: Option<String>,
     pub(crate) precision: u8,
@@ -178,7 +175,6 @@ impl From<RgbLibAssetCFA> for AssetCFA {
     fn from(value: RgbLibAssetCFA) -> Self {
         Self {
             asset_id: value.asset_id,
-            asset_iface: value.asset_iface.into(),
             name: value.name,
             details: value.details,
             precision: value.precision,
@@ -191,27 +187,9 @@ impl From<RgbLibAssetCFA> for AssetCFA {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) enum AssetIface {
-    RGB20,
-    RGB21,
-    RGB25,
-}
-
-impl From<RgbLibAssetIface> for AssetIface {
-    fn from(value: RgbLibAssetIface) -> Self {
-        match value {
-            RgbLibAssetIface::RGB20 => Self::RGB20,
-            RgbLibAssetIface::RGB21 => Self::RGB21,
-            RgbLibAssetIface::RGB25 => Self::RGB25,
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetNIA {
     pub(crate) asset_id: String,
-    pub(crate) asset_iface: AssetIface,
     pub(crate) ticker: String,
     pub(crate) name: String,
     pub(crate) details: Option<String>,
@@ -227,7 +205,6 @@ impl From<RgbLibAssetNIA> for AssetNIA {
     fn from(value: RgbLibAssetNIA) -> Self {
         Self {
             asset_id: value.asset_id,
-            asset_iface: value.asset_iface.into(),
             ticker: value.ticker,
             name: value.name,
             details: value.details,
@@ -271,7 +248,6 @@ impl From<RgbLibAssetSchema> for AssetSchema {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetUDA {
     pub(crate) asset_id: String,
-    pub(crate) asset_iface: AssetIface,
     pub(crate) ticker: String,
     pub(crate) name: String,
     pub(crate) details: Option<String>,
@@ -287,7 +263,6 @@ impl From<RgbLibAssetUDA> for AssetUDA {
     fn from(value: RgbLibAssetUDA) -> Self {
         Self {
             asset_id: value.asset_id,
-            asset_iface: value.asset_iface.into(),
             ticker: value.ticker,
             name: value.name,
             details: value.details,
@@ -460,7 +435,7 @@ pub(crate) struct DecodeRGBInvoiceRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) recipient_id: String,
-    pub(crate) asset_iface: Option<AssetIface>,
+    pub(crate) asset_schema: Option<AssetSchema>,
     pub(crate) asset_id: Option<String>,
     pub(crate) amount: Option<u64>,
     pub(crate) network: BitcoinNetwork,
@@ -802,7 +777,8 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) eventual_close_fees_sat: u64,
     pub(crate) pending_outbound_payments_sat: u64,
     pub(crate) num_peers: usize,
-    pub(crate) onchain_pubkey: String,
+    pub(crate) account_xpub_vanilla: String,
+    pub(crate) account_xpub_colored: String,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) rgb_htlc_min_msat: u64,
     pub(crate) rgb_channel_capacity_min_sat: u64,
@@ -1262,7 +1238,6 @@ pub(crate) async fn asset_metadata(
         .rgb_get_asset_metadata(contract_id)?;
 
     Ok(Json(AssetMetadataResponse {
-        asset_iface: metadata.asset_iface.into(),
         asset_schema: metadata.asset_schema.into(),
         issued_supply: metadata.issued_supply,
         timestamp: metadata.timestamp,
@@ -1490,7 +1465,7 @@ pub(crate) async fn decode_rgb_invoice(
 
     Ok(Json(DecodeRGBInvoiceResponse {
         recipient_id: invoice_data.recipient_id,
-        asset_iface: invoice_data.asset_iface.map(|i| i.into()),
+        asset_schema: invoice_data.asset_schema.map(|s| s.into()),
         asset_id: invoice_data.asset_id,
         amount: invoice_data.amount,
         network: invoice_data.network.into(),
@@ -2829,7 +2804,8 @@ pub(crate) async fn node_info(
         eventual_close_fees_sat,
         pending_outbound_payments_sat,
         num_peers: unlocked_state.peer_manager.list_peers().len(),
-        onchain_pubkey: unlocked_state.rgb_get_wallet_data().pubkey,
+        account_xpub_vanilla: unlocked_state.rgb_get_wallet_data().account_xpub_vanilla,
+        account_xpub_colored: unlocked_state.rgb_get_wallet_data().account_xpub_colored,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
         rgb_htlc_min_msat: HTLC_MIN_MSAT,
         rgb_channel_capacity_min_sat: OPENRGBCHANNEL_MIN_SAT,

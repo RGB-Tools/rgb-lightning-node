@@ -21,7 +21,7 @@ use lightning::onion_message::messenger::{DefaultMessageRouter, SimpleArcOnionMe
 use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
     update_rgb_channel_amount, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME, STATIC_BLINDING,
-    WALLET_ACCOUNT_XPUB_FNAME, WALLET_FINGERPRINT_FNAME,
+    WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -54,13 +54,13 @@ use rgb_lib::{
         secp256k1::Secp256k1 as Secp256k1_30,
         ScriptBuf,
     },
-    utils::{get_account_xpub, recipient_id_from_script_buf, script_buf_from_recipient_id},
+    utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
         DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
         WitnessData,
     },
-    AssetSchema, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer, RgbTxid,
+    BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer, RgbTxid,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -516,7 +516,7 @@ async fn handle_ldk_events(
                 &temporary_channel_id,
                 &PathBuf::from(&static_state.ldk_data_dir),
             );
-            let (unsigned_psbt, asset_id, recipient_id) = if is_colored {
+            let (unsigned_psbt, asset_id) = if is_colored {
                 let (rgb_info, _) = get_rgb_channel_info_pending(
                     &temporary_channel_id,
                     &PathBuf::from(&static_state.ldk_data_dir),
@@ -546,12 +546,12 @@ async fn handle_ldk_events(
                 })
                 .await
                 .unwrap();
-                (unsigned_psbt, Some(asset_id), Some(recipient_id))
+                (unsigned_psbt, Some(asset_id))
             } else {
                 let unsigned_psbt = unlocked_state
                     .rgb_send_btc_begin(addr.to_address(), channel_value_satoshis, FEE_RATE)
                     .unwrap();
-                (unsigned_psbt, None, None)
+                (unsigned_psbt, None)
             };
 
             let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
@@ -565,14 +565,12 @@ async fn handle_ldk_events(
                 .join(format!("psbt_{funding_txid}"));
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
-            if is_colored {
-                let asset_id = asset_id.expect("is present");
-                let recipient_id = recipient_id.expect("is present");
+            if let Some(asset_id) = asset_id {
                 let transfer_dir = unlocked_state.rgb_get_transfer_dir(&funding_txid);
                 let asset_transfer_dir =
                     unlocked_state.rgb_get_asset_transfer_dir(transfer_dir, &asset_id);
                 let consignment_path =
-                    unlocked_state.rgb_get_send_consignment_path(asset_transfer_dir, &recipient_id);
+                    unlocked_state.rgb_get_send_consignment_path(asset_transfer_dir);
                 let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
@@ -975,10 +973,8 @@ async fn handle_ldk_events(
                 let consignment =
                     RgbTransfer::load_file(consignment_path).expect("successful consignment load");
                 let contract_id = consignment.contract_id();
-                let schema_id = consignment.schema_id().to_string();
-                let asset_schema = AssetSchema::from_schema_id(schema_id).unwrap();
 
-                match unlocked_state.rgb_save_new_asset(&asset_schema, contract_id, None) {
+                match unlocked_state.rgb_save_new_asset(contract_id, None) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {}", e),
@@ -1625,7 +1621,9 @@ pub(crate) async fn start_ldk(
 
     // Prepare the RGB wallet
     let mnemonic_str = mnemonic.to_string();
-    let account_xpub = get_account_xpub(bitcoin_network, &mnemonic_str).unwrap();
+    let (_, account_xpub_vanilla) =
+        get_account_data(bitcoin_network, &mnemonic_str, false).unwrap();
+    let (_, account_xpub_colored) = get_account_data(bitcoin_network, &mnemonic_str, true).unwrap();
     let data_dir = static_state
         .storage_dir_path
         .clone()
@@ -1637,7 +1635,8 @@ pub(crate) async fn start_ldk(
             bitcoin_network,
             database_type: DatabaseType::Sqlite,
             max_allocations_per_utxo: 1,
-            pubkey: account_xpub.to_string(),
+            account_xpub_vanilla: account_xpub_vanilla.to_string(),
+            account_xpub_colored: account_xpub_colored.to_string(),
             mnemonic: Some(mnemonic.to_string()),
             vanilla_keychain: None,
         })
@@ -1648,14 +1647,21 @@ pub(crate) async fn start_ldk(
     let rgb_online = rgb_wallet.go_online(false, indexer_url.to_string())?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
-        account_xpub.fingerprint().to_string(),
+        account_xpub_colored.fingerprint().to_string(),
     )
     .expect("able to write");
     fs::write(
         static_state
             .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_FNAME),
-        account_xpub.to_string(),
+            .join(WALLET_ACCOUNT_XPUB_COLORED_FNAME),
+        account_xpub_colored.to_string(),
+    )
+    .expect("able to write");
+    fs::write(
+        static_state
+            .storage_dir_path
+            .join(WALLET_ACCOUNT_XPUB_VANILLA_FNAME),
+        account_xpub_vanilla.to_string(),
     )
     .expect("able to write");
 

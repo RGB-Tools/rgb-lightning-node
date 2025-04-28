@@ -1,4 +1,4 @@
-use crate::routes::{AssetIface, BitcoinNetwork};
+use crate::routes::{AssetSchema, BitcoinNetwork};
 
 use super::*;
 
@@ -49,7 +49,7 @@ async fn send_receive() {
     // check decoded RGB invoice (with asset ID)
     let decoded = decode_rgb_invoice(node1_addr, &invoice).await;
     assert_eq!(decoded.recipient_id, recipient_id);
-    assert!(matches!(decoded.asset_iface, Some(AssetIface::RGB20)));
+    assert!(matches!(decoded.asset_schema, Some(AssetSchema::Nia)));
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
     assert_eq!(decoded.amount, None);
     assert!(matches!(decoded.network, BitcoinNetwork::Regtest));

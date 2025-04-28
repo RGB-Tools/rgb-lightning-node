@@ -110,10 +110,9 @@ impl UnlockedAppState {
     pub(crate) fn rgb_get_send_consignment_path<P: AsRef<Path>>(
         &self,
         asset_transfer_dir: P,
-        recipient_id: &str,
     ) -> PathBuf {
         self.rgb_wallet_wrapper
-            .get_send_consignment_path(asset_transfer_dir, recipient_id)
+            .get_send_consignment_path(asset_transfer_dir)
     }
 
     pub(crate) fn rgb_get_transfer_dir(&self, transfer_id: &str) -> PathBuf {
@@ -214,12 +213,11 @@ impl UnlockedAppState {
 
     pub(crate) fn rgb_save_new_asset(
         &self,
-        asset_schema: &AssetSchema,
         contract_id: ContractId,
         contract: Option<Contract>,
     ) -> Result<(), RgbLibError> {
         self.rgb_wallet_wrapper
-            .save_new_asset(asset_schema, contract_id, contract)
+            .save_new_asset(contract_id, contract)
     }
 
     pub(crate) fn rgb_send(
@@ -413,10 +411,9 @@ impl RgbLibWalletWrapper {
     pub(crate) fn get_send_consignment_path<P: AsRef<Path>>(
         &self,
         asset_transfer_dir: P,
-        recipient_id: &str,
     ) -> PathBuf {
         self.get_rgb_wallet()
-            .get_send_consignment_path(asset_transfer_dir, recipient_id)
+            .get_send_consignment_path(asset_transfer_dir)
     }
 
     pub(crate) fn get_transfer_dir(&self, transfer_id: &str) -> PathBuf {
@@ -439,14 +436,8 @@ impl RgbLibWalletWrapper {
         amounts: Vec<u64>,
         file_path: Option<String>,
     ) -> Result<AssetCFA, RgbLibError> {
-        self.get_rgb_wallet().issue_asset_cfa(
-            self.online.clone(),
-            name,
-            details,
-            precision,
-            amounts,
-            file_path,
-        )
+        self.get_rgb_wallet()
+            .issue_asset_cfa(name, details, precision, amounts, file_path)
     }
 
     pub(crate) fn issue_asset_nia(
@@ -457,7 +448,7 @@ impl RgbLibWalletWrapper {
         amounts: Vec<u64>,
     ) -> Result<AssetNIA, RgbLibError> {
         self.get_rgb_wallet()
-            .issue_asset_nia(self.online.clone(), ticker, name, precision, amounts)
+            .issue_asset_nia(ticker, name, precision, amounts)
     }
 
     pub(crate) fn issue_asset_uda(
@@ -470,7 +461,6 @@ impl RgbLibWalletWrapper {
         attachments_file_paths: Vec<String>,
     ) -> Result<AssetUDA, RgbLibError> {
         self.get_rgb_wallet().issue_asset_uda(
-            self.online.clone(),
             ticker,
             name,
             details,
@@ -537,12 +527,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn save_new_asset(
         &self,
-        asset_schema: &AssetSchema,
         contract_id: ContractId,
         contract: Option<Contract>,
     ) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet()
-            .save_new_asset(asset_schema, contract_id, contract)
+        self.get_rgb_wallet().save_new_asset(contract_id, contract)
     }
 
     pub(crate) fn send(

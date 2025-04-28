@@ -2,13 +2,13 @@
 name = "rgb-lightning-node"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.81.0"
+rust-version = "1.85.0"
 
 [[bin]]
 name = "rgb-lightning-node"
 
 [dependencies]
-amplify = { version = "=4.7.1", default-features = false }
+amplify = { version = "=4.8.1", default-features = false }
 anyhow = "1.0.93"
 axum = { version = "0.7.7", features = ["multipart"] }
 axum-extra = "0.9.4"
@@ -33,7 +33,7 @@ lightning-rapid-gossip-sync = { version = "0.0.125", path = "./rust-lightning/li
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "0.3.0-alpha.12", features = [
+rgb-lib = { version = "0.3.0-alpha.13", features = [
     "electrum",
     "esplora",
 ] }
