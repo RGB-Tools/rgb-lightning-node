@@ -59,19 +59,11 @@ async fn success() {
     let status = invoice_status(node2_addr, &invoice).await;
     assert!(matches!(status, InvoiceStatus::Succeeded));
 
-    let payments = list_payments(node1_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
-    let payments = list_payments(node2_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -89,19 +81,11 @@ async fn success() {
     .await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payments = list_payments(node1_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
-    let payments = list_payments(node2_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -111,19 +95,11 @@ async fn success() {
     let _ = send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payments = list_payments(node1_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
-    let payments = list_payments(node2_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -133,19 +109,11 @@ async fn success() {
     let _ = send_payment(node2_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payments = list_payments(node1_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
-    let payments = list_payments(node2_addr).await;
-    let payment = payments
-        .iter()
-        .find(|p| p.payment_hash == decoded.payment_hash)
-        .unwrap();
+    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);

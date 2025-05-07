@@ -171,6 +171,7 @@ The node currently exposes the following APIs:
 - `/failtransfers` (POST)
 - `/getassetmedia` (POST)
 - `/getchannelid` (POST)
+- `/getpayment` (POST)
 - `/init` (POST)
 - `/invoicestatus` (POST)
 - `/issueassetcfa` (POST)

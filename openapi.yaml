@@ -350,6 +350,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetChannelIdResponse'
+  /getpayment:
+    post:
+      tags:
+        - Payments
+      summary: Get a payment
+      description: Get a payment by its payment hash
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetPaymentRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPaymentResponse'
   /init:
     post:
       tags:
@@ -1404,6 +1422,17 @@ components:
         channel_id:
           type: string
           example: 8129afe1b1d7cf60d5e1bf4c04b09bec925ed4df5417ceee0484e24f816a105a
+    GetPaymentRequest:
+      type: object
+      properties:
+        payment_hash:
+          type: string
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
+    GetPaymentResponse:
+      type: object
+      properties:
+        payment:
+          $ref: '#/components/schemas/Payment'
     HTLCStatus:
       type: string
       enum:
