@@ -273,10 +273,7 @@ pub(crate) fn hex_str_to_compressed_pubkey(hex: &str) -> Option<PublicKey> {
         return None;
     }
     let data = hex_str_to_vec(&hex[0..33 * 2])?;
-    match PublicKey::from_slice(&data) {
-        Ok(pk) => Some(pk),
-        Err(_) => None,
-    }
+    PublicKey::from_slice(&data).ok()
 }
 
 pub(crate) fn hex_str_to_vec(hex: &str) -> Option<Vec<u8>> {
