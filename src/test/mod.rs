@@ -24,14 +24,14 @@ use crate::routes::{
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
     DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
     GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
-    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
-    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
-    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
-    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
-    ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse,
-    ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
+    GetPaymentRequest, GetPaymentResponse, HTLCStatus, InitRequest, InitResponse, InvoiceStatus,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
+    IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse,
+    KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest,
+    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
+    ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest,
+    ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest,
+    MakerInitRequest, MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
     OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RefreshRequest, RestoreRequest,
     RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
     SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SwapStatus, TakerRequest,
@@ -764,6 +764,24 @@ async fn list_payments(node_address: SocketAddr) -> Vec<Payment> {
         .await
         .unwrap()
         .payments
+}
+async fn get_payment(node_address: SocketAddr, payment_hash: &str) -> Payment {
+    println!("getting payment for node {node_address}");
+    let payload = GetPaymentRequest {
+        payment_hash: payment_hash.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/getpayment", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<GetPaymentResponse>()
+        .await
+        .unwrap()
+        .payment
 }
 
 async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {

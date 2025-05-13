@@ -144,6 +144,9 @@ pub enum APIError {
     #[error("Invalid onion data: {0}")]
     InvalidOnionData(String),
 
+    #[error("Invalid payment hash: {0}")]
+    InvalidPaymentHash(String),
+
     #[error("Invalid payment secret")]
     InvalidPaymentSecret,
 
@@ -236,6 +239,9 @@ pub enum APIError {
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
+
+    #[error("Payment not found: {0}")]
+    PaymentNotFound(String),
 
     #[error("Recipient ID already used")]
     RecipientIDAlreadyUsed,
@@ -406,6 +412,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidNodeIds(_)
             | APIError::InvalidOnionData(_)
             | APIError::InvalidPassword(_)
+            | APIError::InvalidPaymentHash(_)
             | APIError::InvalidPaymentSecret
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
@@ -422,6 +429,7 @@ impl IntoResponse for APIError {
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
+            | APIError::PaymentNotFound(_)
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string(), self.name())
             }
