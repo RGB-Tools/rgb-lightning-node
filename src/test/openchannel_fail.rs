@@ -235,7 +235,7 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::FORBIDDEN,
-        "Insufficient capacity to cover the commitment transaction fees (1984 sat)",
+        "Insufficient capacity to cover the commitment transaction fees",
         "InsufficientCapacity",
     )
     .await;

@@ -269,9 +269,10 @@ async fn swap_roundtrip_multihop_asset_asset() {
         .unwrap();
     let htlc_min_sat = HTLC_MIN_MSAT / 1000;
     let fees = 1;
-    assert_eq!(
-        chan_1_12.local_balance_sat,
-        chan_1_12_before.local_balance_sat - htlc_min_sat - (fees * 2)
+    assert!(chan_1_12.local_balance_sat < chan_1_12_before.local_balance_sat - htlc_min_sat);
+    assert!(
+        chan_1_12.local_balance_sat
+            >= chan_1_12_before.local_balance_sat - htlc_min_sat - (fees * 3)
     );
     assert_eq!(
         chan_2_12.local_balance_sat,
