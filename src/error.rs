@@ -429,7 +429,6 @@ impl IntoResponse for APIError {
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
-            | APIError::PaymentNotFound(_)
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string(), self.name())
             }
@@ -459,6 +458,7 @@ impl IntoResponse for APIError {
             | APIError::NoRoute
             | APIError::NotInitialized
             | APIError::OpenChannelInProgress
+            | APIError::PaymentNotFound(_)
             | APIError::RecipientIDAlreadyUsed
             | APIError::SyncNeeded
             | APIError::TemporaryChannelIdAlreadyUsed

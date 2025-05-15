@@ -1359,8 +1359,7 @@ pub(crate) async fn close_channel(
         if channel_id_vec.is_none() || channel_id_vec.as_ref().unwrap().len() != 32 {
             return Err(APIError::InvalidChannelID);
         }
-        let mut channel_id = [0; 32];
-        channel_id.copy_from_slice(&channel_id_vec.unwrap());
+        let requested_cid = ChannelId(channel_id_vec.unwrap().try_into().unwrap());
 
         let peer_pubkey_vec = match hex_str_to_vec(&payload.peer_pubkey) {
             Some(peer_pubkey_vec) => peer_pubkey_vec,
@@ -1375,7 +1374,7 @@ pub(crate) async fn close_channel(
             match unlocked_state
                 .channel_manager
                 .force_close_broadcasting_latest_txn(
-                    &ChannelId(channel_id),
+                    &requested_cid,
                     &peer_pubkey,
                     "Manually force-closed".to_string(),
                 ) {
@@ -1385,7 +1384,7 @@ pub(crate) async fn close_channel(
         } else {
             match unlocked_state
                 .channel_manager
-                .close_channel(&ChannelId(channel_id), &peer_pubkey)
+                .close_channel(&requested_cid, &peer_pubkey)
             {
                 Ok(()) => tracing::info!("EVENT: initiating channel close"),
                 Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
@@ -2075,23 +2074,19 @@ pub(crate) async fn get_payment(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<GetPaymentRequest>, APIError>,
 ) -> Result<Json<GetPaymentResponse>, APIError> {
+    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
     let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
     if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
-        return Err(APIError::InvalidPaymentHash(format!(
-            "{:?}",
-            payload.payment_hash
-        )));
+        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
     }
-    let mut payment_hash = [0; 32];
-    payment_hash.copy_from_slice(&payment_hash_vec.unwrap());
-    let requested_payment_hash = PaymentHash(payment_hash);
-    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
 
     let inbound_payments = unlocked_state.inbound_payments();
     let outbound_payments = unlocked_state.outbound_payments();
 
     for (payment_hash, payment_info) in &inbound_payments {
-        if payment_hash == &requested_payment_hash {
+        if payment_hash == &requested_ph {
             let rgb_payment_info_path_inbound =
                 get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, true);
 
@@ -2120,7 +2115,7 @@ pub(crate) async fn get_payment(
 
     for (payment_id, payment_info) in &outbound_payments {
         let payment_hash = &PaymentHash(payment_id.0);
-        if payment_hash == &requested_payment_hash {
+        if payment_hash == &requested_ph {
             let rgb_payment_info_path_outbound =
                 get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, false);
 
@@ -2146,10 +2141,8 @@ pub(crate) async fn get_payment(
             }));
         }
     }
-    Err(APIError::PaymentNotFound(format!(
-        "{:?}",
-        &payload.payment_hash
-    )))
+
+    Err(APIError::PaymentNotFound(payload.payment_hash))
 }
 
 pub(crate) async fn list_peers(
