@@ -368,6 +368,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetPaymentResponse'
+  /getswap:
+    post:
+      tags:
+        - Swaps
+      summary: Get a swap
+      description: Get a swap by its payment hash
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetSwapRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSwapResponse'
   /init:
     post:
       tags:
@@ -1433,6 +1451,20 @@ components:
       properties:
         payment:
           $ref: '#/components/schemas/Payment'
+    GetSwapRequest:
+      type: object
+      properties:
+        payment_hash:
+          type: string
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
+        taker:
+          type: boolean
+          example: false
+    GetSwapResponse:
+      type: object
+      properties:
+        swap:
+          $ref: '#/components/schemas/Swap'
     HTLCStatus:
       type: string
       enum:
