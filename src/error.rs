@@ -305,10 +305,9 @@ impl From<RgbLibError> for APIError {
             RgbLibError::FailedBdkSync { details } => APIError::FailedBdkSync(details),
             RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
             RgbLibError::FailedIssuance { details } => APIError::FailedIssuingAsset(details),
-            RgbLibError::IO { details } => APIError::IO(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("rgb-lib err: {details}"),
-            )),
+            RgbLibError::IO { details } => {
+                APIError::IO(std::io::Error::other(format!("rgb-lib err: {details}")))
+            }
             RgbLibError::Inconsistency { details } => {
                 APIError::Unexpected(format!("rgb-lib inconsistency detected: {details}"))
             }
