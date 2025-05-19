@@ -93,6 +93,8 @@ async fn swap_roundtrip_assets() {
     assert_eq!(swap_maker.to_asset, Some(asset_id_1.clone()));
     assert_eq!(swap_maker.payment_hash, maker_init_response.payment_hash);
     assert_eq!(swap_maker.status, SwapStatus::Waiting);
+    let swap_maker_single = get_swap(maker_addr, &maker_init_response.payment_hash, false).await;
+    assert_eq!(swap_maker_single, *swap_maker);
     let swaps_taker = list_swaps(taker_addr).await;
     assert!(swaps_taker.maker.is_empty());
     assert_eq!(swaps_taker.taker.len(), 1);

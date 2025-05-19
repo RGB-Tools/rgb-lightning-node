@@ -543,6 +543,17 @@ pub(crate) struct GetPaymentResponse {
     pub(crate) payment: Payment,
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetSwapRequest {
+    pub(crate) payment_hash: String,
+    pub(crate) taker: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetSwapResponse {
+    pub(crate) swap: Swap,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
     Pending,
@@ -954,7 +965,7 @@ pub(crate) struct SignMessageResponse {
     pub(crate) signed_message: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct Swap {
     pub(crate) qty_from: u64,
     pub(crate) qty_to: u64,
@@ -968,7 +979,7 @@ pub(crate) struct Swap {
     pub(crate) completed_at: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) enum SwapStatus {
     Waiting,
     Pending,
@@ -2208,6 +2219,67 @@ pub(crate) async fn list_swaps(
             .map(|(ph, sd)| map_swap(ph, sd, false))
             .collect(),
     }))
+}
+
+pub(crate) async fn get_swap(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetSwapRequest>, APIError>,
+) -> Result<Json<GetSwapResponse>, APIError> {
+    let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+
+    let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
+    if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
+        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
+    }
+    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
+
+    let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
+        let mut status = swap_data.status.clone();
+        if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
+            status = SwapStatus::Expired;
+        } else if status == SwapStatus::Pending
+            && get_current_timestamp() > swap_data.initiated_at.unwrap() + 86400
+        {
+            status = SwapStatus::Failed;
+        }
+        if status != swap_data.status {
+            if taker {
+                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
+            } else {
+                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
+            }
+        }
+        Swap {
+            payment_hash: payment_hash.to_string(),
+            qty_from: swap_data.swap_info.qty_from,
+            qty_to: swap_data.swap_info.qty_to,
+            from_asset: swap_data.swap_info.from_asset.map(|c| c.to_string()),
+            to_asset: swap_data.swap_info.to_asset.map(|c| c.to_string()),
+            status,
+            requested_at: swap_data.requested_at,
+            initiated_at: swap_data.initiated_at,
+            expires_at: swap_data.swap_info.expiry,
+            completed_at: swap_data.completed_at,
+        }
+    };
+
+    if payload.taker {
+        let taker_swaps = unlocked_state.taker_swaps();
+        if let Some(sd) = taker_swaps.get(&requested_ph) {
+            return Ok(Json(GetSwapResponse {
+                swap: map_swap(&requested_ph, sd, true),
+            }));
+        }
+    } else {
+        let maker_swaps = unlocked_state.maker_swaps();
+        if let Some(sd) = maker_swaps.get(&requested_ph) {
+            return Ok(Json(GetSwapResponse {
+                swap: map_swap(&requested_ph, sd, false),
+            }));
+        }
+    }
+
+    Err(APIError::SwapNotFound(payload.payment_hash))
 }
 
 pub(crate) async fn list_transactions(
