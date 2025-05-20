@@ -172,6 +172,7 @@ The node currently exposes the following APIs:
 - `/getassetmedia` (POST)
 - `/getchannelid` (POST)
 - `/getpayment` (POST)
+- `/getswap` (POST)
 - `/init` (POST)
 - `/invoicestatus` (POST)
 - `/issueassetcfa` (POST)

@@ -246,6 +246,9 @@ pub enum APIError {
     #[error("Recipient ID already used")]
     RecipientIDAlreadyUsed,
 
+    #[error("Swap not found: {0}")]
+    SwapNotFound(String),
+
     #[error("Sync needed")]
     SyncNeeded,
 
@@ -459,6 +462,7 @@ impl IntoResponse for APIError {
             | APIError::OpenChannelInProgress
             | APIError::PaymentNotFound(_)
             | APIError::RecipientIDAlreadyUsed
+            | APIError::SwapNotFound(_)
             | APIError::SyncNeeded
             | APIError::TemporaryChannelIdAlreadyUsed
             | APIError::UnknownContractId
