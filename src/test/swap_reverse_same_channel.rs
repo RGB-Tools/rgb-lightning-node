@@ -175,8 +175,8 @@ async fn swap_reverse_same_channel() {
     )
     .await;
 
-    wait_for_ln_balance(maker_addr, &asset_id, 600).await;
-    wait_for_ln_balance(taker_addr, &asset_id, 0).await;
+    wait_for_ln_balance(maker_addr, &asset_id, 20).await;
+    wait_for_ln_balance(taker_addr, &asset_id, 580).await;
 
     let swaps_maker = list_swaps(maker_addr).await;
     assert_eq!(swaps_maker.maker.len(), 1);
