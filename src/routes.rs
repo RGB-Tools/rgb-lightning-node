@@ -3298,11 +3298,21 @@ pub(crate) async fn send_payment(
 ) -> Result<Json<SendPaymentResponse>, APIError> {
     no_cancel(async move {
         let unlocked_state = state.check_unlocked().await?.clone().unwrap();
+        // get our node pubkey
+        let our_node_pubkey = unlocked_state.channel_manager.get_our_node_id();
 
         let mut status = HTLCStatus::Pending;
         let created_at = get_current_timestamp();
 
         let (payment_id, payment_hash, payment_secret) = if let Ok(offer) = Offer::from_str(&payload.invoice) {
+            // prevent self-payment
+            let payee_pubkey = offer.signing_pubkey()
+                .ok_or(APIError::InvalidInvoice(s!("missing signing pubkey")))?;
+            
+            if payee_pubkey == our_node_pubkey {
+                return Err(APIError::InvalidInvoice(s!("self-payment is not allowed")));
+            }
+
             let random_bytes = unlocked_state.keys_manager.get_secure_random_bytes();
             let payment_id = PaymentId(random_bytes);
 
@@ -3355,8 +3365,26 @@ pub(crate) async fn send_payment(
                 Ok(v) => v,
             };
 
+            // prevent self-payment
+            let payee_pubkey = invoice.get_payee_pub_key();
+            if payee_pubkey == our_node_pubkey {
+                return Err(APIError::InvalidInvoice(s!("self-payment is not allowed")));
+            }
+
             let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
             let payment_secret = Some(*invoice.payment_secret());
+
+            // prevent duplicate payments
+            let existing_payments = unlocked_state.outbound_payments();
+            if let Some(existing_payment) = existing_payments.get(&payment_id) {
+                if !matches!(existing_payment.status, HTLCStatus::Failed) {
+                    return Err(APIError::InvalidInvoice(format!(
+                        "Payment for this invoice is already in progress or completed. Status: {:?}",
+                        existing_payment.status
+                    )));
+                }
+            }
+
             let zero_amt_invoice =
                 invoice.amount_milli_satoshis().is_none() || invoice.amount_milli_satoshis() == Some(0);
             let (pay_params_opt, amt_msat) = if zero_amt_invoice {
