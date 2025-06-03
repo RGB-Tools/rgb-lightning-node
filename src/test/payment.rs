@@ -193,3 +193,66 @@ async fn success() {
     assert!(xfer_3.expiration.is_some());
     assert!(!xfer_3.transport_endpoints.is_empty());
 }
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+#[should_panic(expected = "channel isn't getting force-closed")]
+async fn same_invoice_twice() {
+    initialize();
+
+    let test_dir_base = format!("{TEST_DIR_BASE}same_invoice_twice/");
+    let test_dir_node1 = format!("{test_dir_base}node1");
+    let test_dir_node2 = format!("{test_dir_base}node2");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
+
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
+
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+
+    let _channel = open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        Some(3500000),
+        Some(600),
+        Some(&asset_id),
+    )
+    .await;
+    assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
+
+    let channels_1_before = list_channels(node1_addr).await;
+    let channels_2_before = list_channels(node2_addr).await;
+    assert_eq!(channels_1_before.len(), 1);
+    assert_eq!(channels_2_before.len(), 1);
+
+    let asset_amount = Some(100);
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+
+    send_payment_raw(node1_addr, invoice.clone()).await;
+
+    // try to re-pay the same invoice
+    send_payment_raw(node1_addr, invoice).await;
+
+    // TODO: change the test from here on as soon as we fix the force-close bug
+
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        // sleep to give the channel the time to incorectly force-close
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels_1 = list_channels(node1_addr).await;
+        // exit if the channel got closed
+        if channels_1.is_empty() {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 60.0 {
+            panic!("channel isn't getting force-closed");
+        }
+    }
+}

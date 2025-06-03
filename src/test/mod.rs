@@ -1267,7 +1267,7 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
         .txid
 }
 
-async fn _send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
+async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
     println!("sending LN payment for invoice {invoice} from node {node_address}");
     let payload = SendPaymentRequest {
         invoice,
@@ -1299,7 +1299,7 @@ async fn send_payment_with_ln_balance(
 ) {
     let bolt11_invoice = Bolt11Invoice::from_str(&invoice).unwrap();
 
-    let res = _send_payment_raw(node_address, invoice).await;
+    let res = send_payment_raw(node_address, invoice).await;
 
     _with_ln_balance_checks(
         node_address,
@@ -1319,7 +1319,7 @@ async fn send_payment_with_status(
     invoice: String,
     expected_status: HTLCStatus,
 ) -> Payment {
-    let send_payment = _send_payment_raw(node_address, invoice).await;
+    let send_payment = send_payment_raw(node_address, invoice).await;
     _wait_for_ln_payment(
         node_address,
         // TODO: remove unwrap once RGB offers are enabled
