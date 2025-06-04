@@ -41,7 +41,7 @@ use crate::ldk::stop_ldk;
 use crate::routes::{
     address, asset_balance, asset_metadata, backup, btc_balance, change_password,
     check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
-    decode_ln_invoice, decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers,
+    decode_asset_id, decode_ln_invoice, decode_rgb_invoice, disconnect_peer, encode_asset_id, estimate_fee, fail_transfers,
     get_asset_media, get_channel_id, get_payment, get_swap, init, invoice_status, issue_asset_cfa,
     issue_asset_nia, issue_asset_uda, keysend, list_assets, list_channels, list_payments,
     list_peers, list_swaps, list_transactions, list_transfers, list_unspents, ln_invoice, lock,
@@ -112,9 +112,11 @@ pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), Ap
         .route("/closechannel", post(close_channel))
         .route("/connectpeer", post(connect_peer))
         .route("/createutxos", post(create_utxos))
+        .route("/decodeassetid", post(decode_asset_id))
         .route("/decodelninvoice", post(decode_ln_invoice))
         .route("/decodergbinvoice", post(decode_rgb_invoice))
         .route("/disconnectpeer", post(disconnect_peer))
+        .route("/encodeassetid", post(encode_asset_id))
         .route("/estimatefee", post(estimate_fee))
         .route("/failtransfers", post(fail_transfers))
         .route("/getassetmedia", post(get_asset_media))
