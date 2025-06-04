@@ -223,6 +223,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /decodeassetid:
+    post:
+      summary: Decode RGB asset ID to hexadecimal format
+      description: Convert RGB format asset ID (rgb:xxx) to hexadecimal format
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecodeAssetIdRequest'
+      responses:
+        '200':
+          description: Asset ID encoding result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecodeAssetIdResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Locked'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /decodelninvoice:
     post:
       tags:
@@ -277,6 +300,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /encodeassetid:
+    post:
+      summary: Encode hexadecimal asset ID to RGB format
+      description: Convert hexadecimal format asset ID to RGB format (rgb:xxx)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncodeAssetIdRequest'
+      responses:
+        '200':
+          description: Asset ID decoding result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncodeAssetIdResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Locked'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /estimatefee:
     post:
       tags:
@@ -1288,6 +1334,21 @@ components:
         skip_sync:
           type: boolean
           example: false
+    DecodeAssetIdRequest:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+    DecodeAssetIdResponse:
+      type: object
+      properties:
+        hex_format:
+          type: string
+          example: aa1c3d3ef10424cf64e45ea93516c14766be91031c39715783a4f78bd7e64a8a
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
     DecodeLNInvoiceRequest:
       type: object
       properties:
@@ -1359,6 +1420,21 @@ components:
         peer_pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+    EncodeAssetIdRequest:
+      type: object
+      properties:
+        hex_format:
+          type: string
+          example: aa1c3d3ef10424cf64e45ea93516c14766be91031c39715783a4f78bd7e64a8a
+    EncodeAssetIdResponse:
+      type: object
+      properties:
+        hex_format:
+          type: string
+          example: aa1c3d3ef10424cf64e45ea93516c14766be91031c39715783a4f78bd7e64a8a
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
     EmbeddedMedia:
       type: object
       properties:
