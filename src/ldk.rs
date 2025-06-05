@@ -234,10 +234,22 @@ impl UnlockedAppState {
         self.save_inbound_payments(inbound);
     }
 
-    pub(crate) fn add_outbound_payment(&self, payment_id: PaymentId, payment_info: PaymentInfo) {
+    pub(crate) fn add_outbound_payment(
+        &self,
+        payment_id: PaymentId,
+        payment_info: PaymentInfo,
+    ) -> Result<(), APIError> {
         let mut outbound = self.get_outbound_payments();
+        if let Some(existing_payment) = outbound.payments.get(&payment_id) {
+            if !matches!(existing_payment.status, HTLCStatus::Failed) {
+                return Err(APIError::DuplicatePayment(
+                    existing_payment.status.to_string(),
+                ));
+            }
+        }
         outbound.payments.insert(payment_id, payment_info);
         self.save_outbound_payments(outbound);
+        Ok(())
     }
 
     fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {

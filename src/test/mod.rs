@@ -633,7 +633,7 @@ async fn _with_ln_balance_checks(
         let final_ln_balance_rgb = initial_ln_balance_rgb.unwrap() - asset_amount.unwrap();
         wait_for_ln_balance(node_address, asset_id, final_ln_balance_rgb).await;
     }
-    _wait_for_ln_payment(node_address, payment_hash, HTLCStatus::Succeeded).await;
+    wait_for_ln_payment(node_address, payment_hash, HTLCStatus::Succeeded).await;
     if let Some(asset_id) = &asset_id {
         let counterparty_final_ln_balance =
             counterparty_initial_ln_balance_rgb.unwrap() + asset_amount.unwrap();
@@ -644,7 +644,7 @@ async fn _with_ln_balance_checks(
         )
         .await;
     }
-    _wait_for_ln_payment(
+    wait_for_ln_payment(
         counterparty_node_address,
         payment_hash,
         HTLCStatus::Succeeded,
@@ -691,7 +691,7 @@ async fn keysend(
     asset_amount: Option<u64>,
 ) -> Payment {
     let keysend = _keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
-    _wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
+    wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1267,7 +1267,7 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
         .txid
 }
 
-async fn _send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
+async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaymentResponse {
     println!("sending LN payment for invoice {invoice} from node {node_address}");
     let payload = SendPaymentRequest {
         invoice,
@@ -1299,7 +1299,7 @@ async fn send_payment_with_ln_balance(
 ) {
     let bolt11_invoice = Bolt11Invoice::from_str(&invoice).unwrap();
 
-    let res = _send_payment_raw(node_address, invoice).await;
+    let res = send_payment_raw(node_address, invoice).await;
 
     _with_ln_balance_checks(
         node_address,
@@ -1319,8 +1319,8 @@ async fn send_payment_with_status(
     invoice: String,
     expected_status: HTLCStatus,
 ) -> Payment {
-    let send_payment = _send_payment_raw(node_address, invoice).await;
-    _wait_for_ln_payment(
+    let send_payment = send_payment_raw(node_address, invoice).await;
+    wait_for_ln_payment(
         node_address,
         // TODO: remove unwrap once RGB offers are enabled
         &send_payment.payment_hash.unwrap(),
@@ -1463,7 +1463,7 @@ async fn wait_for_usable_channels(node_address: SocketAddr, expected_num_usable_
     }
 }
 
-async fn _wait_for_ln_payment(
+async fn wait_for_ln_payment(
     node_address: SocketAddr,
     payment_hash: &str,
     expected_status: HTLCStatus,
@@ -1480,7 +1480,7 @@ async fn _wait_for_ln_payment(
             return payment;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 40.0 {
-            panic!("cannot find successful payment")
+            panic!("cannot find payment in status {expected_status}")
         }
     }
 }
