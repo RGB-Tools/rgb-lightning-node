@@ -197,7 +197,6 @@ async fn success() {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-#[should_panic(expected = "channel isn't getting force-closed")]
 async fn same_invoice_twice() {
     initialize();
 
@@ -238,21 +237,25 @@ async fn same_invoice_twice() {
     send_payment_raw(node1_addr, invoice.clone()).await;
 
     // try to re-pay the same invoice
-    send_payment_raw(node1_addr, invoice).await;
+    println!("sending LN payment for invoice {invoice} from node {node1_addr}");
+    let payload = SendPaymentRequest {
+        invoice: invoice.clone(),
+        amt_msat: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/sendpayment", node1_addr))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::FORBIDDEN,
+        "Another payment for this invoice is already in status",
+        "DuplicatePayment",
+    )
+    .await;
 
-    // TODO: change the test from here on as soon as we fix the force-close bug
-
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        // sleep to give the channel the time to incorectly force-close
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let channels_1 = list_channels(node1_addr).await;
-        // exit if the channel got closed
-        if channels_1.is_empty() {
-            break;
-        }
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 60.0 {
-            panic!("channel isn't getting force-closed");
-        }
-    }
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
 }

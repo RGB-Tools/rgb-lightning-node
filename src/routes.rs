@@ -1,4 +1,4 @@
-use amplify::{map, s};
+use amplify::{map, s, Display};
 use axum::{
     extract::{Multipart, State},
     Json,
@@ -529,7 +529,8 @@ pub(crate) struct GetSwapResponse {
     pub(crate) swap: Swap,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display)]
+#[display(inner)]
 pub(crate) enum HTLCStatus {
     Pending,
     Succeeded,
@@ -1773,15 +1774,6 @@ pub(crate) async fn keysend(
             (Some(asset_id), Some(rgb_amount)) => {
                 let contract_id = ContractId::from_str(&asset_id)
                     .map_err(|_| APIError::InvalidAssetID(asset_id))?;
-
-                write_rgb_payment_info_file(
-                    &PathBuf::from(&state.static_state.ldk_data_dir),
-                    &payment_hash,
-                    contract_id,
-                    rgb_amount,
-                    false,
-                    false,
-                );
                 Some((contract_id, rgb_amount))
             }
             (None, None) => None,
@@ -1807,7 +1799,18 @@ pub(crate) async fn keysend(
                 updated_at: created_at,
                 payee_pubkey: dest_pubkey,
             },
-        );
+        )?;
+        if let Some((contract_id, rgb_amount)) = rgb_payment {
+            write_rgb_payment_info_file(
+                &PathBuf::from(&state.static_state.ldk_data_dir),
+                &payment_hash,
+                contract_id,
+                rgb_amount,
+                false,
+                false,
+            );
+        }
+
         let status = match unlocked_state
             .channel_manager
             .send_spontaneous_payment_with_retry(
@@ -3336,7 +3339,7 @@ pub(crate) async fn send_payment(
                     updated_at: created_at,
                     payee_pubkey: offer.signing_pubkey().ok_or(APIError::InvalidInvoice(s!("missing signing pubkey")))?,
                 },
-            );
+            )?;
 
             let retry = Retry::Timeout(Duration::from_secs(10));
             let amt = Some(amt_msat);
@@ -3385,23 +3388,16 @@ pub(crate) async fn send_payment(
                 },
             };
 
-            match (invoice.rgb_contract_id(), invoice.rgb_amount()) {
+            let rgb_payment = match (invoice.rgb_contract_id(), invoice.rgb_amount()) {
                 (Some(rgb_contract_id), Some(rgb_amount)) => {
                     if amt_msat < INVOICE_MIN_MSAT {
                         return Err(APIError::InvalidAmount(format!(
                             "msat amount in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
                         )));
                     }
-                    write_rgb_payment_info_file(
-                        &PathBuf::from(&state.static_state.ldk_data_dir.clone()),
-                        &payment_hash,
-                        rgb_contract_id,
-                        rgb_amount,
-                        false,
-                        false,
-                    );
+                    Some((rgb_contract_id, rgb_amount))
                 },
-                (None, None) => {}
+                (None, None) => None,
                 (Some(_), None) => {
                     return Err(APIError::InvalidInvoice(s!(
                         "invoice has an RGB contract ID but not an RGB amount"
@@ -3412,7 +3408,7 @@ pub(crate) async fn send_payment(
                         "invoice has an RGB amount but not an RGB contract ID"
                     )))
                 }
-            }
+            };
 
             let secret = payment_secret;
             unlocked_state.add_outbound_payment(
@@ -3426,7 +3422,17 @@ pub(crate) async fn send_payment(
                     updated_at: created_at,
                     payee_pubkey: invoice.get_payee_pub_key(),
                 },
-            );
+            )?;
+            if let Some((contract_id, rgb_amount)) = rgb_payment {
+                write_rgb_payment_info_file(
+                    &PathBuf::from(&state.static_state.ldk_data_dir),
+                    &payment_hash,
+                    contract_id,
+                    rgb_amount,
+                    false,
+                    false,
+                );
+            }
 
             match unlocked_state.channel_manager.send_payment(
                 payment_hash,

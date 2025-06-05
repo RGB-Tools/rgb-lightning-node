@@ -42,6 +42,9 @@ pub enum APIError {
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
+    #[error("Another payment for this invoice is already in status {0}")]
+    DuplicatePayment(String),
+
     #[error("The swap offer has expired")]
     ExpiredSwapOffer,
 
@@ -442,6 +445,7 @@ impl IntoResponse for APIError {
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
             | APIError::ChangingState
+            | APIError::DuplicatePayment(_)
             | APIError::FailedBdkSync(_)
             | APIError::FailedBitcoindConnection(_)
             | APIError::FailedBroadcast(_)
