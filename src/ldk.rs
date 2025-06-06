@@ -9,9 +9,9 @@ use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter, Watch};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose};
-use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
+use lightning::ln::channelmanager::ChainParameters;
 use lightning::ln::channelmanager::{
-    ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
+    self, ChannelManagerReadArgs, PaymentId, RecentPaymentDetails, SimpleArcChannelManager,
 };
 use lightning::ln::msgs::SocketAddress;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, SimpleArcPeerManager};
@@ -628,7 +628,7 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
-            let payment_preimage = match purpose {
+            let payment_preimage: Option<PaymentPreimage> = match purpose {
                 PaymentPurpose::Bolt11InvoicePayment {
                     payment_preimage, ..
                 } => payment_preimage,
@@ -640,9 +640,34 @@ async fn handle_ldk_events(
                 } => payment_preimage,
                 PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            let preimage_to_use = match payment_preimage {
+                Some(preimage) => preimage,
+                None => {
+                    let inbound_payments = unlocked_state.inbound_payments();
+                    match inbound_payments.get(&payment_hash) {
+                        Some(payment_info) => match payment_info.preimage {
+                            Some(preimage) => preimage,
+                            None => {
+                                tracing::error!(
+                                    "EVENT: No payment preimage found for payment hash {}",
+                                    payment_hash
+                                );
+                                return;
+                            }
+                        },
+                        None => {
+                            tracing::error!(
+                                "EVENT: No payment info found for payment hash {}",
+                                payment_hash
+                            );
+                            return;
+                        }
+                    }
+                }
+            };
+
+            unlocked_state.channel_manager.claim_funds(preimage_to_use);
         }
         Event::PaymentClaimed {
             payment_hash,

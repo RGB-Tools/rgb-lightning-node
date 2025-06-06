@@ -1778,6 +1778,14 @@ components:
         asset_amount:
           type: integer
           example: 42
+        preimage:
+          type: string
+          description: Optional custom payment preimage (hex string, 32 bytes)
+          example: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        memo:
+          type: string
+          description: Optional memo/description for the invoice
+          example: "Payment for services"
     LNInvoiceResponse:
       type: object
       properties:
