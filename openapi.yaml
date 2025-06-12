@@ -711,6 +711,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NodeInfoResponse'
+  /nodestate:
+    get:
+      tags:
+        - Other
+      summary: Get node state
+      description: Get the current state of the RGB Lightning Node
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeStateResponse'
   /openchannel:
     post:
       tags:
@@ -1824,6 +1837,25 @@ components:
         network_channels:
           type: integer
           example: 7812821
+    NodeState:
+      type: string
+      enum:
+        - None
+        - Locked
+        - Running
+        - Changing
+      example: Running
+      description: |
+        The current state of the RGB Lightning Node:
+        * `None` - Node is not initialized (no mnemonic file exists)
+        * `Locked` - Node is initialized but locked (needs to be unlocked)
+        * `Running` - Node is unlocked and running (can perform all operations)
+        * `Changing` - Node is in the process of changing state (wait for completion)
+    NodeStateResponse:
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/NodeState'
     OpenChannelRequest:
       type: object
       properties:
