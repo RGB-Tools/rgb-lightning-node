@@ -967,7 +967,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
     AssetBalanceResponse:
       type: object
       properties:
@@ -991,7 +991,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
     AssetMetadataResponse:
       type: object
       properties:
@@ -1022,7 +1022,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         name:
           type: string
           example: Collectible
@@ -1050,7 +1050,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         ticker:
           type: string
           example: USDT
@@ -1087,7 +1087,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         ticker:
           type: string
           example: UNI
@@ -1222,7 +1222,7 @@ components:
           example: true
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         asset_local_amount:
           type: integer
           example: 777
@@ -1308,7 +1308,7 @@ components:
           example: 1691160659
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         asset_amount:
           type: integer
           example: 42
@@ -1328,18 +1328,18 @@ components:
       properties:
         invoice:
           type: string
-          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/RGB20/69+utxob:2PoDFyk-8aegNHZE4-inHHn4nWz-rNtAX3MWv-sTiVPQYrF-ed2bXM?expiry=1698325849&endpoints=rpcs://proxy.iriswallet.com/0.2/json-rpc
+          example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE/RWhwUfTMpuP2Zfx1~j4nswCANGeJrYOqDcKelaMV4zU/~/bcrt:utxob:cbgHUJ4e-7QyKY4U-Jsj5AZw-oI0gxZh-7fxQY2_-tFFUAZN-4CgpX?expiry=1749906951&endpoints=rpcs://proxy.iriswallet.com/0.2/json-rpc
     DecodeRGBInvoiceResponse:
       type: object
       properties:
         recipient_id:
           type: string
-          example: utxob:2PoDFyk-8aegNHZE4-inHHn4nWz-rNtAX3MWv-sTiVPQYrF-ed2bXM
+          example: bcrt:utxob:cbgHUJ4e-7QyKY4U-Jsj5AZw-oI0gxZh-7fxQY2_-tFFUAZN-4CgpX
         asset_schema:
           $ref: '#/components/schemas/AssetSchema'
         asset_id:
           type: string
-          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+          example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE
         amount:
           type: integer
           example: 69
@@ -1578,7 +1578,7 @@ components:
           example: 3000000
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         asset_amount:
           type: integer
           example: 42
@@ -1666,7 +1666,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
     ListTransfersResponse:
       type: object
       properties:
@@ -1698,7 +1698,7 @@ components:
           example: 420
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         asset_amount:
           type: integer
           example: 42
@@ -1713,7 +1713,7 @@ components:
       properties:
         swapstring:
             type: string
-            example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+            example: 30/rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8/10/rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
         payment_secret:
             type: string
             example: 777a7756c620868199ed5fdc35bee4095b5709d543e5c2bf0494396bf27d2ea2
@@ -1731,10 +1731,10 @@ components:
           example: 10
         from_asset:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         to_asset:
           type: string
-          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+          example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE
         timeout_sec:
           type: integer
           example: 100
@@ -1749,7 +1749,7 @@ components:
             example: 777a7756c620868199ed5fdc35bee4095b5709d543e5c2bf0494396bf27d2ea2
         swapstring:
             type: string
-            example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+            example: 30/rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8/10/rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
     Media:
       type: object
       properties:
@@ -1841,7 +1841,7 @@ components:
           example: 333
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         public:
           type: boolean
           example: true
@@ -1874,7 +1874,7 @@ components:
           example: 42
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         payment_hash:
           type: string
           example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
@@ -1941,7 +1941,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         amount:
           type: integer
           example: 42
@@ -1956,7 +1956,7 @@ components:
           example: 1
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         duration_seconds:
           type: integer
           example: 86400
@@ -1965,10 +1965,10 @@ components:
       properties:
         recipient_id:
           type: string
-          example: utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+          example: bcrt:utxob:cbgHUJ4e-7QyKY4U-Jsj5AZw-oI0gxZh-7fxQY2_-tFFUAZN-4CgpX
         invoice:
           type: string
-          example: rgb:~/~/utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n?expiry=1695811760&endpoints=rpc://127.0.0.1:3000/json-rpc
+          example: rgb:~/~/~/bcrt:utxob:cbgHUJ4e-7QyKY4U-Jsj5AZw-oI0gxZh-7fxQY2_-tFFUAZN-4CgpX?expiry=1695811760&endpoints=rpc://127.0.0.1:3000/json-rpc
         expiration_timestamp:
           type: integer
           example: 1695811760
@@ -1980,7 +1980,7 @@ components:
       properties:
         asset_id:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         amount:
           type: integer
           example: 42
@@ -2085,10 +2085,10 @@ components:
           example: 10
         from_asset:
           type: string
-          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
         to_asset:
           type: string
-          example: rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc
+          example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE
         payment_hash:
           type: string
           example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
@@ -2119,7 +2119,7 @@ components:
       properties:
         swapstring:
             type: string
-            example: 30/rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd/10/rgb:2eVw8uw-8G88LQ2tQ-kexM12SoD-nCX8DmQrw-yLMu6JDfK-xx1SCfc/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+            example: 30/rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8/10/rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
     Token:
       type: object
       properties:
