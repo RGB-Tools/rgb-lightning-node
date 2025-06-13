@@ -1432,6 +1432,21 @@ pub(crate) async fn create_utxos(
     .await
 }
 
+pub(crate) async fn decode_asset_id(
+    WithRejection(Json(payload), _): WithRejection<Json<DecodeAssetIdRequest>, APIError>,
+) -> Result<Json<DecodeAssetIdResponse>, APIError> {
+
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id.clone()))?;
+    
+    let bytes: &[u8] = &contract_id[..];
+    let hex_format = bytes.iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+    
+    Ok(Json(DecodeAssetIdResponse { hex_format, asset_id: payload.asset_id }))
+}
+
 pub(crate) async fn decode_ln_invoice(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<DecodeLNInvoiceRequest>, APIError>,
@@ -1520,6 +1535,35 @@ pub(crate) async fn disconnect_peer(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+pub(crate) async fn encode_asset_id(
+    WithRejection(Json(payload), _): WithRejection<Json<EncodeAssetIdRequest>, APIError>,
+) -> Result<Json<EncodeAssetIdResponse>, APIError> {
+    if payload.hex_format.len() != 64 {
+        return Err(APIError::InvalidAssetID(format!(
+            "Hex format asset ID must be 64 characters, actual length: {}",
+            payload.hex_format.len()
+        )));
+    }
+    
+    let hex_bytes = hex_str_to_vec(&payload.hex_format)
+        .ok_or_else(|| APIError::InvalidAssetID(format!(
+            "Invalid hex string: {}",
+            payload.hex_format
+        )))?;
+    
+    if hex_bytes.len() != 32 {
+        return Err(APIError::InvalidAssetID(format!(
+            "Contract ID must be 32 bytes, actual: {} bytes",
+            hex_bytes.len()
+        )));
+    }
+    
+    let contract_id = ContractId::from(<[u8; 32]>::try_from(hex_bytes).unwrap());
+    let asset_id = contract_id.to_string();
+    
+    Ok(Json(EncodeAssetIdResponse { hex_format: payload.hex_format, asset_id }))
 }
 
 pub(crate) async fn estimate_fee(
@@ -3623,46 +3667,3 @@ pub(crate) struct EncodeAssetIdResponse {
     pub(crate) asset_id: String,
 }
 
-pub(crate) async fn decode_asset_id(
-    WithRejection(Json(payload), _): WithRejection<Json<DecodeAssetIdRequest>, APIError>,
-) -> Result<Json<DecodeAssetIdResponse>, APIError> {
-
-    let contract_id = ContractId::from_str(&payload.asset_id)
-        .map_err(|_| APIError::InvalidAssetID(payload.asset_id.clone()))?;
-    
-    let bytes: &[u8] = &contract_id[..];
-    let hex_format = bytes.iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
-    
-    Ok(Json(DecodeAssetIdResponse { hex_format, asset_id: payload.asset_id }))
-}
-
-pub(crate) async fn encode_asset_id(
-    WithRejection(Json(payload), _): WithRejection<Json<EncodeAssetIdRequest>, APIError>,
-) -> Result<Json<EncodeAssetIdResponse>, APIError> {
-    if payload.hex_format.len() != 64 {
-        return Err(APIError::InvalidAssetID(format!(
-            "Hex format asset ID must be 64 characters, actual length: {}",
-            payload.hex_format.len()
-        )));
-    }
-    
-    let hex_bytes = hex_str_to_vec(&payload.hex_format)
-        .ok_or_else(|| APIError::InvalidAssetID(format!(
-            "Invalid hex string: {}",
-            payload.hex_format
-        )))?;
-    
-    if hex_bytes.len() != 32 {
-        return Err(APIError::InvalidAssetID(format!(
-            "Contract ID must be 32 bytes, actual: {} bytes",
-            hex_bytes.len()
-        )));
-    }
-    
-    let contract_id = ContractId::from(<[u8; 32]>::try_from(hex_bytes).unwrap());
-    let asset_id = contract_id.to_string();
-    
-    Ok(Json(EncodeAssetIdResponse { hex_format: payload.hex_format, asset_id }))
-}
