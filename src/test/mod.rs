@@ -18,15 +18,15 @@ use tracing_test::traced_test;
 use crate::error::APIErrorResponse;
 use crate::ldk::FEE_RATE;
 use crate::routes::{
-    address, asset_balance, asset_metadata, backup, btc_balance, change_password,
-    check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
-    decode_asset_id, decode_ln_invoice, decode_rgb_invoice, disconnect_peer, encode_asset_id, estimate_fee, fail_transfers,
-    get_asset_media, get_channel_id, get_payment, get_swap, init, invoice_status, issue_asset_cfa,
-    issue_asset_nia, issue_asset_uda, keysend, list_assets, list_channels, list_payments,
-    list_peers, list_swaps, list_transactions, list_transfers, list_unspents, ln_invoice, lock,
-    maker_execute, maker_init, network_info, node_info, open_channel, post_asset_media,
-    refresh_transfers, restore, rgb_invoice, send_asset, send_btc, send_onion_message,
-    send_payment, shutdown, sign_message, sync, taker, unlock,
+    address, asset_balance, asset_id_from_hex_bytes, asset_id_to_hex_bytes, asset_metadata, backup,
+    btc_balance, change_password, check_indexer_url, check_proxy_endpoint, close_channel,
+    connect_peer, create_utxos, decode_ln_invoice, decode_rgb_invoice, disconnect_peer,
+    estimate_fee, fail_transfers, get_asset_media, get_channel_id, get_payment, get_swap, init,
+    invoice_status, issue_asset_cfa, issue_asset_nia, issue_asset_uda, keysend, list_assets,
+    list_channels, list_payments, list_peers, list_swaps, list_transactions, list_transfers,
+    list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info, node_info,
+    open_channel, post_asset_media, refresh_transfers, restore, rgb_invoice, send_asset, send_btc,
+    send_onion_message, send_payment, shutdown, sign_message, sync, taker, unlock,
 };
 use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
@@ -218,6 +218,44 @@ async fn asset_balance_spendable(node_address: SocketAddr, asset_id: &str) -> u6
     asset_balance(node_address, asset_id).await.spendable
 }
 
+async fn asset_id_from_hex_bytes(
+    node_address: SocketAddr,
+    hex_bytes: String,
+) -> AssetIDFromHexBytesResponse {
+    println!("converting hex bytes {hex_bytes} to asset ID for node {node_address}");
+    let payload = AssetIdFromHexBytesRequest { hex_bytes };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/assetidfromhexbytes", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<AssetIdFromHexBytesResponse>()
+        .await
+        .unwrap()
+}
+
+async fn asset_id_to_hex_bytes(
+    node_address: SocketAddr,
+    asset_id: String,
+) -> AssetIdToHexBytesResponse {
+    println!("converting asset ID {asset_id} to hex bytes for node {node_address}");
+    let payload = AssetIdToHexBytesRequest { asset_id };
+    let res = reqwest::Client::new()
+        .post(format!("http://{}/assetidtohexbytes", node_address))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<AssetIdToHexBytesResponse>()
+        .await
+        .unwrap()
+}
+
 async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
     println!("performing backup for node {node_address} on {backup_path}");
     let payload = BackupRequest {
@@ -384,24 +422,6 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
         .unwrap();
 }
 
-async fn decode_asset_id(node_address: SocketAddr, asset_id: String) -> DecodeAssetIdResponse {
-    println!("decoding asset ID {asset_id} for node {node_address}");
-    let payload = DecodeAssetIdRequest {
-        asset_id,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{}/decodeassetid", node_address))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    _check_response_is_ok(res)
-        .await
-        .json::<DecodeAssetIdResponse>()
-        .await
-        .unwrap()
-}
-
 async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNInvoiceResponse {
     println!("decoding LN invoice {invoice} for node {node_address}");
     let payload = DecodeLNInvoiceRequest {
@@ -454,24 +474,6 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
         .json::<EmptyResponse>()
         .await
         .unwrap();
-}
-
-async fn encode_asset_id(node_address: SocketAddr, asset_id: String) -> EncodeAssetIdResponse {
-    println!("encoding asset ID {asset_id} for node {node_address}");
-    let payload = EncodeAssetIdRequest {
-        hex_format: asset_id,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{}/encodeassetid", node_address))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    _check_response_is_ok(res)
-        .await
-        .json::<EncodeAssetIdResponse>()
-        .await
-        .unwrap()
 }
 
 async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32>) -> bool {
@@ -1684,6 +1686,7 @@ pub fn mock_fee(fee: u32) -> u32 {
     }
 }
 
+mod asset_id_hex_bytes;
 mod backup_and_restore;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
@@ -1694,7 +1697,6 @@ mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
-mod encode_decode_asset_id;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
