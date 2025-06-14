@@ -23,9 +23,12 @@ async fn success() {
     let nia_decoded_result = asset_id_to_hex_bytes(node1_addr, asset_nia.asset_id.clone()).await;
     let uda_decoded_result = asset_id_to_hex_bytes(node1_addr, asset_uda.asset_id.clone()).await;
 
-    let cfa_encoded_result = asset_id_from_hex_bytes(node1_addr, cfa_decoded_result.hex_bytes.clone()).await;
-    let nia_encoded_result = asset_id_from_hex_bytes(node1_addr, nia_decoded_result.hex_bytes.clone()).await;
-    let uda_encoded_result = asset_id_from_hex_bytes(node1_addr, uda_decoded_result.hex_bytes.clone()).await;
+    let cfa_encoded_result =
+        asset_id_from_hex_bytes(node1_addr, cfa_decoded_result.hex_bytes.clone()).await;
+    let nia_encoded_result =
+        asset_id_from_hex_bytes(node1_addr, nia_decoded_result.hex_bytes.clone()).await;
+    let uda_encoded_result =
+        asset_id_from_hex_bytes(node1_addr, uda_decoded_result.hex_bytes.clone()).await;
 
     assert_eq!(cfa_encoded_result.asset_id, asset_cfa.asset_id);
     assert_eq!(nia_encoded_result.asset_id, asset_nia.asset_id);
