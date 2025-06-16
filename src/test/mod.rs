@@ -32,11 +32,11 @@ use crate::routes::{
     ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
     ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
     ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
-    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    PostAssetMediaResponse, RefreshRequest, RestoreRequest, RgbInvoiceRequest, RgbInvoiceResponse,
-    SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest,
-    Unspent,
+    NetworkInfoResponse, NodeInfoResponse, NodeStateResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RefreshRequest, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, Swap, SwapStatus, TakerRequest,
+    Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
@@ -1019,6 +1019,20 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
         .unwrap()
 }
 
+async fn node_state(node_address: SocketAddr) -> NodeStateResponse {
+    println!("getting node state for {node_address}");
+    let res = reqwest::Client::new()
+        .get(format!("http://{}/nodestate", node_address))
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<NodeStateResponse>()
+        .await
+        .unwrap()
+}
+
 async fn open_channel(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
@@ -1676,6 +1690,7 @@ mod issue;
 mod lock_unlock_changepassword;
 mod multi_hop;
 mod multi_open_close;
+mod node_state_test;
 mod open_after_double_send;
 mod openchannel_fail;
 mod openchannel_optional_addr;
