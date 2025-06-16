@@ -142,6 +142,26 @@ impl From<RgbLibBalance> for AssetBalanceResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct AssetIdToHexBytesRequest {
+    pub(crate) asset_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetIdToHexBytesResponse {
+    pub(crate) hex_bytes: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetIdFromHexBytesRequest {
+    pub(crate) hex_bytes: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetIdFromHexBytesResponse {
+    pub(crate) asset_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct AssetMetadataRequest {
     pub(crate) asset_id: String,
 }
@@ -1222,6 +1242,29 @@ pub(crate) async fn asset_balance(
         offchain_outbound,
         offchain_inbound,
     }))
+}
+
+pub(crate) async fn asset_id_from_hex_bytes(
+    WithRejection(Json(payload), _): WithRejection<Json<AssetIdFromHexBytesRequest>, APIError>,
+) -> Result<Json<AssetIdFromHexBytesResponse>, APIError> {
+    let hex_bytes = hex_str_to_vec(&payload.hex_bytes)
+        .ok_or_else(|| APIError::InvalidHexString(payload.hex_bytes))?;
+
+    let contract_id =
+        ContractId::copy_from_slice(&hex_bytes).map_err(|_| APIError::InvalidAssetIDBytes)?;
+    let asset_id = contract_id.to_string();
+
+    Ok(Json(AssetIdFromHexBytesResponse { asset_id }))
+}
+
+pub(crate) async fn asset_id_to_hex_bytes(
+    WithRejection(Json(payload), _): WithRejection<Json<AssetIdToHexBytesRequest>, APIError>,
+) -> Result<Json<AssetIdToHexBytesResponse>, APIError> {
+    let contract_id = ContractId::from_str(&payload.asset_id)
+        .map_err(|_| APIError::InvalidAssetID(payload.asset_id))?;
+    let hex_bytes = hex_str(&contract_id.to_byte_array());
+
+    Ok(Json(AssetIdToHexBytesResponse { hex_bytes }))
 }
 
 pub(crate) async fn asset_metadata(

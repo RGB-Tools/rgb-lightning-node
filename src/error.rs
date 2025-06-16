@@ -111,6 +111,9 @@ pub enum APIError {
     #[error("Invalid asset ID: {0}")]
     InvalidAssetID(String),
 
+    #[error("Invalid hex bytes")]
+    InvalidAssetIDBytes,
+
     #[error("Invalid attachments: {0}")]
     InvalidAttachments(String),
 
@@ -128,6 +131,9 @@ pub enum APIError {
 
     #[error("Invalid fee rate: {0}")]
     InvalidFeeRate(String),
+
+    #[error("Invalid hex string: {0}")]
+    InvalidHexString(String),
 
     #[error("Invalid indexer: {0}")]
     InvalidIndexer(String),
@@ -405,12 +411,14 @@ impl IntoResponse for APIError {
             | APIError::InvalidAnnounceAddresses(_)
             | APIError::InvalidAnnounceAlias(_)
             | APIError::InvalidAssetID(_)
+            | APIError::InvalidAssetIDBytes
             | APIError::InvalidAttachments(_)
             | APIError::InvalidBackupPath
             | APIError::InvalidChannelID
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
             | APIError::InvalidFeeRate(_)
+            | APIError::InvalidHexString(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidMediaDigest
             | APIError::InvalidName(_)

@@ -61,6 +61,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AssetBalanceResponse'
+  /assetidfromhexbytes:
+    post:
+      tags:
+        - RGB
+      summary: Convert hex-encoded bytes to RGB asset ID
+      description: Convert asset ID bytes in hexadecimal format to the corresponding baid64 string form
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetIdFromHexBytesRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetIdFromHexBytesResponse'
+  /assetidtohexbytes:
+    post:
+      tags:
+        - RGB
+      summary: Convert RGB asset ID to hex-encoded bytes
+      description: Convert RGB asset ID in baid64 string form to its bytes in hexadecimal format
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetIdToHexBytesRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetIdToHexBytesResponse'
   /assetmetadata:
     post:
       tags:
@@ -986,6 +1024,30 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    AssetIdFromHexBytesRequest:
+      type: object
+      properties:
+        hex_bytes:
+          type: string
+          example: 08991be186708d18b3dac93f3c044f8a8c2d558235717004602a8ec137ef459f
+    AssetIdFromHexBytesResponse:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+    AssetIdToHexBytesRequest:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+    AssetIdToHexBytesResponse:
+      type: object
+      properties:
+        hex_bytes:
+          type: string
+          example: 08991be186708d18b3dac93f3c044f8a8c2d558235717004602a8ec137ef459f
     AssetMetadataRequest:
       type: object
       properties:
