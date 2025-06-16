@@ -18,15 +18,26 @@ use tracing_test::traced_test;
 use crate::error::APIErrorResponse;
 use crate::ldk::FEE_RATE;
 use crate::routes::{
-    address, asset_balance, asset_id_from_hex_bytes, asset_id_to_hex_bytes, asset_metadata, backup,
-    btc_balance, change_password, check_indexer_url, check_proxy_endpoint, close_channel,
-    connect_peer, create_utxos, decode_ln_invoice, decode_rgb_invoice, disconnect_peer,
-    estimate_fee, fail_transfers, get_asset_media, get_channel_id, get_payment, get_swap, init,
-    invoice_status, issue_asset_cfa, issue_asset_nia, issue_asset_uda, keysend, list_assets,
-    list_channels, list_payments, list_peers, list_swaps, list_transactions, list_transfers,
-    list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info, node_info,
-    open_channel, post_asset_media, refresh_transfers, restore, rgb_invoice, send_asset, send_btc,
-    send_onion_message, send_payment, shutdown, sign_message, sync, taker, unlock,
+    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA,
+    AssetIdFromHexBytesRequest, AssetIdFromHexBytesResponse, AssetIdToHexBytesRequest,
+    AssetIdToHexBytesResponse, AssetNIA, AssetUDA, BackupRequest, BtcBalanceRequest,
+    BtcBalanceResponse, ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest,
+    CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
+    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, FailTransfersRequest,
+    FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest,
+    GetChannelIdResponse, GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
+    HTLCStatus, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest,
+    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
+    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
+    ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse,
+    ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, RefreshRequest, RestoreRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, Swap, SwapStatus, TakerRequest,
+    Transaction, Transfer, UnlockRequest, Unspent,
 };
 use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
@@ -221,7 +232,7 @@ async fn asset_balance_spendable(node_address: SocketAddr, asset_id: &str) -> u6
 async fn asset_id_from_hex_bytes(
     node_address: SocketAddr,
     hex_bytes: String,
-) -> AssetIDFromHexBytesResponse {
+) -> AssetIdFromHexBytesResponse {
     println!("converting hex bytes {hex_bytes} to asset ID for node {node_address}");
     let payload = AssetIdFromHexBytesRequest { hex_bytes };
     let res = reqwest::Client::new()
