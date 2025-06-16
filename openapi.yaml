@@ -1892,6 +1892,10 @@ components:
         payee_pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+        preimage:
+          type: string
+          description: Optional custom payment preimage (hex string, 32 bytes)
+          example: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
     Peer:
       type: object
       properties:
