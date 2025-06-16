@@ -792,6 +792,19 @@ pub(crate) struct NodeInfoResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) enum NodeState {
+    None,
+    Locked,
+    Running,
+    Changing,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct NodeStateResponse {
+    pub(crate) state: NodeState,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct OpenChannelRequest {
     pub(crate) peer_pubkey_and_opt_addr: String,
     pub(crate) capacity_sat: u64,
@@ -2821,6 +2834,33 @@ pub(crate) async fn node_info(
     }))
 }
 
+pub(crate) async fn node_state(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<NodeStateResponse>, APIError> {
+    let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
+    if let Ok(_) = check_already_initialized(&mnemonic_path) {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::None,
+        }));
+    }
+
+    if *state.get_changing_state() {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::Changing,
+        }));
+    }
+
+    if let Ok(_) = state.check_locked().await {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::Locked,
+        }));
+    }
+
+    return Ok(Json(NodeStateResponse {
+        state: NodeState::Running,
+    }));
+}
+
 pub(crate) async fn open_channel(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<OpenChannelRequest>, APIError>,
@@ -3597,45 +3637,4 @@ pub(crate) async fn unlock(
         Ok(Json(EmptyResponse {}))
     })
     .await
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) enum NodeState {
-    None,
-    Locked,
-    Running,
-    Changing,
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct NodeStateResponse {
-    pub(crate) state: NodeState,
-}
-
-pub(crate) async fn node_state(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<NodeStateResponse>, APIError> {
-
-    let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
-    if let Ok(_) = check_already_initialized(&mnemonic_path) {
-        return Ok(Json(NodeStateResponse {
-            state: NodeState::None,
-        }));    
-    }
-
-    if *state.get_changing_state() {
-        return Ok(Json(NodeStateResponse {
-            state: NodeState::Changing,
-        }));
-    }
-
-    if let Ok(_) = state.check_locked().await {
-        return Ok(Json(NodeStateResponse {
-            state: NodeState::Locked,
-        }));
-    }
-
-    return Ok(Json(NodeStateResponse {
-        state: NodeState::Running,
-    }));
 }
