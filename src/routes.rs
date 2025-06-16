@@ -2838,7 +2838,7 @@ pub(crate) async fn node_state(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<NodeStateResponse>, APIError> {
     let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
-    if let Ok(_) = check_already_initialized(&mnemonic_path) {
+    if check_already_initialized(&mnemonic_path).is_ok() {
         return Ok(Json(NodeStateResponse {
             state: NodeState::None,
         }));
@@ -2850,15 +2850,15 @@ pub(crate) async fn node_state(
         }));
     }
 
-    if let Ok(_) = state.check_locked().await {
+    if (state.check_locked().await).is_ok() {
         return Ok(Json(NodeStateResponse {
             state: NodeState::Locked,
         }));
     }
 
-    return Ok(Json(NodeStateResponse {
+    Ok(Json(NodeStateResponse {
         state: NodeState::Running,
-    }));
+    }))
 }
 
 pub(crate) async fn open_channel(
