@@ -25,7 +25,13 @@ async fn open_after_double_send() {
     let node2_pubkey = node_info(node2_addr).await.pubkey;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 100, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(100),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
@@ -33,7 +39,13 @@ async fn open_after_double_send() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 900);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 200, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(200),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
@@ -62,14 +74,26 @@ async fn open_after_double_send() {
     wait_for_balance(node2_addr, &asset_id, 250).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 725, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(725),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id, 225, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id,
+        Assignment::Fungible(225),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

@@ -32,7 +32,13 @@ async fn refuse_high_fees() {
     let node3_pubkey = node_info(node3_addr).await.pubkey;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 400, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(400),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;

@@ -1113,6 +1113,65 @@ components:
           $ref: '#/components/schemas/AssetBalanceResponse'
         token:
           $ref: '#/components/schemas/TokenLight'
+    Assignment:
+      oneOf:
+        - $ref: '#/components/schemas/AssignmentFungible'
+        - $ref: '#/components/schemas/AssignmentNonFungible'
+        - $ref: '#/components/schemas/AssignmentInflationRight'
+        - $ref: '#/components/schemas/AssignmentReplaceRight'
+        - $ref: '#/components/schemas/AssignmentAny'
+      discriminator:
+        propertyName: type
+        mapping:
+          Fungible: '#/components/schemas/AssignmentFungible'
+          NonFungible: '#/components/schemas/AssignmentNonFungible'
+          InflationRight: '#/components/schemas/AssignmentInflationRight'
+          ReplaceRight: '#/components/schemas/AssignmentReplaceRight'
+          Any: '#/components/schemas/AssignmentAny'
+    AssignmentAny:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [Any]
+    AssignmentFungible:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [Fungible]
+        value:
+          type: integer
+          example: 42
+      example:
+        type: Fungible
+        value: 42
+    AssignmentInflationRight:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [InflationRight]
+        value:
+          type: integer
+          example: 200
+    AssignmentNonFungible:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [NonFungible]
+    AssignmentReplaceRight:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ReplaceRight]
     BackupRequest:
       type: object
       properties:
@@ -1340,9 +1399,8 @@ components:
         asset_id:
           type: string
           example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE
-        amount:
-          type: integer
-          example: 69
+        assignment:
+          $ref: '#/components/schemas/Assignment'
         network:
           $ref: '#/components/schemas/BitcoinNetwork'
         expiration_timestamp:
@@ -1942,9 +2000,8 @@ components:
         asset_id:
           type: string
           example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
-        amount:
-          type: integer
-          example: 42
+        assignment:
+          $ref: '#/components/schemas/AssignmentFungible'
         settled:
           type: boolean
           example: false
@@ -1981,9 +2038,8 @@ components:
         asset_id:
           type: string
           example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
-        amount:
-          type: integer
-          example: 42
+        assignment:
+          $ref: '#/components/schemas/AssignmentFungible'
         recipient_id:
           type: string
           example: bcrt:utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
@@ -2218,9 +2274,12 @@ components:
           example: 1691162674
         status:
           $ref: '#/components/schemas/TransferStatus'
-        amount:
-          type: integer
-          example: 77
+        requested_assignment:
+          $ref: '#/components/schemas/AssignmentFungible'
+        assignments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignmentFungible'
         kind:
           $ref: '#/components/schemas/TransferKind'
         txid:

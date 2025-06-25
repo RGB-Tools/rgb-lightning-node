@@ -215,28 +215,52 @@ async fn swap_roundtrip_assets() {
 
     println!("\nspend assets");
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id_1, 200, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id_1,
+        Assignment::Fungible(200),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id_2, 20, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id_2,
+        Assignment::Fungible(20),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id_1, 5, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id_1,
+        Assignment::Fungible(5),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id_2, 200, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id_2,
+        Assignment::Fungible(200),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

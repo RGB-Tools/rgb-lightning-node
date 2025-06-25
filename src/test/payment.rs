@@ -132,14 +132,26 @@ async fn success() {
     wait_for_balance(node2_addr, &asset_id, 50).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 925, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(925),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id, 25, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id,
+        Assignment::Fungible(25),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
@@ -165,7 +177,7 @@ async fn success() {
     let xfer_1 = transfers.iter().find(|t| t.idx == 1).unwrap();
     assert_eq!(xfer_1.status, TransferStatus::Settled);
     assert_eq!(xfer_1.kind, TransferKind::Issuance);
-    assert_eq!(xfer_1.amount, 1000);
+    assert_eq!(xfer_1.assignments, vec![Assignment::Fungible(1000)]);
     assert!(xfer_1.txid.is_none());
     assert!(xfer_1.recipient_id.is_none());
     assert!(xfer_1.receive_utxo.is_none());
@@ -175,7 +187,8 @@ async fn success() {
     let xfer_2 = transfers.iter().find(|t| t.idx == 2).unwrap();
     assert_eq!(xfer_2.status, TransferStatus::Settled);
     assert_eq!(xfer_2.kind, TransferKind::Send);
-    assert_eq!(xfer_2.amount, 600);
+    assert_eq!(xfer_2.requested_assignment, Some(Assignment::Fungible(600)));
+    assert_eq!(xfer_2.assignments, vec![Assignment::Fungible(400)]);
     assert!(xfer_2.txid.is_some());
     assert!(xfer_2.recipient_id.is_some());
     assert!(xfer_2.receive_utxo.is_none());
@@ -185,7 +198,7 @@ async fn success() {
     let xfer_3 = transfers.iter().find(|t| t.idx == 3).unwrap();
     assert_eq!(xfer_3.status, TransferStatus::Settled);
     assert_eq!(xfer_3.kind, TransferKind::ReceiveWitness);
-    assert_eq!(xfer_3.amount, 550);
+    assert_eq!(xfer_3.assignments, vec![Assignment::Fungible(550)]);
     assert!(xfer_3.txid.is_some());
     assert!(xfer_3.recipient_id.is_some());
     assert!(xfer_3.receive_utxo.is_some());

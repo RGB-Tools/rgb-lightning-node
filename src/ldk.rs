@@ -22,6 +22,7 @@ use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
     update_rgb_channel_amount, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME, STATIC_BLINDING,
     WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME,
+    WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -57,10 +58,11 @@ use rgb_lib::{
     utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
-        DatabaseType, Outpoint, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
+        DatabaseType, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
         WitnessData,
     },
-    BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer, RgbTxid,
+    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
+    RgbTxid,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -536,6 +538,11 @@ async fn handle_ldk_events(
 
                 let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
+                let assignment = match rgb_info.schema {
+                    AssetSchema::Nia | AssetSchema::Cfa => Assignment::Fungible(channel_rgb_amount),
+                    AssetSchema::Uda => Assignment::NonFungible,
+                    AssetSchema::Ifa => todo!(),
+                };
 
                 let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
 
@@ -546,7 +553,7 @@ async fn handle_ldk_events(
                             amount_sat: channel_value_satoshis,
                             blinding: Some(STATIC_BLINDING),
                         }),
-                        amount: channel_rgb_amount,
+                        assignment,
                         transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
                 }]};
 
@@ -1214,7 +1221,7 @@ impl OutputSpender for RgbOutputSpender {
         let mut vanilla_descriptor = true;
 
         let mut txouts = outputs.clone();
-        let mut asset_info: HashMap<ContractId, (u32, u64, String, Vec<Outpoint>)> = map![];
+        let mut asset_info: HashMap<ContractId, (u32, u64, String)> = map![];
 
         for outp in descriptors {
             let outpoint = match outp {
@@ -1258,7 +1265,7 @@ impl OutputSpender for RgbOutputSpender {
             let contract_id = transfer_info.contract_id;
 
             let mut new_asset = false;
-            let recipient_id = if let Some((_, _, recipient_id, _)) = asset_info.get(&contract_id) {
+            let recipient_id = if let Some((_, _, recipient_id)) = asset_info.get(&contract_id) {
                 recipient_id.clone()
             } else {
                 new_asset = true;
@@ -1278,17 +1285,12 @@ impl OutputSpender for RgbOutputSpender {
 
             let amt_rgb = transfer_info.rgb_amount;
 
-            let input_outpoint = Outpoint {
-                txid: txid_str,
-                vout: outpoint.index.into(),
-            };
             asset_info
                 .entry(contract_id)
-                .and_modify(|(_, a, _, i)| {
+                .and_modify(|(_, a, _)| {
                     *a += amt_rgb;
-                    i.push(input_outpoint.clone());
                 })
-                .or_insert_with(|| (vout, amt_rgb, recipient_id, vec![input_outpoint.clone()]));
+                .or_insert_with(|| (vout, amt_rgb, recipient_id));
 
             if new_asset {
                 vout += 1;
@@ -1319,12 +1321,11 @@ impl OutputSpender for RgbOutputSpender {
             .unwrap();
 
         let mut asset_info_map = map![];
-        for (contract_id, (vout, amt_rgb, _, input_outpoints)) in asset_info.clone() {
+        for (contract_id, (vout, amt_rgb, _)) in asset_info.clone() {
             asset_info_map.insert(
                 contract_id,
                 AssetColoringInfo {
                     output_map: HashMap::from_iter([(vout, amt_rgb)]),
-                    input_outpoints,
                     static_blinding: None,
                 },
             );
@@ -1363,7 +1364,7 @@ impl OutputSpender for RgbOutputSpender {
         for consignment in consignments {
             let contract_id = consignment.contract_id();
 
-            let (mut vout, _, recipient_id, _) = asset_info[&contract_id].clone();
+            let (mut vout, _, recipient_id) = asset_info[&contract_id].clone();
             vout += 1;
 
             let consignment_path = self
@@ -1633,9 +1634,10 @@ pub(crate) async fn start_ldk(
 
     // Prepare the RGB wallet
     let mnemonic_str = mnemonic.to_string();
-    let (_, account_xpub_vanilla) =
+    let (_, account_xpub_vanilla, _) =
         get_account_data(bitcoin_network, &mnemonic_str, false).unwrap();
-    let (_, account_xpub_colored) = get_account_data(bitcoin_network, &mnemonic_str, true).unwrap();
+    let (_, account_xpub_colored, master_fingerprint) =
+        get_account_data(bitcoin_network, &mnemonic_str, true).unwrap();
     let data_dir = static_state
         .storage_dir_path
         .clone()
@@ -1649,8 +1651,10 @@ pub(crate) async fn start_ldk(
             max_allocations_per_utxo: 1,
             account_xpub_vanilla: account_xpub_vanilla.to_string(),
             account_xpub_colored: account_xpub_colored.to_string(),
+            master_fingerprint: master_fingerprint.to_string(),
             mnemonic: Some(mnemonic.to_string()),
             vanilla_keychain: None,
+            supported_schemas: vec![AssetSchema::Nia, AssetSchema::Cfa, AssetSchema::Uda],
         })
         .expect("valid rgb-lib wallet")
     })
@@ -1674,6 +1678,13 @@ pub(crate) async fn start_ldk(
             .storage_dir_path
             .join(WALLET_ACCOUNT_XPUB_VANILLA_FNAME),
         account_xpub_vanilla.to_string(),
+    )
+    .expect("able to write");
+    fs::write(
+        static_state
+            .storage_dir_path
+            .join(WALLET_MASTER_FINGERPRINT_FNAME),
+        master_fingerprint.to_string(),
     )
     .expect("able to write");
 

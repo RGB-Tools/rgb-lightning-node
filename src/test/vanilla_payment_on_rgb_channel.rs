@@ -81,7 +81,13 @@ async fn vanilla_payment_on_rgb_channel() {
     wait_for_balance(node1_addr, &asset_id, 1000).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 900, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(900),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

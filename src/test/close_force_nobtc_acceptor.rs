@@ -41,7 +41,13 @@ async fn close_force_nobtc_acceptor() {
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 700, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(700),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
@@ -49,7 +55,13 @@ async fn close_force_nobtc_acceptor() {
 
     let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
     fund_and_create_utxos(node2_addr, None).await;
-    send_asset(node2_addr, &asset_id, 50, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id,
+        Assignment::Fungible(50),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;

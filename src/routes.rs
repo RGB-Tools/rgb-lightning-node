@@ -57,7 +57,8 @@ use rgb_lib::{
         Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves, Recipient, RecipientInfo,
         Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData,
     },
-    AssetSchema as RgbLibAssetSchema, BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
+    AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
+    BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -241,6 +242,7 @@ impl From<RgbLibAssetSchema> for AssetSchema {
             RgbLibAssetSchema::Nia => Self::Nia,
             RgbLibAssetSchema::Uda => Self::Uda,
             RgbLibAssetSchema::Cfa => Self::Cfa,
+            RgbLibAssetSchema::Ifa => todo!(),
         }
     }
 }
@@ -272,6 +274,40 @@ impl From<RgbLibAssetUDA> for AssetUDA {
             added_at: value.added_at,
             balance: value.balance.into(),
             token: value.token.map(|t| t.into()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub(crate) enum Assignment {
+    Fungible(u64),
+    NonFungible,
+    InflationRight(u64),
+    ReplaceRight,
+    Any,
+}
+
+impl From<RgbLibAssignment> for Assignment {
+    fn from(x: RgbLibAssignment) -> Self {
+        match x {
+            RgbLibAssignment::Fungible(amt) => Self::Fungible(amt),
+            RgbLibAssignment::NonFungible => Self::NonFungible,
+            RgbLibAssignment::InflationRight(amt) => Self::InflationRight(amt),
+            RgbLibAssignment::ReplaceRight => Self::ReplaceRight,
+            RgbLibAssignment::Any => Self::Any,
+        }
+    }
+}
+
+impl From<Assignment> for RgbLibAssignment {
+    fn from(x: Assignment) -> Self {
+        match x {
+            Assignment::Fungible(amt) => Self::Fungible(amt),
+            Assignment::NonFungible => Self::NonFungible,
+            Assignment::InflationRight(amt) => Self::InflationRight(amt),
+            Assignment::ReplaceRight => Self::ReplaceRight,
+            Assignment::Any => Self::Any,
         }
     }
 }
@@ -437,7 +473,7 @@ pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) recipient_id: String,
     pub(crate) asset_schema: Option<AssetSchema>,
     pub(crate) asset_id: Option<String>,
-    pub(crate) amount: Option<u64>,
+    pub(crate) assignment: Assignment,
     pub(crate) network: BitcoinNetwork,
     pub(crate) expiration_timestamp: Option<i64>,
     pub(crate) transport_endpoints: Vec<String>,
@@ -862,7 +898,7 @@ pub(crate) struct RestoreRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RgbAllocation {
     pub(crate) asset_id: Option<String>,
-    pub(crate) amount: u64,
+    pub(crate) assignment: Assignment,
     pub(crate) settled: bool,
 }
 
@@ -884,7 +920,7 @@ pub(crate) struct RgbInvoiceResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct SendAssetRequest {
     pub(crate) asset_id: String,
-    pub(crate) amount: u64,
+    pub(crate) assignment: Assignment,
     pub(crate) recipient_id: String,
     pub(crate) donation: bool,
     pub(crate) fee_rate: u64,
@@ -1064,7 +1100,8 @@ pub(crate) struct Transfer {
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
     pub(crate) status: TransferStatus,
-    pub(crate) amount: u64,
+    pub(crate) requested_assignment: Option<Assignment>,
+    pub(crate) assignments: Vec<Assignment>,
     pub(crate) kind: TransferKind,
     pub(crate) txid: Option<String>,
     pub(crate) recipient_id: Option<String>,
@@ -1468,7 +1505,7 @@ pub(crate) async fn decode_rgb_invoice(
         recipient_id: invoice_data.recipient_id,
         asset_schema: invoice_data.asset_schema.map(|s| s.into()),
         asset_id: invoice_data.asset_id,
-        amount: invoice_data.amount,
+        assignment: invoice_data.assignment.into(),
         network: invoice_data.network.into(),
         expiration_timestamp: invoice_data.expiration_timestamp,
         transport_endpoints: invoice_data.transport_endpoints,
@@ -2308,7 +2345,8 @@ pub(crate) async fn list_transfers(
                 rgb_lib::TransferStatus::Settled => TransferStatus::Settled,
                 rgb_lib::TransferStatus::Failed => TransferStatus::Failed,
             },
-            amount: transfer.amount,
+            requested_assignment: transfer.requested_assignment.map(|a| a.into()),
+            assignments: transfer.assignments.into_iter().map(|a| a.into()).collect(),
             kind: match transfer.kind {
                 rgb_lib::TransferKind::Issuance => TransferKind::Issuance,
                 rgb_lib::TransferKind::ReceiveBlind => TransferKind::ReceiveBlind,
@@ -2355,7 +2393,7 @@ pub(crate) async fn list_unspents(
                 .iter()
                 .map(|a| RgbAllocation {
                     asset_id: a.asset_id.clone(),
-                    amount: a.amount,
+                    assignment: a.assignment.clone().into(),
                     settled: a.settled,
                 })
                 .collect(),
@@ -2952,12 +2990,23 @@ pub(crate) async fn open_channel(
             None
         };
 
-        if let Some((contract_id, asset_amount)) = &colored_info {
+        let schema = if let Some((contract_id, asset_amount)) = &colored_info {
             let mut fake_p2wsh: [u8; 34] = [0; 34];
             fake_p2wsh[1] = 32;
             let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
             let recipient_id = recipient_id_from_script_buf(script_buf, state.static_state.network);
             let asset_id = contract_id.to_string();
+            let schema = unlocked_state
+                .rgb_get_asset_metadata(*contract_id)?
+                .asset_schema;
+            let assignment = match schema {
+                RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa => {
+                    Assignment::Fungible(*asset_amount)
+                }
+                RgbLibAssetSchema::Uda => Assignment::NonFungible,
+                RgbLibAssetSchema::Ifa => todo!(),
+            };
+
             let recipient_map = map! {
                 asset_id => vec![Recipient {
                     recipient_id,
@@ -2965,7 +3014,7 @@ pub(crate) async fn open_channel(
                         amount_sat: payload.capacity_sat,
                         blinding: Some(STATIC_BLINDING + 1),
                     }),
-                    amount: *asset_amount,
+                    assignment: assignment.into(),
                     transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
             }]};
 
@@ -2980,7 +3029,10 @@ pub(crate) async fn open_channel(
             })
             .await
             .unwrap()?;
-        }
+            Some(schema)
+        } else {
+            None
+        };
 
         *unlocked_state.rgb_send_lock.lock().unwrap() = true;
         tracing::debug!("RGB send lock set to true");
@@ -3023,6 +3075,7 @@ pub(crate) async fn open_channel(
         if let Some((contract_id, asset_amount)) = &colored_info {
             let rgb_info = RgbInfo {
                 contract_id: *contract_id,
+                schema: schema.unwrap(),
                 local_rgb_amount: *asset_amount,
                 remote_rgb_amount: 0,
             };
@@ -3184,7 +3237,7 @@ pub(crate) async fn send_asset(
             payload.asset_id => vec![Recipient {
                 recipient_id: payload.recipient_id,
                 witness_data: None,
-                amount: payload.amount,
+                assignment: payload.assignment.into(),
                 transport_endpoints: payload.transport_endpoints,
             }]
         };

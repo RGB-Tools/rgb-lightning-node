@@ -28,7 +28,13 @@ async fn swap_roundtrip_multihop_asset_asset() {
     let asset_id_2 = issue_asset_nia(node3_addr).await.asset_id;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id_1, 400, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id_1,
+        Assignment::Fungible(400),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
@@ -36,7 +42,13 @@ async fn swap_roundtrip_multihop_asset_asset() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id_1).await, 600);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node3_addr, &asset_id_2, 400, recipient_id).await;
+    send_asset(
+        node3_addr,
+        &asset_id_2,
+        Assignment::Fungible(400),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
@@ -322,42 +334,78 @@ async fn swap_roundtrip_multihop_asset_asset() {
 
     println!("\nspend assets");
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id_1, 200, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id_1,
+        Assignment::Fungible(200),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id_2, 10, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id_2,
+        Assignment::Fungible(10),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;
     refresh_transfers(node1_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id_1, 100, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id_1,
+        Assignment::Fungible(100),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;
     refresh_transfers(node2_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node2_addr, &asset_id_2, 100, recipient_id).await;
+    send_asset(
+        node2_addr,
+        &asset_id_2,
+        Assignment::Fungible(100),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;
     refresh_transfers(node2_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node3_addr, &asset_id_1, 5, recipient_id).await;
+    send_asset(
+        node3_addr,
+        &asset_id_1,
+        Assignment::Fungible(5),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;
     refresh_transfers(node3_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
-    send_asset(node3_addr, &asset_id_2, 80, recipient_id).await;
+    send_asset(
+        node3_addr,
+        &asset_id_2,
+        Assignment::Fungible(80),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;

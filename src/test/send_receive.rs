@@ -25,7 +25,13 @@ async fn send_receive() {
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 400, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(400),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;
@@ -38,7 +44,13 @@ async fn send_receive() {
         invoice,
         ..
     } = rgb_invoice(node1_addr, Some(asset_id.clone())).await;
-    send_asset(node2_addr, &asset_id, 300, recipient_id.clone()).await;
+    send_asset(
+        node2_addr,
+        &asset_id,
+        Assignment::Fungible(300),
+        recipient_id.clone(),
+    )
+    .await;
     mine(false);
     refresh_transfers(node1_addr).await;
     refresh_transfers(node1_addr).await;
@@ -51,13 +63,19 @@ async fn send_receive() {
     assert_eq!(decoded.recipient_id, recipient_id);
     assert!(matches!(decoded.asset_schema, Some(AssetSchema::Nia)));
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
-    assert_eq!(decoded.amount, None);
+    assert_eq!(decoded.assignment, Assignment::Fungible(0));
     assert!(matches!(decoded.network, BitcoinNetwork::Regtest));
     assert!(decoded.expiration_timestamp.is_some());
     assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_LOCAL]);
 
     let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
-    send_asset(node1_addr, &asset_id, 200, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(200),
+        recipient_id,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;

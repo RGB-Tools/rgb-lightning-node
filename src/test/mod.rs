@@ -19,8 +19,8 @@ use crate::error::APIErrorResponse;
 use crate::ldk::FEE_RATE;
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
-    BackupRequest, BtcBalanceRequest, BtcBalanceResponse, ChangePasswordRequest, Channel,
-    CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
+    Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse, ChangePasswordRequest,
+    Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
     DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
     GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
@@ -1218,13 +1218,18 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
         .unwrap()
 }
 
-async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, recipient_id: String) {
+async fn send_asset(
+    node_address: SocketAddr,
+    asset_id: &str,
+    assignment: Assignment,
+    recipient_id: String,
+) {
     println!(
-        "sending on-chain {amount} of asset {asset_id} from node {node_address} to {recipient_id}"
+        "sending on-chain {assignment:?} of asset {asset_id} from node {node_address} to {recipient_id}"
     );
     let payload = SendAssetRequest {
         asset_id: asset_id.to_string(),
-        amount,
+        assignment,
         recipient_id,
         donation: true,
         fee_rate: FEE_RATE,
