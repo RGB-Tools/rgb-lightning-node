@@ -43,7 +43,7 @@ async fn success() {
         reqwest::multipart::Part::bytes(file_bytes).headers([].into_iter().collect()),
     );
     let res = reqwest::Client::new()
-        .post(format!("http://{}/postassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/postassetmedia"))
         .multipart(form)
         .send()
         .await
@@ -64,7 +64,7 @@ async fn fail() {
     // upload asset media with no multipart field
     let form = reqwest::multipart::Form::new();
     let res = reqwest::Client::new()
-        .post(format!("http://{}/postassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/postassetmedia"))
         .multipart(form)
         .send()
         .await
@@ -82,7 +82,7 @@ async fn fail() {
     let form =
         reqwest::multipart::Form::new().part("file", reqwest::multipart::Part::bytes(file_bytes));
     let res = reqwest::Client::new()
-        .post(format!("http://{}/postassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/postassetmedia"))
         .multipart(form)
         .send()
         .await
@@ -102,7 +102,7 @@ async fn fail() {
         reqwest::multipart::Part::bytes(file_bytes).headers([].into_iter().collect()),
     );
     let res = reqwest::Client::new()
-        .post(format!("http://{}/postassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/postassetmedia"))
         .multipart(form)
         .send()
         .await

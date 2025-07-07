@@ -24,7 +24,7 @@ async fn open_fail() {
 
     // open with insufficient allocation slots
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -36,7 +36,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -58,7 +58,7 @@ async fn open_fail() {
 
     // open with unknown asset
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -70,7 +70,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -85,7 +85,7 @@ async fn open_fail() {
 
     // open with bad asset amount
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(0),
@@ -97,7 +97,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -117,7 +117,7 @@ async fn open_fail() {
 
     // open with bad asset ID
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -129,7 +129,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -149,7 +149,7 @@ async fn open_fail() {
 
     // open with invalid BTC amount (too low)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 1_000,
         push_msat: 3_500_000,
         asset_amount: None,
@@ -161,7 +161,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -181,7 +181,7 @@ async fn open_fail() {
 
     // open with invalid BTC amount (too high)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 20000000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -193,7 +193,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -215,7 +215,7 @@ async fn open_fail() {
     println!("setting MOCK_FEE");
     *MOCK_FEE.lock().unwrap() = Some(1000);
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 100_000_000,
         asset_amount: Some(100),
@@ -227,7 +227,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -247,7 +247,7 @@ async fn open_fail() {
 
     // open with invalid push BTC amount (higher than capacity)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 100_000_001,
         asset_amount: Some(100),
@@ -259,7 +259,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -279,7 +279,7 @@ async fn open_fail() {
 
     // open an RGB channel with anchors disabled
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -291,7 +291,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -313,7 +313,7 @@ async fn open_fail() {
     println!("setting MOCK_FEE");
     *MOCK_FEE.lock().unwrap() = Some(5000);
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 5506,
         push_msat: 0,
         asset_amount: None,
@@ -325,7 +325,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -345,7 +345,7 @@ async fn open_fail() {
 
     // open with insufficient assets
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(2000),
@@ -357,7 +357,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -377,7 +377,7 @@ async fn open_fail() {
 
     // open with an invalid temporary channel id
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -389,7 +389,7 @@ async fn open_fail() {
         temporary_channel_id: Some(s!("ttoooosshhoorrtt")),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -409,7 +409,7 @@ async fn open_fail() {
 
     // open a 1st channel (success)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -421,7 +421,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -429,7 +429,7 @@ async fn open_fail() {
     assert!(res.status() == reqwest::StatusCode::OK);
     // open a 2nd channel while the previous open is still in progess (fail)
     let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{}@127.0.0.1:{}", node2_pubkey, NODE2_PEER_PORT),
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
         push_msat: 3_500_000,
         asset_amount: Some(100),
@@ -441,7 +441,7 @@ async fn open_fail() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await

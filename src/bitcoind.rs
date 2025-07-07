@@ -350,7 +350,7 @@ impl BroadcasterInterface for BitcoindClient {
 						"Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransactions: {:?}",
 						err_str,
 						txn);
-					print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\n> ", err_str);
+					print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {err_str}\n> ");
 				}
 			}
 		});

@@ -59,7 +59,7 @@ async fn swap_roundtrip_fail_timeout() {
         swapstring: maker_init_response_1.swapstring.clone(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/taker", taker_addr))
+        .post(format!("http://{taker_addr}/taker"))
         .json(&payload)
         .send()
         .await

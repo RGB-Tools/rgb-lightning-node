@@ -69,7 +69,7 @@ async fn issue() {
     // check /getassetmedia invalid digest errors
     let payload = GetAssetMediaRequest { digest: s!("a") };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/getassetmedia"))
         .json(&payload)
         .send()
         .await
@@ -84,7 +84,7 @@ async fn issue() {
 
     let payload = GetAssetMediaRequest { digest: s!("") };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getassetmedia", node1_addr))
+        .post(format!("http://{node1_addr}/getassetmedia"))
         .json(&payload)
         .send()
         .await

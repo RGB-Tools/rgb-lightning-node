@@ -288,7 +288,7 @@ pub enum APIError {
 
 impl APIError {
     fn name(&self) -> String {
-        format!("{:?}", self)
+        format!("{self:?}")
             .split('(')
             .next()
             .unwrap()

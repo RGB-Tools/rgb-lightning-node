@@ -75,7 +75,7 @@ async fn concurrent_btc_payments() {
         amt_msat: None,
     };
     let res_1 = reqwest::Client::new()
-        .post(format!("http://{}/sendpayment", node3_addr))
+        .post(format!("http://{node3_addr}/sendpayment"))
         .json(&payload_1)
         .send()
         .await
@@ -88,7 +88,7 @@ async fn concurrent_btc_payments() {
         amt_msat: None,
     };
     let res_2 = reqwest::Client::new()
-        .post(format!("http://{}/sendpayment", node4_addr))
+        .post(format!("http://{node4_addr}/sendpayment"))
         .json(&payload_2)
         .send()
         .await

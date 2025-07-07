@@ -731,7 +731,7 @@ async fn handle_ldk_events(
                             payment hash {} with preimage {}",
                     payment.amt_msat,
                     if let Some(fee) = fee_paid_msat {
-                        format!(" (fee {} msat)", fee)
+                        format!(" (fee {fee} msat)")
                     } else {
                         "".to_string()
                     },
@@ -874,7 +874,7 @@ async fn handle_ldk_events(
             };
             let channel_str = |channel_id: &Option<ChannelId>| {
                 channel_id
-                    .map(|channel_id| format!(" with channel {}", channel_id))
+                    .map(|channel_id| format!(" with channel {channel_id}"))
                     .unwrap_or_default()
             };
             let from_prev_str = format!(
@@ -894,7 +894,7 @@ async fn handle_ldk_events(
                 "from HTLC fulfill message"
             };
             let amt_args = if let Some(v) = outbound_amount_forwarded_msat {
-                format!("{}", v)
+                format!("{v}")
             } else {
                 "?".to_string()
             };
@@ -989,7 +989,7 @@ async fn handle_ldk_events(
                 match unlocked_state.rgb_save_new_asset(contract_id, None) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
-                    Err(e) => panic!("Failed saving asset: {}", e),
+                    Err(e) => panic!("Failed saving asset: {e}"),
                 }
             }
         }
@@ -1024,7 +1024,7 @@ async fn handle_ldk_events(
                 "EVENT: Channel {} with counterparty {} closed due to: {:?}",
                 channel_id,
                 counterparty_node_id
-                    .map(|id| format!("{}", id))
+                    .map(|id| format!("{id}"))
                     .unwrap_or("".to_owned()),
                 reason
             );
@@ -1726,7 +1726,7 @@ pub(crate) async fn start_ldk(
             <(BestBlock, OutputSweeper)>::read(&mut reader, read_args)
                 .expect("Failed to deserialize OutputSweeper")
         }
-        Err(e) => panic!("Failed to read OutputSweeper with {}", e),
+        Err(e) => panic!("Failed to read OutputSweeper with {e}"),
     };
 
     // Sync ChannelMonitors, ChannelManager and OutputSweeper to chain tip
@@ -1861,7 +1861,7 @@ pub(crate) async fn start_ldk(
     let stop_processing = Arc::new(AtomicBool::new(false));
     let stop_listen = Arc::clone(&stop_processing);
     tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(format!("[::]:{}", listening_port))
+        let listener = tokio::net::TcpListener::bind(format!("[::]:{listening_port}"))
             .await
             .expect("Failed to bind to listen port - is something else already listening on it?");
         loop {

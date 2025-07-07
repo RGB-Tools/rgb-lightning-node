@@ -29,7 +29,7 @@ async fn lock_unlock_changepassword() {
         new_password: new_password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/changepassword", node1_addr))
+        .post(format!("http://{node1_addr}/changepassword"))
         .json(&payload)
         .send()
         .await
@@ -46,7 +46,7 @@ async fn lock_unlock_changepassword() {
         new_password: new_password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/changepassword", node1_addr))
+        .post(format!("http://{node1_addr}/changepassword"))
         .json(&payload)
         .send()
         .await
@@ -62,7 +62,7 @@ async fn lock_unlock_changepassword() {
         new_password: new_password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/changepassword", node1_addr))
+        .post(format!("http://{node1_addr}/changepassword"))
         .json(&payload)
         .send()
         .await

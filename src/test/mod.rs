@@ -167,7 +167,7 @@ async fn start_node(
             password: password.clone(),
         };
         let res = reqwest::Client::new()
-            .post(format!("http://{}/init", node_address))
+            .post(format!("http://{node_address}/init"))
             .json(&payload)
             .send()
             .await
@@ -188,7 +188,7 @@ async fn start_node(
 async fn address(node_address: SocketAddr) -> String {
     println!("getting address for node {node_address}");
     let res = reqwest::Client::new()
-        .post(format!("http://{}/address", node_address))
+        .post(format!("http://{node_address}/address"))
         .send()
         .await
         .unwrap();
@@ -206,7 +206,7 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalance
         asset_id: asset_id.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/assetbalance", node_address))
+        .post(format!("http://{node_address}/assetbalance"))
         .json(&payload)
         .send()
         .await
@@ -235,7 +235,7 @@ async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
         password: password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/backup", node_address))
+        .post(format!("http://{node_address}/backup"))
         .json(&payload)
         .send()
         .await
@@ -251,7 +251,7 @@ async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
     println!("getting BTC balance for node {node_address}");
     let payload = BtcBalanceRequest { skip_sync: false };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/btcbalance", node_address))
+        .post(format!("http://{node_address}/btcbalance"))
         .json(&payload)
         .send()
         .await
@@ -270,7 +270,7 @@ async fn change_password(node_address: SocketAddr, old_password: &str, new_passw
         new_password: new_password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/changepassword", node_address))
+        .post(format!("http://{node_address}/changepassword"))
         .json(&payload)
         .send()
         .await
@@ -310,7 +310,7 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
         force,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/closechannel", node_address))
+        .post(format!("http://{node_address}/closechannel"))
         .json(&payload)
         .send()
         .await
@@ -345,7 +345,7 @@ async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &s
         peer_pubkey_and_addr: format!("{peer_pubkey}@{peer_addr}"),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/connectpeer", node_address))
+        .post(format!("http://{node_address}/connectpeer"))
         .json(&payload)
         .send()
         .await
@@ -382,7 +382,7 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
         skip_sync: false,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/createutxos", node_address))
+        .post(format!("http://{node_address}/createutxos"))
         .json(&payload)
         .send()
         .await
@@ -400,7 +400,7 @@ async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNI
         invoice: invoice.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/decodelninvoice", node_address))
+        .post(format!("http://{node_address}/decodelninvoice"))
         .json(&payload)
         .send()
         .await
@@ -418,7 +418,7 @@ async fn decode_rgb_invoice(node_address: SocketAddr, invoice: &str) -> DecodeRG
         invoice: invoice.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/decodergbinvoice", node_address))
+        .post(format!("http://{node_address}/decodergbinvoice"))
         .json(&payload)
         .send()
         .await
@@ -436,7 +436,7 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
         peer_pubkey: peer_pubkey.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/disconnectpeer", node_address))
+        .post(format!("http://{node_address}/disconnectpeer"))
         .json(&payload)
         .send()
         .await
@@ -458,7 +458,7 @@ async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32
         skip_sync: false,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/failtransfers", node_address))
+        .post(format!("http://{node_address}/failtransfers"))
         .json(&payload)
         .send()
         .await
@@ -488,7 +488,7 @@ async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
         digest: digest.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getassetmedia", node_address))
+        .post(format!("http://{node_address}/getassetmedia"))
         .json(&payload)
         .send()
         .await
@@ -507,7 +507,7 @@ async fn get_channel_id(node_address: SocketAddr, temp_chan_id: &str) -> String 
         temporary_channel_id: temp_chan_id.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getchannelid", node_address))
+        .post(format!("http://{node_address}/getchannelid"))
         .json(&payload)
         .send()
         .await
@@ -526,7 +526,7 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
         invoice: invoice.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/invoicestatus", node_address))
+        .post(format!("http://{node_address}/invoicestatus"))
         .json(&payload)
         .send()
         .await
@@ -553,7 +553,7 @@ async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> A
         file_digest,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/issueassetcfa", node_address))
+        .post(format!("http://{node_address}/issueassetcfa"))
         .json(&payload)
         .send()
         .await
@@ -575,7 +575,7 @@ async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
         precision: 0,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/issueassetnia", node_address))
+        .post(format!("http://{node_address}/issueassetnia"))
         .json(&payload)
         .send()
         .await
@@ -603,7 +603,7 @@ async fn issue_asset_uda(node_address: SocketAddr, file_path: Option<&str>) -> A
         attachments_file_digests: vec![],
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/issueassetuda", node_address))
+        .post(format!("http://{node_address}/issueassetuda"))
         .json(&payload)
         .send()
         .await
@@ -671,7 +671,7 @@ async fn _keysend_raw(
         asset_amount,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/keysend", node_address))
+        .post(format!("http://{node_address}/keysend"))
         .json(&payload)
         .send()
         .await
@@ -725,7 +725,7 @@ async fn list_assets(node_address: SocketAddr) -> ListAssetsResponse {
         filter_asset_schemas: vec![],
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/listassets", node_address))
+        .post(format!("http://{node_address}/listassets"))
         .json(&payload)
         .send()
         .await
@@ -740,7 +740,7 @@ async fn list_assets(node_address: SocketAddr) -> ListAssetsResponse {
 async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {
     println!("listing channels for node {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listchannels", node_address))
+        .get(format!("http://{node_address}/listchannels"))
         .send()
         .await
         .unwrap();
@@ -755,7 +755,7 @@ async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {
 async fn list_payments(node_address: SocketAddr) -> Vec<Payment> {
     println!("listing payments for node {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listpayments", node_address))
+        .get(format!("http://{node_address}/listpayments"))
         .send()
         .await
         .unwrap();
@@ -772,7 +772,7 @@ async fn get_payment(node_address: SocketAddr, payment_hash: &str) -> Payment {
         payment_hash: payment_hash.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getpayment", node_address))
+        .post(format!("http://{node_address}/getpayment"))
         .json(&payload)
         .send()
         .await
@@ -788,7 +788,7 @@ async fn get_payment(node_address: SocketAddr, payment_hash: &str) -> Payment {
 async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
     println!("listing peers for node {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listpeers", node_address))
+        .get(format!("http://{node_address}/listpeers"))
         .send()
         .await
         .unwrap();
@@ -803,7 +803,7 @@ async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
 async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
     println!("listing swaps for node {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/listswaps", node_address))
+        .get(format!("http://{node_address}/listswaps"))
         .send()
         .await
         .unwrap();
@@ -817,7 +817,7 @@ async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> 
         taker,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getswap", node_address))
+        .post(format!("http://{node_address}/getswap"))
         .json(&payload)
         .send()
         .await
@@ -834,7 +834,7 @@ async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
     println!("listing transactions for node {node_address}");
     let payload = ListTransactionsRequest { skip_sync: false };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/listtransactions", node_address))
+        .post(format!("http://{node_address}/listtransactions"))
         .json(&payload)
         .send()
         .await
@@ -853,7 +853,7 @@ async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfe
         asset_id: asset_id.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/listtransfers", node_address))
+        .post(format!("http://{node_address}/listtransfers"))
         .json(&payload)
         .send()
         .await
@@ -870,7 +870,7 @@ async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
     println!("listing unspents for node {node_address}");
     let payload = ListUnspentsRequest { skip_sync: false };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/listunspents", node_address))
+        .post(format!("http://{node_address}/listunspents"))
         .json(&payload)
         .send()
         .await
@@ -900,7 +900,7 @@ async fn ln_invoice(
         asset_amount,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/lninvoice", node_address))
+        .post(format!("http://{node_address}/lninvoice"))
         .json(&payload)
         .send()
         .await
@@ -915,7 +915,7 @@ async fn ln_invoice(
 async fn lock(node_address: SocketAddr) {
     println!("locking node {node_address}");
     let res = reqwest::Client::new()
-        .post(format!("http://{}/lock", node_address))
+        .post(format!("http://{node_address}/lock"))
         .send()
         .await
         .unwrap();
@@ -952,7 +952,7 @@ async fn maker_execute_raw(
         taker_pubkey,
     };
     reqwest::Client::new()
-        .post(format!("http://{}/makerexecute", node_address))
+        .post(format!("http://{node_address}/makerexecute"))
         .json(&payload)
         .send()
         .await
@@ -979,7 +979,7 @@ async fn maker_init(
         timeout_sec,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/makerinit", node_address))
+        .post(format!("http://{node_address}/makerinit"))
         .json(&payload)
         .send()
         .await
@@ -994,7 +994,7 @@ async fn maker_init(
 async fn network_info(node_address: SocketAddr) -> NetworkInfoResponse {
     println!("getting network info for node {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/networkinfo", node_address))
+        .get(format!("http://{node_address}/networkinfo"))
         .send()
         .await
         .unwrap();
@@ -1008,7 +1008,7 @@ async fn network_info(node_address: SocketAddr) -> NetworkInfoResponse {
 async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
     println!("getting node info for {node_address}");
     let res = reqwest::Client::new()
-        .get(format!("http://{}/nodeinfo", node_address))
+        .get(format!("http://{node_address}/nodeinfo"))
         .send()
         .await
         .unwrap();
@@ -1064,7 +1064,7 @@ async fn open_channel_with_custom_data(
     );
     stop_mining();
     let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
-        format!("{}@127.0.0.1:{}", dest_peer_pubkey, p)
+        format!("{dest_peer_pubkey}@127.0.0.1:{p}")
     } else {
         dest_peer_pubkey.to_string()
     };
@@ -1081,7 +1081,7 @@ async fn open_channel_with_custom_data(
         temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node_address))
+        .post(format!("http://{node_address}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -1143,7 +1143,7 @@ async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
     let form =
         reqwest::multipart::Form::new().part("file", reqwest::multipart::Part::bytes(file_bytes));
     let res = reqwest::Client::new()
-        .post(format!("http://{}/postassetmedia", node_address))
+        .post(format!("http://{node_address}/postassetmedia"))
         .multipart(form)
         .send()
         .await
@@ -1160,7 +1160,7 @@ async fn refresh_transfers(node_address: SocketAddr) {
     println!("refreshing transfers for node {node_address}");
     let payload = RefreshRequest { skip_sync: false };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/refreshtransfers", node_address))
+        .post(format!("http://{node_address}/refreshtransfers"))
         .json(&payload)
         .send()
         .await
@@ -1179,7 +1179,7 @@ async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
         password: password.to_string(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/restore", node_address))
+        .post(format!("http://{node_address}/restore"))
         .json(&payload)
         .send()
         .await
@@ -1195,7 +1195,7 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
     println!(
         "generating RGB invoice{} for node {node_address}",
         if let Some(id) = asset_id.as_ref() {
-            format!(" for asset {}", id)
+            format!(" for asset {id}")
         } else {
             s!("")
         }
@@ -1206,7 +1206,7 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
         duration_seconds: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/rgbinvoice", node_address))
+        .post(format!("http://{node_address}/rgbinvoice"))
         .json(&payload)
         .send()
         .await
@@ -1233,7 +1233,7 @@ async fn send_asset(node_address: SocketAddr, asset_id: &str, amount: u64, recip
         skip_sync: false,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/sendasset", node_address))
+        .post(format!("http://{node_address}/sendasset"))
         .json(&payload)
         .send()
         .await
@@ -1254,7 +1254,7 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
         skip_sync: false,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/sendbtc", node_address))
+        .post(format!("http://{node_address}/sendbtc"))
         .json(&payload)
         .send()
         .await
@@ -1274,7 +1274,7 @@ async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaym
         amt_msat: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/sendpayment", node_address))
+        .post(format!("http://{node_address}/sendpayment"))
         .json(&payload)
         .send()
         .await
@@ -1334,7 +1334,7 @@ async fn shutdown(node_sockets: &[SocketAddr]) {
     for node_address in node_sockets {
         println!("shutting down node {node_address}");
         let res = reqwest::Client::new()
-            .post(format!("http://{}/shutdown", node_address))
+            .post(format!("http://{node_address}/shutdown"))
             .send()
             .await
             .unwrap();
@@ -1365,7 +1365,7 @@ async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
     println!("taking swap {swapstring} on node {node_address}");
     let payload = TakerRequest { swapstring };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/taker", node_address))
+        .post(format!("http://{node_address}/taker"))
         .json(&payload)
         .send()
         .await
@@ -1391,7 +1391,7 @@ async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
         announce_alias: Some(s!("RLN_alias")),
     };
     reqwest::Client::new()
-        .post(format!("http://{}/unlock", node_address))
+        .post(format!("http://{node_address}/unlock"))
         .json(&payload)
         .send()
         .await

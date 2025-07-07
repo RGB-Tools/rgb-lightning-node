@@ -243,7 +243,7 @@ async fn same_invoice_twice() {
         amt_msat: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/sendpayment", node1_addr))
+        .post(format!("http://{node1_addr}/sendpayment"))
         .json(&payload)
         .send()
         .await

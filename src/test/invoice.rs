@@ -23,7 +23,7 @@ async fn invoice() {
         asset_amount: Some(1),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/lninvoice", node1_addr))
+        .post(format!("http://{node1_addr}/lninvoice"))
         .json(&payload)
         .send()
         .await
@@ -38,7 +38,7 @@ async fn invoice() {
         asset_amount: Some(1),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/lninvoice", node1_addr))
+        .post(format!("http://{node1_addr}/lninvoice"))
         .json(&payload)
         .send()
         .await
@@ -53,7 +53,7 @@ async fn invoice() {
         asset_amount: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/lninvoice", node1_addr))
+        .post(format!("http://{node1_addr}/lninvoice"))
         .json(&payload)
         .send()
         .await

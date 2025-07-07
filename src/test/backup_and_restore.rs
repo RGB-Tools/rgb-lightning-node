@@ -55,7 +55,7 @@ async fn backup_and_restore() {
         password: node1_password.clone(),
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/backup", node1_addr))
+        .post(format!("http://{node1_addr}/backup"))
         .json(&payload)
         .send()
         .await

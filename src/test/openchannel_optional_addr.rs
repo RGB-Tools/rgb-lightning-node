@@ -37,7 +37,7 @@ async fn openchannel_optional_addr_forward() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node1_addr))
+        .post(format!("http://{node1_addr}/openchannel"))
         .json(&payload)
         .send()
         .await
@@ -120,7 +120,7 @@ async fn openchannel_optional_addr_reverse() {
         temporary_channel_id: None,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/openchannel", node2_addr))
+        .post(format!("http://{node2_addr}/openchannel"))
         .json(&payload)
         .send()
         .await

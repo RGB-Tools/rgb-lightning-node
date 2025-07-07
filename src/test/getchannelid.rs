@@ -71,7 +71,7 @@ async fn getchannelid_fail() {
         temporary_channel_id,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getchannelid", node1_addr))
+        .post(format!("http://{node1_addr}/getchannelid"))
         .json(&payload)
         .send()
         .await
@@ -91,7 +91,7 @@ async fn getchannelid_fail() {
         temporary_channel_id,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getchannelid", node1_addr))
+        .post(format!("http://{node1_addr}/getchannelid"))
         .json(&payload)
         .send()
         .await
@@ -112,7 +112,7 @@ async fn getchannelid_fail() {
         temporary_channel_id,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{}/getchannelid", node1_addr))
+        .post(format!("http://{node1_addr}/getchannelid"))
         .json(&payload)
         .send()
         .await

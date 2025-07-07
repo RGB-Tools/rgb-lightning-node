@@ -1366,7 +1366,7 @@ pub(crate) async fn close_channel(
                     "Manually force-closed".to_string(),
                 ) {
                 Ok(()) => tracing::info!("EVENT: initiating channel force-close"),
-                Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
+                Err(e) => return Err(APIError::FailedClosingChannel(format!("{e:?}"))),
             }
         } else {
             match unlocked_state
@@ -1374,7 +1374,7 @@ pub(crate) async fn close_channel(
                 .close_channel(&requested_cid, &peer_pubkey)
             {
                 Ok(()) => tracing::info!("EVENT: initiating channel close"),
-                Err(e) => return Err(APIError::FailedClosingChannel(format!("{:?}", e))),
+                Err(e) => return Err(APIError::FailedClosingChannel(format!("{e:?}"))),
             }
         }
 
@@ -1508,8 +1508,7 @@ pub(crate) async fn disconnect_peer(
             .is_none()
         {
             return Err(APIError::FailedPeerDisconnection(format!(
-                "Could not find peer {}",
-                peer_pubkey
+                "Could not find peer {peer_pubkey}"
             )));
         }
 
@@ -2602,8 +2601,7 @@ pub(crate) async fn maker_execute(
 
         if total_fee >= MAX_SWAP_FEE_MSAT {
             return Err(APIError::FailedPayment(format!(
-                "Fee too high: {}",
-                total_fee
+                "Fee too high: {total_fee}"
             )));
         }
 
@@ -2662,7 +2660,7 @@ pub(crate) async fn maker_execute(
             Some(e) => {
                 unlocked_state
                     .update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Failed);
-                Err(APIError::FailedPayment(format!("{:?}", e)))
+                Err(APIError::FailedPayment(format!("{e:?}")))
             }
         }
     })
@@ -3016,7 +3014,7 @@ pub(crate) async fn open_channel(
                         }
                         APIError::InsufficientCapacity(commitment_tx_fee)
                     }
-                    _ => APIError::FailedOpenChannel(format!("{:?}", e)),
+                    _ => APIError::FailedOpenChannel(format!("{e:?}")),
                 }
             })?;
         let temporary_channel_id = temporary_channel_id.0.as_hex().to_string();
@@ -3248,8 +3246,7 @@ pub(crate) async fn send_onion_message(
                 Some(peer_pubkey_vec) => peer_pubkey_vec,
                 None => {
                     return Err(APIError::InvalidNodeIds(format!(
-                        "Couldn't parse peer_pubkey '{}'",
-                        pk_str
+                        "Couldn't parse peer_pubkey '{pk_str}'"
                     )))
                 }
             };
@@ -3257,8 +3254,7 @@ pub(crate) async fn send_onion_message(
                 Ok(peer_pubkey) => peer_pubkey,
                 Err(_) => {
                     return Err(APIError::InvalidNodeIds(format!(
-                        "Couldn't parse peer_pubkey '{}'",
-                        pk_str
+                        "Couldn't parse peer_pubkey '{pk_str}'"
                     )))
                 }
             };
@@ -3286,7 +3282,7 @@ pub(crate) async fn send_onion_message(
                 },
                 message_send_instructions,
             )
-            .map_err(|e| APIError::FailedSendingOnionMessage(format!("{:?}", e)))?;
+            .map_err(|e| APIError::FailedSendingOnionMessage(format!("{e:?}")))?;
 
         tracing::info!("SUCCESS: forwarded onion message to first hop");
 
