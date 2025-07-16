@@ -93,8 +93,8 @@ use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
-    hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_REGTEST, ELECTRUM_URL_SIGNET,
-    ELECTRUM_URL_TESTNET, PROXY_ENDPOINT_LOCAL, PROXY_ENDPOINT_PUBLIC,
+    hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
+    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, PROXY_ENDPOINT_LOCAL, PROXY_ENDPOINT_PUBLIC,
 };
 
 pub(crate) const FEE_RATE: u64 = 7;
@@ -1463,7 +1463,7 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Regtest => ELECTRUM_URL_REGTEST,
             BitcoinNetwork::Signet => ELECTRUM_URL_SIGNET,
             BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
-            _ => unimplemented!("unsupported network"),
+            BitcoinNetwork::Mainnet => ELECTRUM_URL_MAINNET,
         }
     };
     let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
@@ -1473,9 +1473,10 @@ pub(crate) async fn start_ldk(
     } else {
         tracing::info!("Using the default proxy");
         match bitcoin_network {
-            BitcoinNetwork::Signet | BitcoinNetwork::Testnet => PROXY_ENDPOINT_PUBLIC,
+            BitcoinNetwork::Signet | BitcoinNetwork::Testnet | BitcoinNetwork::Mainnet => {
+                PROXY_ENDPOINT_PUBLIC
+            }
             BitcoinNetwork::Regtest => PROXY_ENDPOINT_LOCAL,
-            _ => unimplemented!("unsupported network"),
         }
     };
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
