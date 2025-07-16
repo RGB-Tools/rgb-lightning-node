@@ -505,7 +505,4 @@ impl IntoResponse for APIError {
 pub enum AppError {
     #[error("Port {0} is unavailable")]
     UnavailablePort(u16),
-
-    #[error("PoC does not support selected network")]
-    UnsupportedBitcoinNetwork,
 }
