@@ -62,7 +62,7 @@ use rgb_lib::{
         WitnessData,
     },
     AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
-    RgbTxid,
+    RgbTxid, WitnessOrd,
 };
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -585,6 +585,19 @@ async fn handle_ldk_events(
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
             if let Some(asset_id) = asset_id {
+                let unlocked_state_copy = unlocked_state.clone();
+                let witness_id = funding_txid.clone();
+                tokio::task::spawn_blocking(move || {
+                    unlocked_state_copy
+                        .rgb_upsert_witness(
+                            RgbTxid::from_str(&witness_id).unwrap(),
+                            WitnessOrd::Tentative,
+                        )
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
                 let transfer_dir = unlocked_state.rgb_get_transfer_dir(&funding_txid);
                 let asset_transfer_dir =
                     unlocked_state.rgb_get_asset_transfer_dir(transfer_dir, &asset_id);
