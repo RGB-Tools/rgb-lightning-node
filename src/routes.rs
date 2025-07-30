@@ -1176,11 +1176,11 @@ impl AppState {
     async fn check_locked(
         &self,
     ) -> Result<TokioMutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
+        self.check_changing_state()?;
         let unlocked_app_state = self.get_unlocked_app_state().await;
         if unlocked_app_state.is_some() {
             Err(APIError::UnlockedNode)
         } else {
-            self.check_changing_state()?;
             Ok(unlocked_app_state)
         }
     }
@@ -1188,11 +1188,11 @@ impl AppState {
     async fn check_unlocked(
         &self,
     ) -> Result<TokioMutexGuard<Option<Arc<UnlockedAppState>>>, APIError> {
+        self.check_changing_state()?;
         let unlocked_app_state = self.get_unlocked_app_state().await;
         if unlocked_app_state.is_none() {
             Err(APIError::LockedNode)
         } else {
-            self.check_changing_state()?;
             Ok(unlocked_app_state)
         }
     }
