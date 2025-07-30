@@ -208,6 +208,10 @@ The node currently exposes the following APIs:
 - `/taker` (POST)
 - `/unlock` (POST)
 
+To see these APIs in action, we have provided a set of example scripts that demonstrate common workflows like opening RGB channels and performing atomic swaps. These are the best way to get started and understand how to interact with the node.
+
+**[See the examples directory for runnable scenarios and detailed explanations.](./examples/README.md)**
+
 To get more details about the available APIs see the [OpenAPI specification].
 A Swagger UI for the `master` branch is generated from the specification and
 available at https://rgb-tools.github.io/rgb-lightning-node.
