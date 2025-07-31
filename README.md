@@ -234,9 +234,21 @@ Tests can be executed with:
 cargo test
 ```
 
+## Projects using RLN
+
+Here is a list of projects using RLN, in alphabetical order:
+- [Iris Wallet desktop]
+- [KaleidoSwap]
+- [Lnfi]
+- [Thunderstack]
+
 
 [RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
 [rgb-lightning-sample]: https://github.com/RGB-Tools/rgb-lightning-sample
 [rust-lightning]: https://github.com/lightningdevkit/rust-lightning
+[Iris Wallet desktop]: https://github.com/RGB-Tools/iris-wallet-desktop
+[KaleidoSwap]: https://kaleidoswap.com/
+[Lnfi]: https://www.lnfi.network/
+[Thunderstack]: https://thunderstack.org/
