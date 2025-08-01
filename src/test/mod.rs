@@ -1039,6 +1039,7 @@ async fn open_channel(
         None,
         None,
         None,
+        None,
         true,
     )
     .await
@@ -1053,6 +1054,7 @@ async fn open_channel_with_custom_data(
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
     asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
@@ -1074,6 +1076,7 @@ async fn open_channel_with_custom_data(
         push_msat: push_msat.unwrap_or(0),
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
+        push_asset_amount,
         public: true,
         with_anchors,
         fee_base_msat,
@@ -1685,6 +1688,7 @@ mod open_after_double_send;
 mod openchannel_fail;
 mod openchannel_optional_addr;
 mod payment;
+mod push_rgb_assets;
 mod refuse_high_fees;
 mod restart;
 mod send_receive;
