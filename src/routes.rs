@@ -857,6 +857,7 @@ pub(crate) struct Payment {
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: String,
+    pub(crate) preimage: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -2063,6 +2064,7 @@ pub(crate) async fn list_payments(
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
+            preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
         });
     }
 
@@ -2089,6 +2091,7 @@ pub(crate) async fn list_payments(
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
+            preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
         });
     }
 
@@ -2133,6 +2136,7 @@ pub(crate) async fn get_payment(
                     created_at: payment_info.created_at,
                     updated_at: payment_info.updated_at,
                     payee_pubkey: payment_info.payee_pubkey.to_string(),
+                    preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
                 },
             }));
         }
@@ -2162,6 +2166,7 @@ pub(crate) async fn get_payment(
                     created_at: payment_info.created_at,
                     updated_at: payment_info.updated_at,
                     payee_pubkey: payment_info.payee_pubkey.to_string(),
+                    preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
                 },
             }));
         }
