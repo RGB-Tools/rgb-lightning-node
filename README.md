@@ -240,6 +240,7 @@ Here is a list of projects using RLN, in alphabetical order:
 - [Iris Wallet desktop]
 - [KaleidoSwap]
 - [Lnfi]
+- [Spectrum]
 - [Thunderstack]
 
 
@@ -251,4 +252,5 @@ Here is a list of projects using RLN, in alphabetical order:
 [Iris Wallet desktop]: https://github.com/RGB-Tools/iris-wallet-desktop
 [KaleidoSwap]: https://kaleidoswap.com/
 [Lnfi]: https://www.lnfi.network/
+[Spectrum]: https://rgbspectrum.pages.dev/
 [Thunderstack]: https://thunderstack.org/
