@@ -305,7 +305,7 @@ impl RgbLibWalletWrapper {
         RgbLibWalletWrapper { wallet, online }
     }
 
-    pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<RgbLibWallet> {
+    pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<'_, RgbLibWallet> {
         self.wallet.lock().unwrap()
     }
 

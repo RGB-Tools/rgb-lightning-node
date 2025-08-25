@@ -62,17 +62,19 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
-    pub(crate) fn get_changing_state(&self) -> MutexGuard<bool> {
+    pub(crate) fn get_changing_state(&self) -> MutexGuard<'_, bool> {
         self.changing_state.lock().unwrap()
     }
 
-    pub(crate) fn get_ldk_background_services(&self) -> MutexGuard<Option<LdkBackgroundServices>> {
+    pub(crate) fn get_ldk_background_services(
+        &self,
+    ) -> MutexGuard<'_, Option<LdkBackgroundServices>> {
         self.ldk_background_services.lock().unwrap()
     }
 
     pub(crate) async fn get_unlocked_app_state(
         &self,
-    ) -> TokioMutexGuard<Option<Arc<UnlockedAppState>>> {
+    ) -> TokioMutexGuard<'_, Option<Arc<UnlockedAppState>>> {
         self.unlocked_app_state.lock().await
     }
 }
@@ -108,23 +110,23 @@ pub(crate) struct UnlockedAppState {
 }
 
 impl UnlockedAppState {
-    pub(crate) fn get_inbound_payments(&self) -> MutexGuard<InboundPaymentInfoStorage> {
+    pub(crate) fn get_inbound_payments(&self) -> MutexGuard<'_, InboundPaymentInfoStorage> {
         self.inbound_payments.lock().unwrap()
     }
 
-    pub(crate) fn get_outbound_payments(&self) -> MutexGuard<OutboundPaymentInfoStorage> {
+    pub(crate) fn get_outbound_payments(&self) -> MutexGuard<'_, OutboundPaymentInfoStorage> {
         self.outbound_payments.lock().unwrap()
     }
 
-    pub(crate) fn get_maker_swaps(&self) -> MutexGuard<SwapMap> {
+    pub(crate) fn get_maker_swaps(&self) -> MutexGuard<'_, SwapMap> {
         self.maker_swaps.lock().unwrap()
     }
 
-    pub(crate) fn get_taker_swaps(&self) -> MutexGuard<SwapMap> {
+    pub(crate) fn get_taker_swaps(&self) -> MutexGuard<'_, SwapMap> {
         self.taker_swaps.lock().unwrap()
     }
 
-    pub(crate) fn get_channel_ids_map(&self) -> MutexGuard<ChannelIdsMap> {
+    pub(crate) fn get_channel_ids_map(&self) -> MutexGuard<'_, ChannelIdsMap> {
         self.channel_ids_map.lock().unwrap()
     }
 }
