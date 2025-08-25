@@ -47,7 +47,7 @@ async fn close_force_standard() {
     wait_for_balance(node1_addr, &asset_id, 900).await;
     wait_for_balance(node2_addr, &asset_id, 100).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -60,7 +60,7 @@ async fn close_force_standard() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id,

@@ -1191,7 +1191,11 @@ async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
         .unwrap();
 }
 
-async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbInvoiceResponse {
+async fn rgb_invoice(
+    node_address: SocketAddr,
+    asset_id: Option<String>,
+    witness: bool,
+) -> RgbInvoiceResponse {
     println!(
         "generating RGB invoice{} for node {node_address}",
         if let Some(id) = asset_id.as_ref() {
@@ -1204,6 +1208,7 @@ async fn rgb_invoice(node_address: SocketAddr, asset_id: Option<String>) -> RgbI
         min_confirmations: 1,
         asset_id,
         duration_seconds: None,
+        witness,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/rgbinvoice"))

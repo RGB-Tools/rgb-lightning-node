@@ -14,7 +14,9 @@ async fn success() {
 
     fund_and_create_utxos(node1_addr, None).await;
 
-    let batch_transfer_idx = rgb_invoice(node1_addr, None).await.batch_transfer_idx;
+    let batch_transfer_idx = rgb_invoice(node1_addr, None, false)
+        .await
+        .batch_transfer_idx;
 
     let transfers_changed = fail_transfers(node1_addr, Some(batch_transfer_idx)).await;
     assert!(transfers_changed);

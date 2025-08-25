@@ -907,6 +907,7 @@ pub(crate) struct RgbInvoiceRequest {
     pub(crate) asset_id: Option<String>,
     pub(crate) duration_seconds: Option<u32>,
     pub(crate) min_confirmations: u8,
+    pub(crate) witness: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3204,12 +3205,21 @@ pub(crate) async fn rgb_invoice(
             return Err(APIError::OpenChannelInProgress);
         }
 
-        let receive_data = unlocked_state.rgb_blind_receive(
-            payload.asset_id,
-            payload.duration_seconds,
-            vec![unlocked_state.proxy_endpoint.clone()],
-            payload.min_confirmations,
-        )?;
+        let receive_data = if payload.witness {
+            unlocked_state.rgb_witness_receive(
+                payload.asset_id,
+                payload.duration_seconds,
+                vec![unlocked_state.proxy_endpoint.clone()],
+                payload.min_confirmations,
+            )?
+        } else {
+            unlocked_state.rgb_blind_receive(
+                payload.asset_id,
+                payload.duration_seconds,
+                vec![unlocked_state.proxy_endpoint.clone()],
+                payload.min_confirmations,
+            )?
+        };
 
         Ok(Json(RgbInvoiceResponse {
             recipient_id: receive_data.recipient_id,

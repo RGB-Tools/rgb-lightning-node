@@ -214,7 +214,7 @@ async fn swap_roundtrip_assets() {
     wait_for_balance(node2_addr, &asset_id_2, 950).await;
 
     println!("\nspend assets");
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id_1,
@@ -227,7 +227,7 @@ async fn swap_roundtrip_assets() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id_2,
@@ -240,7 +240,7 @@ async fn swap_roundtrip_assets() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id_1,
@@ -253,7 +253,7 @@ async fn swap_roundtrip_assets() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id_2,

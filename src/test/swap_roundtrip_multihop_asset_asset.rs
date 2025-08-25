@@ -27,7 +27,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     let asset_id_1 = issue_asset_nia(node1_addr).await.asset_id;
     let asset_id_2 = issue_asset_nia(node3_addr).await.asset_id;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id_1,
@@ -41,7 +41,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id_1).await, 600);
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node3_addr,
         &asset_id_2,
@@ -333,7 +333,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     wait_for_balance(node1_addr, &asset_id_2, 20).await;
 
     println!("\nspend assets");
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id_1,
@@ -346,7 +346,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id_2,
@@ -359,7 +359,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id_1,
@@ -372,7 +372,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node2_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id_2,
@@ -385,7 +385,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node2_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node3_addr,
         &asset_id_1,
@@ -398,7 +398,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node3_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node3_addr,
         &asset_id_2,

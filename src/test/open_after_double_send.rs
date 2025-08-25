@@ -24,7 +24,7 @@ async fn open_after_double_send() {
     let node1_pubkey = node_info(node1_addr).await.pubkey;
     let node2_pubkey = node_info(node2_addr).await.pubkey;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -38,7 +38,7 @@ async fn open_after_double_send() {
     refresh_transfers(node1_addr).await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 900);
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -73,7 +73,7 @@ async fn open_after_double_send() {
     wait_for_balance(node1_addr, &asset_id, 750).await;
     wait_for_balance(node2_addr, &asset_id, 250).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -86,7 +86,7 @@ async fn open_after_double_send() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id,

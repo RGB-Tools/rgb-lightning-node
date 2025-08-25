@@ -154,7 +154,7 @@ async fn swap_roundtrip_buy_same_channel() {
     wait_for_balance(node2_addr, &asset_id, 10).await;
 
     println!("\nspend assets");
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -167,7 +167,7 @@ async fn swap_roundtrip_buy_same_channel() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(node2_addr, &asset_id, Assignment::Fungible(5), recipient_id).await;
     mine(false);
     refresh_transfers(node3_addr).await;

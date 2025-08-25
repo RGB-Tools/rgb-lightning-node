@@ -44,7 +44,7 @@ async fn multi_hop() {
     assert_eq!(node3_info.local_balance_sat, 0);
     assert_eq!(node3_info.num_peers, 0);
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -273,7 +273,7 @@ async fn multi_hop() {
     wait_for_balance(node2_addr, &asset_id, 400).await;
     wait_for_balance(node3_addr, &asset_id, 50).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -286,7 +286,7 @@ async fn multi_hop() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node3_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id,
@@ -299,7 +299,7 @@ async fn multi_hop() {
     refresh_transfers(node3_addr).await;
     refresh_transfers(node2_addr).await;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node3_addr,
         &asset_id,

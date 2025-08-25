@@ -2017,6 +2017,9 @@ components:
         duration_seconds:
           type: integer
           example: 86400
+        witness:
+          type: boolean
+          example: false
     RgbInvoiceResponse:
       type: object
       properties:

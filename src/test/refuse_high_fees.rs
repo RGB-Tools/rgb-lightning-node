@@ -31,7 +31,7 @@ async fn refuse_high_fees() {
     let node2_pubkey = node_info(node2_addr).await.pubkey;
     let node3_pubkey = node_info(node3_addr).await.pubkey;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,

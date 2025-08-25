@@ -26,7 +26,7 @@ async fn swap_roundtrip_multihop_buy() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -291,7 +291,7 @@ async fn swap_roundtrip_multihop_buy() {
     close_channel(node2_addr, &channel_21.channel_id, &node1_pubkey, false).await;
 
     println!("\nspend assets");
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -304,7 +304,7 @@ async fn swap_roundtrip_multihop_buy() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node1_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(
         node2_addr,
         &asset_id,
@@ -317,7 +317,7 @@ async fn swap_roundtrip_multihop_buy() {
     refresh_transfers(node4_addr).await;
     refresh_transfers(node2_addr).await;
 
-    let recipient_id = rgb_invoice(node4_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
     send_asset(node3_addr, &asset_id, Assignment::Fungible(5), recipient_id).await;
     mine(false);
     refresh_transfers(node4_addr).await;

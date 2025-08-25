@@ -24,7 +24,7 @@ async fn send_receive() {
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,
@@ -43,7 +43,7 @@ async fn send_receive() {
         recipient_id,
         invoice,
         ..
-    } = rgb_invoice(node1_addr, Some(asset_id.clone())).await;
+    } = rgb_invoice(node1_addr, Some(asset_id.clone()), false).await;
     send_asset(
         node2_addr,
         &asset_id,
@@ -68,7 +68,7 @@ async fn send_receive() {
     assert!(decoded.expiration_timestamp.is_some());
     assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_LOCAL]);
 
-    let recipient_id = rgb_invoice(node2_addr, None).await.recipient_id;
+    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
     send_asset(
         node1_addr,
         &asset_id,

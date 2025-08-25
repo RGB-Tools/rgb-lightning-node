@@ -293,6 +293,21 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper
             .upsert_witness(witness_id, witness_ord)
     }
+
+    pub(crate) fn rgb_witness_receive(
+        &self,
+        asset_id: Option<String>,
+        duration_seconds: Option<u32>,
+        transport_endpoints: Vec<String>,
+        min_confirmations: u8,
+    ) -> Result<ReceiveData, RgbLibError> {
+        self.rgb_wallet_wrapper.witness_receive(
+            asset_id,
+            duration_seconds,
+            transport_endpoints,
+            min_confirmations,
+        )
+    }
 }
 
 pub(crate) struct RgbLibWalletWrapper {
@@ -635,10 +650,18 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn witness_receive(
         &self,
+        asset_id: Option<String>,
+        duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
+        min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
-        self.get_rgb_wallet()
-            .witness_receive(None, Assignment::Any, None, transport_endpoints, 0)
+        self.get_rgb_wallet().witness_receive(
+            asset_id,
+            Assignment::Any,
+            duration_seconds,
+            transport_endpoints,
+            min_confirmations,
+        )
     }
 }
 
