@@ -17,6 +17,7 @@ use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
 use std::{
+    collections::HashSet,
     fmt::Write,
     fs,
     net::{SocketAddr, TcpStream, ToSocketAddrs},
@@ -59,6 +60,8 @@ pub(crate) struct AppState {
     pub(crate) unlocked_app_state: Arc<TokioMutex<Option<Arc<UnlockedAppState>>>>,
     pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
     pub(crate) changing_state: Mutex<bool>,
+    pub(crate) root_public_key: Option<biscuit_auth::PublicKey>,
+    pub(crate) revoked_tokens: Arc<Mutex<HashSet<Vec<u8>>>>,
 }
 
 impl AppState {
@@ -357,13 +360,23 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         max_media_upload_size_mb: args.max_media_upload_size_mb,
     });
 
-    Ok(Arc::new(AppState {
+    let app_state = Arc::new(AppState {
         static_state,
         cancel_token,
         unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
-    }))
+        root_public_key: args.root_public_key,
+        revoked_tokens: Arc::new(Mutex::new(HashSet::new())),
+    });
+
+    // Load revoked tokens from file if authentication is enabled
+    if app_state.root_public_key.is_some() {
+        let loaded_tokens = app_state.load_revoked_tokens()?;
+        *app_state.revoked_tokens.lock().unwrap() = loaded_tokens;
+    }
+
+    Ok(app_state)
 }
 
 pub(crate) fn get_current_timestamp() -> u64 {

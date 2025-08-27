@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use axum_extra::extract::WithRejection;
+use biscuit_auth::Biscuit;
 use bitcoin::hashes::sha256::{self, Hash as Sha256};
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
@@ -893,6 +894,11 @@ pub(crate) struct RefreshRequest {
 pub(crate) struct RestoreRequest {
     pub(crate) backup_path: String,
     pub(crate) password: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct RevokeTokenRequest {
+    pub(crate) token: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3192,6 +3198,21 @@ pub(crate) async fn restore(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+pub(crate) async fn revoke_token(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<RevokeTokenRequest>, APIError>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    let Some(root_pubkey) = state.root_public_key else {
+        return Err(APIError::AuthenticationDisabled);
+    };
+
+    let token_to_revoke = Biscuit::from_base64(&payload.token, root_pubkey)
+        .map_err(|_| APIError::InvalidBiscuitToken)?;
+    state.revoke_token(&token_to_revoke)?;
+
+    Ok(Json(EmptyResponse {}))
 }
 
 pub(crate) async fn rgb_invoice(

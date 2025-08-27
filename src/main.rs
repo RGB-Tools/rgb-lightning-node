@@ -1,4 +1,5 @@
 mod args;
+mod auth;
 mod backup;
 mod bitcoind;
 mod disk;
@@ -16,6 +17,7 @@ use anyhow::Result;
 use axum::{
     extract::DefaultBodyLimit,
     http::Request,
+    middleware,
     response::Response,
     routing::{get, post},
     Router,
@@ -36,6 +38,7 @@ use tracing_subscriber::{
 };
 
 use crate::args::UserArgs;
+use crate::auth::conditional_auth_middleware;
 use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
@@ -46,8 +49,8 @@ use crate::routes::{
     issue_asset_nia, issue_asset_uda, keysend, list_assets, list_channels, list_payments,
     list_peers, list_swaps, list_transactions, list_transfers, list_unspents, ln_invoice, lock,
     maker_execute, maker_init, network_info, node_info, open_channel, post_asset_media,
-    refresh_transfers, restore, rgb_invoice, send_asset, send_btc, send_onion_message,
-    send_payment, shutdown, sign_message, sync, taker, unlock,
+    refresh_transfers, restore, revoke_token, rgb_invoice, send_asset, send_btc,
+    send_onion_message, send_payment, shutdown, sign_message, sync, taker, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -144,6 +147,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/openchannel", post(open_channel))
         .route("/refreshtransfers", post(refresh_transfers))
         .route("/restore", post(restore))
+        .route("/revoketoken", post(revoke_token))
         .route("/rgbinvoice", post(rgb_invoice))
         .route("/sendasset", post(send_asset))
         .route("/sendbtc", post(send_btc))
@@ -172,6 +176,10 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
                     tracing::info!("ENDED in {:?}", latency);
                 }),
         )
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            conditional_auth_middleware,
+        ))
         .layer(CorsLayer::permissive())
         .with_state(app_state.clone());
 

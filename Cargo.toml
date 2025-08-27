@@ -15,6 +15,7 @@ axum-extra = "0.9.4"
 # axum-macros = "0.4.2"  # uncomment to use debug_handler
 baid58 = "0.4.4"
 base64 = "0.22.1"
+biscuit-auth = "6.0.0"
 bitcoin = "0.32"
 bitcoin-bech32 = "0.13"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }

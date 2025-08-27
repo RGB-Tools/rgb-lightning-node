@@ -77,7 +77,7 @@ async fn backup_and_restore() {
     }
     std::fs::rename(test_dir_node1.clone(), old_test_dir_node1.clone()).unwrap();
 
-    let node1_addr = start_daemon(&test_dir_node1, NODE1_PEER_PORT).await;
+    let node1_addr = start_daemon(&test_dir_node1, NODE1_PEER_PORT, None).await;
 
     restore(node1_addr, &node1_backup_path, &node1_password).await;
 

@@ -30,6 +30,9 @@ pub enum APIError {
     #[error("Node has already been unlocked")]
     AlreadyUnlocked,
 
+    #[error("Authentication is disabled")]
+    AuthenticationDisabled,
+
     #[error("Batch transfer not found")]
     BatchTransferNotFound,
 
@@ -119,6 +122,9 @@ pub enum APIError {
 
     #[error("Invalid backup path")]
     InvalidBackupPath,
+
+    #[error("Invalid Biscuit token")]
+    InvalidBiscuitToken,
 
     #[error("Invalid channel ID")]
     InvalidChannelID,
@@ -407,6 +413,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidAssignment
             | APIError::InvalidAttachments(_)
             | APIError::InvalidBackupPath
+            | APIError::InvalidBiscuitToken
             | APIError::InvalidChannelID
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
@@ -441,6 +448,7 @@ impl IntoResponse for APIError {
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::AlreadyUnlocked
+            | APIError::AuthenticationDisabled
             | APIError::BatchTransferNotFound
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
@@ -503,6 +511,18 @@ impl IntoResponse for APIError {
 /// The error variants returned by the app
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("The provided authentication args are invalid")]
+    InvalidAuthenticationArgs,
+
+    #[error("The revoked tokens file contains an invalid entry")]
+    InvalidRevokedTokensFile,
+
+    #[error("The provided root public key is invalid")]
+    InvalidRootKey,
+
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
+
     #[error("Port {0} is unavailable")]
     UnavailablePort(u16),
 }

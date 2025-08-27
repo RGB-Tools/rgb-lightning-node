@@ -197,6 +197,7 @@ The node currently exposes the following APIs:
 - `/postassetmedia` (POST)
 - `/refreshtransfers` (POST)
 - `/restore` (POST)
+- `/revoketoken` (POST)
 - `/rgbinvoice` (POST)
 - `/sendasset` (POST)
 - `/sendbtc` (POST)
@@ -223,6 +224,95 @@ given above, you can even call the APIs directly from the Swagger UI.
 
 To stop the daemon, exit with the `/shutdown` API (or press `Ctrl+C`).
 
+### Authentication
+
+RLN provides API authentication via [Biscuit tokens].
+
+#### One-time setup
+
+First, generate a root keypair. This keypair is your issuer key: the private
+half signs new tokens, and the public half is shared with your node so it can
+verify them.
+
+```sh
+# install the biscuit CLI (or download a prebuilt binary from the Biscuit releases page
+cargo install biscuit-cli
+
+# generate a root keypair (prints both keys)
+biscuit keypair
+
+# alternatively, you can export just the private key
+biscuit keypair --only-private-key > private-key-file
+# and later derive the public key from it
+biscuit keypair --from-private-key-file private-key-file --only-public-key
+```
+
+Save the private key in a secure way (e.g. in a secret manager).
+
+When starting the node, pass the public key with:
+```sh
+--root-public-key <public_key>
+```
+To **disable** authentication provide the explicit `--disable-authentication`
+arg and do not provide any key.
+
+#### Minting tokens
+
+You can now create Biscuit tokens that will allow calling the authenticated
+APIs.
+
+Tokens must carry a **role**, these are the available roles:
+
+- **admin** token (full access):
+    ```sh
+    echo 'role("admin");' \
+      | biscuit generate --private-key-file private-key-file -
+    ```
+
+- **read-only** token (allows access only to endpoints that do not make any
+  write operations):
+    ```sh
+    echo 'role("read-only");' \
+      | biscuit generate --private-key-file private-key-file -
+    ```
+- **custom** token (allows access only to the specified API paths), for
+  example:
+    ```sh
+    echo 'role("custom");
+          right("api", "/nodeinfo");
+          right("api", "/networkinfo");' \
+      | biscuit generate --private-key-file private-key-file -
+    ```
+
+Tokens can also carry an **expiry** date. Add a `check` clause to enforce
+expiration, for example:
+```sh
+echo 'role("admin");
+      check if time($t), $t <= 2025-08-30T00:00:00Z;' \
+  | biscuit generate --private-key-file private-key-file -
+```
+
+#### Using tokens
+
+All authenticated requests must include the Biscuit token in the
+`Authorization` header:
+
+```sh
+curl -H "Authorization: Bearer <token>" [...] http://<node-address>/networkinfo
+```
+
+In the Swagger UI you can add the token by clicking the Authorize button (lock
+icon) at the top right, pasting the token and clicking Authorize.
+
+#### Revoking tokens
+
+A token can be revoked before its expiration.
+When you revoke a token, the node will reject any future request carrying that
+token.
+The node exposes a `/revoketoken` endpoint for this purpose.
+Internally, the node extracts the token’s revocation identifiers and adds them
+to its revocation list. Every request checks this list before authenticating.
+
 ## Test
 
 Tests for a few scenarios using the regtest network are included. The same
@@ -244,6 +334,7 @@ Here is a list of projects using RLN, in alphabetical order:
 - [Thunderstack]
 
 
+[Biscuit tokens]: https://www.biscuitsec.org/
 [RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
