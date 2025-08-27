@@ -33,7 +33,7 @@ use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
-    args::LdkUserInfo,
+    args::UserArgs,
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
@@ -341,7 +341,7 @@ pub(crate) fn parse_peer_info(
     Ok((pubkey.unwrap(), peer_addr))
 }
 
-pub(crate) async fn start_daemon(args: &LdkUserInfo) -> Result<Arc<AppState>, AppError> {
+pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppError> {
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));

@@ -53,7 +53,7 @@ static INIT: Once = Once::new();
 static MINER: Lazy<RwLock<Miner>> = Lazy::new(|| RwLock::new(Miner { no_mine_count: 0 }));
 
 #[cfg(test)]
-impl Default for LdkUserInfo {
+impl Default for UserArgs {
     fn default() -> Self {
         Self {
             network: BitcoinNetwork::Regtest,
@@ -134,7 +134,7 @@ async fn start_daemon(node_test_dir: &str, node_peer_port: u16) -> SocketAddr {
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let node_address = listener.local_addr().unwrap();
     std::fs::create_dir_all(node_test_dir).unwrap();
-    let args = LdkUserInfo {
+    let args = UserArgs {
         storage_dir_path: node_test_dir.into(),
         ldk_peer_listening_port: node_peer_port,
         ..Default::default()

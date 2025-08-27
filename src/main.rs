@@ -35,7 +35,7 @@ use tracing_subscriber::{
     prelude::*,
 };
 
-use crate::args::LdkUserInfo;
+use crate::args::UserArgs;
 use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn app(args: LdkUserInfo) -> Result<(Router, Arc<AppState>), AppError> {
+pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppError> {
     let app_state = start_daemon(&args).await?;
 
     let router = Router::new()

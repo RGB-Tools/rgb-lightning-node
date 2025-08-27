@@ -28,7 +28,7 @@ struct Args {
     max_media_upload_size_mb: u16,
 }
 
-pub(crate) struct LdkUserInfo {
+pub(crate) struct UserArgs {
     pub(crate) storage_dir_path: PathBuf,
     pub(crate) daemon_listening_port: u16,
     pub(crate) ldk_peer_listening_port: u16,
@@ -36,7 +36,7 @@ pub(crate) struct LdkUserInfo {
     pub(crate) max_media_upload_size_mb: u16,
 }
 
-pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
+pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
     let args = Args::parse();
 
     let network = args.network;
@@ -46,7 +46,7 @@ pub(crate) fn parse_startup_args() -> Result<LdkUserInfo, AppError> {
     let ldk_peer_listening_port = args.ldk_peer_listening_port;
     check_port_is_available(ldk_peer_listening_port)?;
 
-    Ok(LdkUserInfo {
+    Ok(UserArgs {
         storage_dir_path: args.storage_directory_path,
         daemon_listening_port,
         ldk_peer_listening_port,
