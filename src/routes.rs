@@ -828,6 +828,19 @@ pub(crate) struct NodeInfoResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) enum NodeState {
+    None,
+    Locked,
+    Running,
+    Changing,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct NodeStateResponse {
+    pub(crate) state: NodeState,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct OpenChannelRequest {
     pub(crate) peer_pubkey_and_opt_addr: String,
     pub(crate) capacity_sat: u64,
@@ -2855,6 +2868,33 @@ pub(crate) async fn node_info(
         channel_asset_max_amount: u64::MAX,
         network_nodes,
         network_channels,
+    }))
+}
+
+pub(crate) async fn node_state(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<NodeStateResponse>, APIError> {
+    let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
+    if check_already_initialized(&mnemonic_path).is_ok() {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::None,
+        }));
+    }
+
+    if *state.get_changing_state() {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::Changing,
+        }));
+    }
+
+    if (state.check_locked().await).is_ok() {
+        return Ok(Json(NodeStateResponse {
+            state: NodeState::Locked,
+        }));
+    }
+
+    Ok(Json(NodeStateResponse {
+        state: NodeState::Running,
     }))
 }
 
