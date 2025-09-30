@@ -1,8 +1,18 @@
-**/target
-/.git*
-/Dockerfile
-/.dockerignore
+# ignore everything
+*
 
-# Test files
-/data*
-/tmp
+# except these
+!Cargo.lock
+!Cargo.toml
+!index.html
+!LICENSE
+!openapi.yaml
+!README.md
+!regtest.sh
+!rust-lightning/
+!src/
+
+# but still ignore these
+rust-lightning/.git
+rust-lightning/.github
+rust-lightning/.gitignore
