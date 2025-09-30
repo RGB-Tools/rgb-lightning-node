@@ -613,7 +613,7 @@ async fn handle_ldk_events(
                         funding_txid.clone(),
                         &consignment_path,
                         funding_txid,
-                        Some(0),
+                        None,
                     )
                 })
                 .await
