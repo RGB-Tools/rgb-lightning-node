@@ -2372,16 +2372,16 @@ components:
           example: password
         bitcoind_rpc_host:
           type: string
-          example: localhost
+          example: regtest-bitcoind.rgbtools.org
         bitcoind_rpc_port:
           type: integer
-          example: 18443
+          example: 80
         indexer_url:
           type: string
-          example: 127.0.0.1:50001
+          example: electrum.rgbtools.org:50041
         proxy_endpoint:
           type: string
-          example: rpc://127.0.0.1:3000/json-rpc
+          example: rpcs://proxy.iriswallet.com/0.2/json-rpc
         announce_addresses:
           type: array
           items:
