@@ -34,7 +34,7 @@ lightning-rapid-gossip-sync = { version = "0.0.125", path = "./rust-lightning/li
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "0.3.0-beta.2", features = [
+rgb-lib = { version = "0.3.0-beta.3", features = [
     "electrum",
     "esplora",
 ] }

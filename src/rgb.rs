@@ -20,8 +20,8 @@ use rgb_lib::{
         Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction, Transfer,
         TransportEndpoint, Unspent, WalletData,
     },
-    AssetSchema, Assignment, BitcoinNetwork, Contract, ContractId, Error as RgbLibError,
-    RgbTransfer, RgbTransport, RgbTxid, UpdateRes, Wallet as RgbLibWallet, WitnessOrd,
+    AssetSchema, Assignment, BitcoinNetwork, ContractId, Error as RgbLibError, RgbTransfer,
+    RgbTransport, RgbTxid, UpdateRes, Wallet as RgbLibWallet, WitnessOrd,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -86,15 +86,6 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.get_asset_metadata(contract_id)
     }
 
-    pub(crate) fn rgb_get_asset_transfer_dir<P: AsRef<Path>>(
-        &self,
-        transfer_dir: P,
-        asset_id: &str,
-    ) -> PathBuf {
-        self.rgb_wallet_wrapper
-            .get_asset_transfer_dir(transfer_dir, asset_id)
-    }
-
     pub(crate) fn rgb_get_btc_balance(&self, skip_sync: bool) -> Result<BtcBalance, RgbLibError> {
         self.rgb_wallet_wrapper.get_btc_balance(skip_sync)
     }
@@ -107,16 +98,13 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.get_media_dir()
     }
 
-    pub(crate) fn rgb_get_send_consignment_path<P: AsRef<Path>>(
+    pub(crate) fn rgb_get_send_consignment_path(
         &self,
-        asset_transfer_dir: P,
+        asset_id: &str,
+        transfer_id: &str,
     ) -> PathBuf {
         self.rgb_wallet_wrapper
-            .get_send_consignment_path(asset_transfer_dir)
-    }
-
-    pub(crate) fn rgb_get_transfer_dir(&self, transfer_id: &str) -> PathBuf {
-        self.rgb_wallet_wrapper.get_transfer_dir(transfer_id)
+            .get_send_consignment_path(asset_id, transfer_id)
     }
 
     pub(crate) fn rgb_get_wallet_data(&self) -> WalletData {
@@ -211,13 +199,8 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.refresh(skip_sync)
     }
 
-    pub(crate) fn rgb_save_new_asset(
-        &self,
-        contract_id: ContractId,
-        contract: Option<Contract>,
-    ) -> Result<(), RgbLibError> {
-        self.rgb_wallet_wrapper
-            .save_new_asset(contract_id, contract)
+    pub(crate) fn rgb_save_new_asset(&self, consignment: RgbTransfer) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.save_new_asset(consignment)
     }
 
     pub(crate) fn rgb_send(
@@ -405,15 +388,6 @@ impl RgbLibWalletWrapper {
             .get_asset_metadata(contract_id.to_string())
     }
 
-    pub(crate) fn get_asset_transfer_dir<P: AsRef<Path>>(
-        &self,
-        transfer_dir: P,
-        asset_id: &str,
-    ) -> PathBuf {
-        self.get_rgb_wallet()
-            .get_asset_transfer_dir(transfer_dir, asset_id)
-    }
-
     pub(crate) fn get_btc_balance(&self, skip_sync: bool) -> Result<BtcBalance, RgbLibError> {
         let online = if skip_sync {
             None
@@ -432,16 +406,9 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().get_media_dir()
     }
 
-    pub(crate) fn get_send_consignment_path<P: AsRef<Path>>(
-        &self,
-        asset_transfer_dir: P,
-    ) -> PathBuf {
+    pub(crate) fn get_send_consignment_path(&self, asset_id: &str, transfer_id: &str) -> PathBuf {
         self.get_rgb_wallet()
-            .get_send_consignment_path(asset_transfer_dir)
-    }
-
-    pub(crate) fn get_transfer_dir(&self, transfer_id: &str) -> PathBuf {
-        self.get_rgb_wallet().get_transfer_dir(transfer_id)
+            .get_send_consignment_path(asset_id, transfer_id)
     }
 
     pub(crate) fn get_tx_height(&self, txid: String) -> Result<Option<u32>, RgbLibError> {
@@ -549,12 +516,8 @@ impl RgbLibWalletWrapper {
             .refresh(self.online.clone(), None, vec![], skip_sync)
     }
 
-    pub(crate) fn save_new_asset(
-        &self,
-        contract_id: ContractId,
-        contract: Option<Contract>,
-    ) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().save_new_asset(contract_id, contract)
+    pub(crate) fn save_new_asset(&self, consignment: RgbTransfer) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().save_new_asset(consignment)
     }
 
     pub(crate) fn send(

@@ -598,11 +598,8 @@ async fn handle_ldk_events(
                 .await
                 .unwrap();
 
-                let transfer_dir = unlocked_state.rgb_get_transfer_dir(&funding_txid);
-                let asset_transfer_dir =
-                    unlocked_state.rgb_get_asset_transfer_dir(transfer_dir, &asset_id);
                 let consignment_path =
-                    unlocked_state.rgb_get_send_consignment_path(asset_transfer_dir);
+                    unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid);
                 let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
@@ -1004,9 +1001,8 @@ async fn handle_ldk_events(
                 }
                 let consignment =
                     RgbTransfer::load_file(consignment_path).expect("successful consignment load");
-                let contract_id = consignment.contract_id();
 
-                match unlocked_state.rgb_save_new_asset(contract_id, None) {
+                match unlocked_state.rgb_save_new_asset(consignment) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {e}"),

@@ -3947,9 +3947,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-consensus"
-version = "0.11.1-rc.4"
+version = "0.11.1-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ddbe1b97f51fdb00c23db07b8680b7e7753aec3f0ec6984b5501ed041f5b914"
+checksum = "fb451849f3250194143222aaebc13fdc50b4767d5275a1fd07dc7aae17d40af4"
 dependencies = [
  "aluvm",
  "amplify",
@@ -3968,9 +3968,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-invoicing"
-version = "0.11.1-rc.4"
+version = "0.11.1-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf0688c9fbab4f83c1e0bb0ea9eb2bdabd3dcfda781a722fc965b27bce427fc"
+checksum = "44c621ab9eb5c9a0dd2cd5ba8b73d92d8030f781f795470ed9800b66c9f213bc"
 dependencies = [
  "amplify",
  "baid64",
@@ -3988,9 +3988,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-lib"
-version = "0.3.0-beta.2"
+version = "0.3.0-beta.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4442fd7cd5b7470c073a9a84262832b781fa859ed13b64423420ceed5bf83e1"
+checksum = "1e058179020e95aa905ba661d2aac597ab7acd32345fa6d6baea6a79cb4903f1"
 dependencies = [
  "amplify",
  "base64 0.22.1",
@@ -4006,6 +4006,7 @@ dependencies = [
  "commit_verify",
  "file-format",
  "futures",
+ "generic-array",
  "hex",
  "rand 0.9.2",
  "reqwest",
@@ -4099,9 +4100,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-ops"
-version = "0.11.1-rc.4"
+version = "0.11.1-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc88f417d12f50d584cd3fb5a626cf5cd7ab841e43e6a24b32f98ee03f339bd6"
+checksum = "b2d5351a03b7423768d2742ae522097261141bb45886f6acb84a1298b8d408db"
 dependencies = [
  "aluvm",
  "amplify",
@@ -4126,9 +4127,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-psbt-utils"
-version = "0.11.1-rc.3"
+version = "0.11.1-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ff0151eab7ed4f7588cffd429f918ff5eab689535625141759b0b0a00809238"
+checksum = "95b3d3aff15e2ca289967accab2c7c8a4b9bb99556d5eed00571b1c9426dce86"
 dependencies = [
  "amplify",
  "baid64",
@@ -4143,9 +4144,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-schemas"
-version = "0.11.1-rc.4"
+version = "0.11.1-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "decc7f1db83242858831a57c73f9ee0b03b13315e1cbea1ef6d952da36f5a161"
+checksum = "6307787c8fc6416bceeb5b34067803e009851473be0be2d187b62fa81fde1bfe"
 dependencies = [
  "aluvm",
  "amplify",
