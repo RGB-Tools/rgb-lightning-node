@@ -1070,7 +1070,7 @@ async fn handle_ldk_events(
             inbound_amount_msat,
             expected_outbound_amount_msat,
             inbound_rgb_amount,
-            expected_outbound_rgb_amount,
+            expected_outbound_rgb_payment,
             requested_next_hop_scid,
             prev_short_channel_id,
         } => {
@@ -1112,7 +1112,7 @@ async fn handle_ldk_events(
             let inbound_rgb_info = get_rgb_info(&inbound_channel.channel_id);
             let outbound_rgb_info = get_rgb_info(&outbound_channel.channel_id);
 
-            tracing::debug!("EVENT: Requested swap with params inbound_msat={} outbound_msat={} inbound_rgb={:?} outbound_rgb={:?} inbound_contract_id={:?}, outbound_contract_id={:?}", inbound_amount_msat, expected_outbound_amount_msat, inbound_rgb_amount, expected_outbound_rgb_amount, inbound_rgb_info.map(|i| i.0), outbound_rgb_info.map(|i| i.0));
+            tracing::debug!("EVENT: Requested swap with params inbound_msat={} outbound_msat={} inbound_rgb={:?} outbound_rgb={:?} inbound_contract_id={:?}, outbound_contract_id={:?}", inbound_amount_msat, expected_outbound_amount_msat, inbound_rgb_amount, expected_outbound_rgb_payment.map(|(_, a)| a), inbound_rgb_info.map(|i| i.0), expected_outbound_rgb_payment.map(|(c, _)| c));
 
             let swaps_lock = unlocked_state.taker_swaps.lock().unwrap();
             let whitelist_swap = match swaps_lock.swaps.get(&payment_hash) {
@@ -1141,7 +1141,8 @@ async fn handle_ldk_events(
                 let net_msat_diff =
                     inbound_amount_msat.saturating_sub(expected_outbound_amount_msat);
 
-                if expected_outbound_rgb_amount != Some(whitelist_swap.swap_info.qty_from)
+                if expected_outbound_rgb_payment.map(|(_, a)| a)
+                    != Some(whitelist_swap.swap_info.qty_from)
                     || outbound_rgb_info.map(|x| x.0) != whitelist_swap.swap_info.from_asset
                     || net_msat_diff != whitelist_swap.swap_info.qty_to
                 {
@@ -1151,7 +1152,8 @@ async fn handle_ldk_events(
                 let net_msat_diff = inbound_amount_msat.checked_sub(expected_outbound_amount_msat);
 
                 if net_msat_diff != Some(0)
-                    || expected_outbound_rgb_amount != Some(whitelist_swap.swap_info.qty_from)
+                    || expected_outbound_rgb_payment.map(|(_, a)| a)
+                        != Some(whitelist_swap.swap_info.qty_from)
                     || outbound_rgb_info.map(|x| x.0) != whitelist_swap.swap_info.from_asset
                     || inbound_rgb_amount != Some(whitelist_swap.swap_info.qty_to)
                     || inbound_rgb_info.map(|x| x.0) != whitelist_swap.swap_info.to_asset
@@ -1182,7 +1184,7 @@ async fn handle_ldk_events(
                     channelmanager::NextHopForward::ShortChannelId(requested_next_hop_scid),
                     outbound_channel.counterparty.node_id,
                     expected_outbound_amount_msat,
-                    expected_outbound_rgb_amount,
+                    expected_outbound_rgb_payment,
                 )
                 .expect("Forward should be valid");
         }

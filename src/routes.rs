@@ -2624,13 +2624,13 @@ pub(crate) async fn maker_execute(
             .into_iter()
             .map(|mut hop| {
                 if swap_info.is_to_asset() {
-                    hop.rgb_amount = Some(swap_info.qty_to);
+                    hop.rgb_payment = Some((swap_info.to_asset.unwrap(), swap_info.qty_to));
                 }
                 hop
             })
             .chain(second_leg.paths[0].hops.clone().into_iter().map(|mut hop| {
                 if swap_info.is_from_asset() {
-                    hop.rgb_amount = Some(swap_info.qty_from);
+                    hop.rgb_payment = Some((swap_info.from_asset.unwrap(), swap_info.qty_from));
                 }
                 hop
             }))
