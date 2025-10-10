@@ -180,6 +180,9 @@ pub enum APIError {
     #[error("Invalid pubkey")]
     InvalidPubkey,
 
+    #[error("The provided recipient data is invalid: {0}")]
+    InvalidRecipientData(String),
+
     #[error("The provided recipient ID is neither a blinded UTXO or a script")]
     InvalidRecipientID,
 
@@ -348,6 +351,9 @@ impl From<RgbLibError> for APIError {
             RgbLibError::InvalidProxyProtocol { version } => {
                 APIError::InvalidProxyProtocol(version)
             }
+            RgbLibError::InvalidRecipientData { details } => {
+                APIError::InvalidRecipientData(details)
+            }
             RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
             RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
             RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
@@ -429,6 +435,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
+            | APIError::InvalidRecipientData(_)
             | APIError::InvalidRecipientID
             | APIError::InvalidRecipientNetwork
             | APIError::InvalidSwap(_)
