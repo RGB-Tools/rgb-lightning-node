@@ -36,6 +36,9 @@ pub enum APIError {
     #[error("Batch transfer not found")]
     BatchTransferNotFound,
 
+    #[error("Cannot close channel")]
+    CannotCloseChannel(String),
+
     #[error("Cannot estimate fees")]
     CannotEstimateFees,
 
@@ -270,6 +273,9 @@ pub enum APIError {
     #[error("Unexpected error: {0}")]
     Unexpected(String),
 
+    #[error("Unknown channel ID")]
+    UnknownChannelId,
+
     #[error("Unknown RGB contract ID")]
     UnknownContractId,
 
@@ -457,6 +463,7 @@ impl IntoResponse for APIError {
             | APIError::AlreadyUnlocked
             | APIError::AuthenticationDisabled
             | APIError::BatchTransferNotFound
+            | APIError::CannotCloseChannel(_)
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
             | APIError::ChangingState
@@ -483,6 +490,7 @@ impl IntoResponse for APIError {
             | APIError::RecipientIDAlreadyUsed
             | APIError::SwapNotFound(_)
             | APIError::TemporaryChannelIdAlreadyUsed
+            | APIError::UnknownChannelId
             | APIError::UnknownContractId
             | APIError::UnknownLNInvoice
             | APIError::UnknownTemporaryChannelId

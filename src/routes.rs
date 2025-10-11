@@ -1438,6 +1438,24 @@ pub(crate) async fn close_channel(
             Err(_) => return Err(APIError::InvalidPubkey),
         };
 
+        if let Some(chan_details) = unlocked_state
+            .channel_manager
+            .list_channels()
+            .iter()
+            .find(|c| c.channel_id == requested_cid)
+        {
+            match chan_details.channel_shutdown_state {
+                Some(ChannelShutdownState::NotShuttingDown) => {}
+                _ => {
+                    return Err(APIError::CannotCloseChannel(s!(
+                        "Channel is already being closed"
+                    )))
+                }
+            }
+        } else {
+            return Err(APIError::UnknownChannelId);
+        }
+
         if payload.force {
             match unlocked_state
                 .channel_manager
@@ -1447,7 +1465,12 @@ pub(crate) async fn close_channel(
                     "Manually force-closed".to_string(),
                 ) {
                 Ok(()) => tracing::info!("EVENT: initiating channel force-close"),
-                Err(e) => return Err(APIError::FailedClosingChannel(format!("{e:?}"))),
+                Err(e) => match e {
+                    LDKAPIError::APIMisuseError { err } => {
+                        return Err(APIError::FailedClosingChannel(err))
+                    }
+                    _ => return Err(APIError::CannotCloseChannel(format!("{e:?}"))),
+                },
             }
         } else {
             match unlocked_state
@@ -1455,7 +1478,12 @@ pub(crate) async fn close_channel(
                 .close_channel(&requested_cid, &peer_pubkey)
             {
                 Ok(()) => tracing::info!("EVENT: initiating channel close"),
-                Err(e) => return Err(APIError::FailedClosingChannel(format!("{e:?}"))),
+                Err(e) => match e {
+                    LDKAPIError::APIMisuseError { err } => {
+                        return Err(APIError::FailedClosingChannel(err))
+                    }
+                    _ => return Err(APIError::CannotCloseChannel(format!("{e:?}"))),
+                },
             }
         }
 
