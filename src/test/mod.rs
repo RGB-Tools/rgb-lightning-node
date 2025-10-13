@@ -1706,6 +1706,7 @@ mod payment;
 mod refuse_high_fees;
 mod restart;
 mod send_receive;
+mod swap_assets_liquidity_both_ways;
 mod swap_reverse_same_channel;
 mod swap_roundtrip_assets;
 mod swap_roundtrip_buy;
