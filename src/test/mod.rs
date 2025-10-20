@@ -49,6 +49,8 @@ const NODE1_PEER_PORT: u16 = 9801;
 const NODE2_PEER_PORT: u16 = 9802;
 const NODE3_PEER_PORT: u16 = 9803;
 const NODE4_PEER_PORT: u16 = 9804;
+const NODE5_PEER_PORT: u16 = 9805;
+const NODE6_PEER_PORT: u16 = 9806;
 
 static INIT: Once = Once::new();
 
@@ -1709,6 +1711,7 @@ mod close_force_nobtc_acceptor;
 mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
+mod concurrent_openchannel;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
