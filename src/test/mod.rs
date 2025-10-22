@@ -1071,6 +1071,20 @@ async fn open_channel_with_custom_data(
               to {dest_peer_pubkey}"
     );
     stop_mining();
+
+    let blockcount = get_block_count();
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let net_info = network_info(node_address).await;
+        if net_info.height == blockcount {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("height is not syncing");
+        }
+    }
+
     let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
         format!("{dest_peer_pubkey}@127.0.0.1:{p}")
     } else {
@@ -1614,8 +1628,7 @@ fn resume_mining() {
         .resume_mining()
 }
 
-fn wait_electrs_sync() {
-    let t_0 = OffsetDateTime::now_utc();
+fn get_block_count() -> u32 {
     let output = Command::new("docker")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
@@ -1627,10 +1640,15 @@ fn wait_electrs_sync() {
     assert!(output.status.success());
     let blockcount_str =
         std::str::from_utf8(&output.stdout).expect("could not parse blockcount output");
-    let blockcount = blockcount_str
+    blockcount_str
         .trim()
         .parse::<u32>()
-        .expect("could not parse blockcount");
+        .expect("could not parse blockcount")
+}
+
+fn wait_electrs_sync() {
+    let t_0 = OffsetDateTime::now_utc();
+    let blockcount = get_block_count();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
         let mut all_synced = true;
