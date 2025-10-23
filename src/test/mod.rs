@@ -1300,6 +1300,15 @@ async fn rgb_invoice(
     asset_id: Option<String>,
     witness: bool,
 ) -> RgbInvoiceResponse {
+    rgb_invoice_with_assignment(node_address, asset_id, None, witness).await
+}
+
+async fn rgb_invoice_with_assignment(
+    node_address: SocketAddr,
+    asset_id: Option<String>,
+    assignment: Option<Assignment>,
+    witness: bool,
+) -> RgbInvoiceResponse {
     println!(
         "generating RGB invoice{} for node {node_address}",
         if let Some(id) = asset_id.as_ref() {
@@ -1311,6 +1320,7 @@ async fn rgb_invoice(
     let payload = RgbInvoiceRequest {
         min_confirmations: 1,
         asset_id,
+        assignment,
         duration_seconds: None,
         witness,
     };

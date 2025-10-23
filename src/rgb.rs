@@ -34,12 +34,14 @@ impl UnlockedAppState {
     pub(crate) fn rgb_blind_receive(
         &self,
         asset_id: Option<String>,
+        assignment: Assignment,
         duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
         self.rgb_wallet_wrapper.blind_receive(
             asset_id,
+            assignment,
             duration_seconds,
             transport_endpoints,
             min_confirmations,
@@ -280,12 +282,14 @@ impl UnlockedAppState {
     pub(crate) fn rgb_witness_receive(
         &self,
         asset_id: Option<String>,
+        assignment: Assignment,
         duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
         self.rgb_wallet_wrapper.witness_receive(
             asset_id,
+            assignment,
             duration_seconds,
             transport_endpoints,
             min_confirmations,
@@ -314,13 +318,14 @@ impl RgbLibWalletWrapper {
     pub(crate) fn blind_receive(
         &self,
         asset_id: Option<String>,
+        assignment: Assignment,
         duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
         self.get_rgb_wallet().blind_receive(
             asset_id,
-            Assignment::Any,
+            assignment,
             duration_seconds,
             transport_endpoints,
             min_confirmations,
@@ -614,13 +619,14 @@ impl RgbLibWalletWrapper {
     pub(crate) fn witness_receive(
         &self,
         asset_id: Option<String>,
+        assignment: Assignment,
         duration_seconds: Option<u32>,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
         self.get_rgb_wallet().witness_receive(
             asset_id,
-            Assignment::Any,
+            assignment,
             duration_seconds,
             transport_endpoints,
             min_confirmations,

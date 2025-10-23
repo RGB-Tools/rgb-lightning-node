@@ -928,6 +928,7 @@ pub(crate) struct RgbAllocation {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RgbInvoiceRequest {
     pub(crate) asset_id: Option<String>,
+    pub(crate) assignment: Option<Assignment>,
     pub(crate) duration_seconds: Option<u32>,
     pub(crate) min_confirmations: u8,
     pub(crate) witness: bool,
@@ -3322,9 +3323,12 @@ pub(crate) async fn rgb_invoice(
             return Err(APIError::OpenChannelInProgress);
         }
 
+        let assignment = payload.assignment.unwrap_or(Assignment::Any).into();
+
         let receive_data = if payload.witness {
             unlocked_state.rgb_witness_receive(
                 payload.asset_id,
+                assignment,
                 payload.duration_seconds,
                 vec![unlocked_state.proxy_endpoint.clone()],
                 payload.min_confirmations,
@@ -3332,6 +3336,7 @@ pub(crate) async fn rgb_invoice(
         } else {
             unlocked_state.rgb_blind_receive(
                 payload.asset_id,
+                assignment,
                 payload.duration_seconds,
                 vec![unlocked_state.proxy_endpoint.clone()],
                 payload.min_confirmations,

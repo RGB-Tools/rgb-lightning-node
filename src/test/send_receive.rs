@@ -44,7 +44,13 @@ async fn send_receive() {
         recipient_id,
         invoice,
         ..
-    } = rgb_invoice(node1_addr, Some(asset_id.clone()), true).await;
+    } = rgb_invoice_with_assignment(
+        node1_addr,
+        Some(asset_id.clone()),
+        Some(Assignment::Fungible(300)),
+        true,
+    )
+    .await;
     let witness_data = WitnessData {
         amount_sat: 1200,
         blinding: None,
@@ -69,12 +75,15 @@ async fn send_receive() {
     assert_eq!(decoded.recipient_id, recipient_id);
     assert!(matches!(decoded.asset_schema, Some(AssetSchema::Nia)));
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
-    assert_eq!(decoded.assignment, Assignment::Fungible(0));
+    assert_eq!(decoded.assignment, Assignment::Fungible(300));
     assert!(matches!(decoded.network, BitcoinNetwork::Regtest));
     assert!(decoded.expiration_timestamp.is_some());
     assert_eq!(decoded.transport_endpoints, vec![PROXY_ENDPOINT_LOCAL]);
 
-    let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
+    let recipient_id =
+        rgb_invoice_with_assignment(node2_addr, None, Some(Assignment::Fungible(200)), false)
+            .await
+            .recipient_id;
     send_asset(
         node1_addr,
         &asset_id,

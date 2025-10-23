@@ -1294,7 +1294,13 @@ impl OutputSpender for RgbOutputSpender {
                 new_asset = true;
                 let receive_data = self
                     .rgb_wallet_wrapper
-                    .witness_receive(None, None, vec![self.proxy_endpoint.clone()], 0)
+                    .witness_receive(
+                        None,
+                        Assignment::Any,
+                        None,
+                        vec![self.proxy_endpoint.clone()],
+                        0,
+                    )
                     .unwrap();
                 let script_pubkey = script_buf_from_recipient_id(receive_data.recipient_id.clone())
                     .unwrap()
