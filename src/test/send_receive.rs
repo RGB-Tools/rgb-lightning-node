@@ -43,7 +43,7 @@ async fn send_receive() {
         recipient_id,
         invoice,
         ..
-    } = rgb_invoice(node1_addr, Some(asset_id.clone()), false).await;
+    } = rgb_invoice(node1_addr, Some(asset_id.clone()), true).await;
     send_asset(
         node2_addr,
         &asset_id,
