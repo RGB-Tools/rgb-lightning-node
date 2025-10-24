@@ -1055,7 +1055,55 @@ async fn open_channel(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn open_channel_with_custom_data(
+async fn open_channel_with_retry(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+    max_retries: u32,
+) -> Channel {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let result = open_channel_raw(
+            node_address,
+            dest_peer_pubkey,
+            dest_peer_port,
+            capacity_sat,
+            push_msat,
+            asset_amount,
+            asset_id,
+            None,
+            None,
+            None,
+            true,
+        )
+        .await;
+
+        match result {
+            Ok(channel) => return channel,
+            Err(status) if status == reqwest::StatusCode::FORBIDDEN && attempt < max_retries => {
+                println!(
+                    "Channel opening in progress (attempt {}/{}), retrying in 5s...",
+                    attempt, max_retries
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            Err(status) => {
+                panic!(
+                    "Failed to open channel after {} attempts with status: {}",
+                    attempt, status
+                );
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn open_channel_raw(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: Option<u16>,
@@ -1067,12 +1115,11 @@ async fn open_channel_with_custom_data(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
-) -> Channel {
+) -> Result<Channel, reqwest::StatusCode> {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
               to {dest_peer_pubkey}"
     );
-    stop_mining();
 
     let blockcount = get_block_count();
     let t_0 = OffsetDateTime::now_utc();
@@ -1110,11 +1157,13 @@ async fn open_channel_with_custom_data(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
-        .await
-        .json::<OpenChannelResponse>()
-        .await
-        .unwrap();
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(status);
+    }
+
+    res.json::<OpenChannelResponse>().await.unwrap();
 
     let t_0 = OffsetDateTime::now_utc();
     let mut channel_id = None;
@@ -1131,7 +1180,7 @@ async fn open_channel_with_custom_data(
             if channel.funding_txid.is_some() {
                 let txout = _get_txout(channel.funding_txid.as_ref().unwrap());
                 if !txout.is_empty() {
-                    mine_n_blocks(true, 6);
+                    mine_n_blocks(false, 6);
                     channel_id = Some(channel.channel_id.clone());
                     channel_funded = true;
                     continue;
@@ -1153,12 +1202,43 @@ async fn open_channel_with_custom_data(
             .find(|c| c.channel_id == channel_id)
             .unwrap();
         if channel.ready {
-            return channel.clone();
+            return Ok(channel.clone());
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
             panic!("channel is taking too long to be ready")
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn open_channel_with_custom_data(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+    fee_base_msat: Option<u32>,
+    fee_proportional_millionths: Option<u32>,
+    temporary_channel_id: Option<&str>,
+    with_anchors: bool,
+) -> Channel {
+    open_channel_raw(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        capacity_sat,
+        push_msat,
+        asset_amount,
+        asset_id,
+        fee_base_msat,
+        fee_proportional_millionths,
+        temporary_channel_id,
+        with_anchors,
+    )
+    .await
+    .expect("channel opening should succeed")
 }
 
 async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
