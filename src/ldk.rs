@@ -8,7 +8,7 @@ use bitcoin_bech32::WitnessProgram;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter, Watch};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
-use lightning::events::{Event, PaymentFailureReason, PaymentPurpose};
+use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
@@ -505,7 +505,7 @@ async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
     static_state: Arc<StaticState>,
-) {
+) -> Result<(), ReplayEvent> {
     match event {
         Event::FundingGenerationReady {
             temporary_channel_id,
@@ -578,6 +578,7 @@ async fn handle_ldk_events(
 
             let funding_tx = psbt.clone().extract_tx().unwrap();
             let funding_txid = funding_tx.compute_txid().to_string();
+            tracing::info!("Funding TXID: {funding_txid}");
 
             let psbt_path = static_state
                 .ldk_data_dir
@@ -618,7 +619,7 @@ async fn handle_ldk_events(
 
                 if let Err(e) = res {
                     tracing::error!("cannot post consignment: {e}");
-                    return;
+                    return Err(ReplayEvent());
                 }
             }
 
@@ -980,15 +981,24 @@ async fn handle_ldk_events(
 
                 let state_copy = unlocked_state.clone();
                 let psbt_str_copy = psbt_str.clone();
+
+                let is_chan_colored =
+                    is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir));
+                tracing::info!("Initiator of the channel (colored: {})", is_chan_colored);
+
                 let _txid = tokio::task::spawn_blocking(move || {
-                    if is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir)) {
-                        state_copy.rgb_send_end(psbt_str_copy).unwrap().txid
+                    if is_chan_colored {
+                        state_copy.rgb_send_end(psbt_str_copy).map(|r| r.txid)
                     } else {
-                        state_copy.rgb_send_btc_end(psbt_str_copy).unwrap()
+                        state_copy.rgb_send_btc_end(psbt_str_copy)
                     }
                 })
                 .await
-                .unwrap();
+                .unwrap()
+                .map_err(|e| {
+                    tracing::error!("Error completing channel opening: {e:?}");
+                    ReplayEvent()
+                })?;
 
                 *unlocked_state.rgb_send_lock.lock().unwrap() = false;
             } else {
@@ -997,7 +1007,8 @@ async fn handle_ldk_events(
                     .ldk_data_dir
                     .join(format!("consignment_{funding_txid}"));
                 if !consignment_path.exists() {
-                    return;
+                    // vanilla channel
+                    return Ok(());
                 }
                 let consignment =
                     RgbTransfer::load_file(consignment_path).expect("successful consignment load");
@@ -1118,7 +1129,7 @@ async fn handle_ldk_events(
                         .channel_manager
                         .fail_intercepted_htlc(intercept_id)
                         .unwrap();
-                    return;
+                    return Ok(());
                 }
                 Some(x) => x,
             };
@@ -1167,7 +1178,7 @@ async fn handle_ldk_events(
                     .channel_manager
                     .fail_intercepted_htlc(intercept_id)
                     .unwrap();
-                return;
+                return Ok(());
             }
 
             tracing::debug!("Swap is whitelisted, forwarding the htlc...");
@@ -1208,6 +1219,7 @@ async fn handle_ldk_events(
             });
         }
     }
+    Ok(())
 }
 
 impl OutputSpender for RgbOutputSpender {
@@ -1997,10 +2009,7 @@ pub(crate) async fn start_ldk(
     let event_handler = move |event: Event| {
         let unlocked_state_copy = Arc::clone(&unlocked_state_copy);
         let static_state_copy = Arc::clone(&static_state_copy);
-        async move {
-            handle_ldk_events(event, unlocked_state_copy, static_state_copy).await;
-            Ok(())
-        }
+        async move { handle_ldk_events(event, unlocked_state_copy, static_state_copy).await }
     };
 
     // Background Processing
