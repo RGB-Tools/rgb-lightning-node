@@ -137,6 +137,7 @@ async fn success() {
         &asset_id,
         Assignment::Fungible(925),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -150,6 +151,7 @@ async fn success() {
         &asset_id,
         Assignment::Fungible(25),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

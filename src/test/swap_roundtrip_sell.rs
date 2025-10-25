@@ -195,7 +195,14 @@ async fn swap_roundtrip_sell() {
 
     println!("\nspend assets");
     let recipient_id = rgb_invoice(node3_addr, None, false).await.recipient_id;
-    send_asset(node1_addr, &asset_id, Assignment::Fungible(5), recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::Fungible(5),
+        recipient_id,
+        None,
+    )
+    .await;
     mine(false);
     refresh_transfers(node3_addr).await;
     refresh_transfers(node3_addr).await;
@@ -207,6 +214,7 @@ async fn swap_roundtrip_sell() {
         &asset_id,
         Assignment::Fungible(700),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

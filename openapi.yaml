@@ -1412,6 +1412,8 @@ components:
         recipient_id:
           type: string
           example: bcrt:utxob:cbgHUJ4e-7QyKY4U-Jsj5AZw-oI0gxZh-7fxQY2_-tFFUAZN-4CgpX
+        recipient_type:
+          $ref: '#/components/schemas/RecipientType'
         asset_schema:
           $ref: '#/components/schemas/AssetSchema'
         asset_id:
@@ -1997,6 +1999,11 @@ components:
           items:
             type: integer
           example: [6, 36, 87, 13, 5, 17]
+    RecipientType:
+      type: string
+      enum:
+        - Blind
+        - Witness
     RefreshRequest:
       type: object
       properties:
@@ -2070,6 +2077,8 @@ components:
         recipient_id:
           type: string
           example: bcrt:utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+        witness_data:
+          $ref: '#/components/schemas/WitnessData'
         donation:
           type: boolean
           example: false
@@ -2411,6 +2420,15 @@ components:
         colorable:
           type: boolean
           example: true
+    WitnessData:
+      type: object
+      properties:
+        amount_sat:
+          type: number
+          example: 1000
+        blinding:
+          type: number
+          example: 439017309
   securitySchemes:
     bearerAuth:
       type: http

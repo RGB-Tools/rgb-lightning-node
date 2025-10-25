@@ -56,7 +56,8 @@ use rgb_lib::{
         AssetCFA as RgbLibAssetCFA, AssetNIA as RgbLibAssetNIA, AssetUDA as RgbLibAssetUDA,
         Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia, Invoice as RgbLibInvoice,
         Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves, Recipient, RecipientInfo,
-        Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData,
+        RecipientType as RgbLibRecipientType, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
+        WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
     BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
@@ -472,6 +473,7 @@ pub(crate) struct DecodeRGBInvoiceRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) recipient_id: String,
+    pub(crate) recipient_type: RecipientType,
     pub(crate) asset_schema: Option<AssetSchema>,
     pub(crate) asset_id: Option<String>,
     pub(crate) assignment: Assignment,
@@ -885,6 +887,21 @@ impl From<RgbLibProofOfReserves> for ProofOfReserves {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) enum RecipientType {
+    Blind,
+    Witness,
+}
+
+impl From<RgbLibRecipientType> for RecipientType {
+    fn from(value: RgbLibRecipientType) -> Self {
+        match value {
+            RgbLibRecipientType::Blind => Self::Blind,
+            RgbLibRecipientType::Witness => Self::Witness,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RefreshRequest {
     pub(crate) skip_sync: bool,
@@ -929,6 +946,7 @@ pub(crate) struct SendAssetRequest {
     pub(crate) asset_id: String,
     pub(crate) assignment: Assignment,
     pub(crate) recipient_id: String,
+    pub(crate) witness_data: Option<WitnessData>,
     pub(crate) donation: bool,
     pub(crate) fee_rate: u64,
     pub(crate) min_confirmations: u8,
@@ -1170,6 +1188,21 @@ pub(crate) struct Utxo {
     pub(crate) outpoint: String,
     pub(crate) btc_amount: u64,
     pub(crate) colorable: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct WitnessData {
+    pub(crate) amount_sat: u64,
+    pub(crate) blinding: Option<u64>,
+}
+
+impl From<WitnessData> for RgbLibWitnessData {
+    fn from(value: WitnessData) -> Self {
+        Self {
+            amount_sat: value.amount_sat,
+            blinding: value.blinding,
+        }
+    }
 }
 
 impl AppState {
@@ -1513,9 +1546,11 @@ pub(crate) async fn decode_rgb_invoice(
     let _guard = state.get_unlocked_app_state();
 
     let invoice_data = RgbLibInvoice::new(payload.invoice)?.invoice_data();
+    let recipient_info = RecipientInfo::new(invoice_data.recipient_id.clone())?;
 
     Ok(Json(DecodeRGBInvoiceResponse {
         recipient_id: invoice_data.recipient_id,
+        recipient_type: recipient_info.recipient_type.into(),
         asset_schema: invoice_data.asset_schema.map(|s| s.into()),
         asset_id: invoice_data.asset_id,
         assignment: invoice_data.assignment.into(),
@@ -3046,7 +3081,7 @@ pub(crate) async fn open_channel(
             let recipient_map = map! {
                 asset_id => vec![Recipient {
                     recipient_id,
-                    witness_data: Some(WitnessData {
+                    witness_data: Some(RgbLibWitnessData {
                         amount_sat: payload.capacity_sat,
                         blinding: Some(STATIC_BLINDING + 1),
                     }),
@@ -3301,7 +3336,7 @@ pub(crate) async fn send_asset(
         let recipient_map = map! {
             payload.asset_id => vec![Recipient {
                 recipient_id: payload.recipient_id,
-                witness_data: None,
+                witness_data: payload.witness_data.map(|w| w.into()),
                 assignment: payload.assignment.into(),
                 transport_endpoints: payload.transport_endpoints,
             }]

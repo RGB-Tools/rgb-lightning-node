@@ -50,6 +50,7 @@ async fn multi_hop() {
         &asset_id,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -279,6 +280,7 @@ async fn multi_hop() {
         &asset_id,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -292,6 +294,7 @@ async fn multi_hop() {
         &asset_id,
         Assignment::Fungible(150),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -305,6 +308,7 @@ async fn multi_hop() {
         &asset_id,
         Assignment::Fungible(375),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

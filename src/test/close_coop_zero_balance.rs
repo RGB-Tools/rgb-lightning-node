@@ -38,7 +38,14 @@ async fn close_coop_zero_balance() {
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 0);
 
     let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
-    send_asset(node1_addr, &asset_id, Assignment::NonFungible, recipient_id).await;
+    send_asset(
+        node1_addr,
+        &asset_id,
+        Assignment::NonFungible,
+        recipient_id,
+        None,
+    )
+    .await;
     mine(false);
     refresh_transfers(node2_addr).await;
     refresh_transfers(node2_addr).await;

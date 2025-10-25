@@ -30,6 +30,7 @@ async fn send_receive() {
         &asset_id,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -44,11 +45,16 @@ async fn send_receive() {
         invoice,
         ..
     } = rgb_invoice(node1_addr, Some(asset_id.clone()), true).await;
+    let witness_data = WitnessData {
+        amount_sat: 1200,
+        blinding: None,
+    };
     send_asset(
         node2_addr,
         &asset_id,
         Assignment::Fungible(300),
         recipient_id.clone(),
+        Some(witness_data),
     )
     .await;
     mine(false);
@@ -74,6 +80,7 @@ async fn send_receive() {
         &asset_id,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

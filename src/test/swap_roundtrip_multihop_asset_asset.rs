@@ -33,6 +33,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_1,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -47,6 +48,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_2,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -339,6 +341,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_1,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -352,6 +355,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_2,
         Assignment::Fungible(10),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -365,6 +369,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_1,
         Assignment::Fungible(100),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -378,6 +383,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_2,
         Assignment::Fungible(100),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -391,6 +397,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_1,
         Assignment::Fungible(5),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -404,6 +411,7 @@ async fn swap_roundtrip_multihop_asset_asset() {
         &asset_id_2,
         Assignment::Fungible(80),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

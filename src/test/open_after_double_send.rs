@@ -30,6 +30,7 @@ async fn open_after_double_send() {
         &asset_id,
         Assignment::Fungible(100),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -44,6 +45,7 @@ async fn open_after_double_send() {
         &asset_id,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -79,6 +81,7 @@ async fn open_after_double_send() {
         &asset_id,
         Assignment::Fungible(725),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -92,6 +95,7 @@ async fn open_after_double_send() {
         &asset_id,
         Assignment::Fungible(225),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

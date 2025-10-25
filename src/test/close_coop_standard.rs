@@ -90,6 +90,7 @@ async fn close_coop_standard() {
         &asset_id,
         Assignment::Fungible(10),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -115,6 +116,7 @@ async fn close_coop_standard() {
         &asset_id,
         Assignment::Fungible(690),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -128,6 +130,7 @@ async fn close_coop_standard() {
         &asset_id,
         Assignment::Fungible(50),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

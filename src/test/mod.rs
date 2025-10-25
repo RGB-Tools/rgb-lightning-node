@@ -38,7 +38,7 @@ use crate::routes::{
     PostAssetMediaResponse, RefreshRequest, RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest,
     RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse,
     SendPaymentRequest, SendPaymentResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer,
-    UnlockRequest, Unspent,
+    UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
@@ -1332,6 +1332,7 @@ async fn send_asset(
     asset_id: &str,
     assignment: Assignment,
     recipient_id: String,
+    witness_data: Option<WitnessData>,
 ) {
     println!(
         "sending on-chain {assignment:?} of asset {asset_id} from node {node_address} to {recipient_id}"
@@ -1340,6 +1341,7 @@ async fn send_asset(
         asset_id: asset_id.to_string(),
         assignment,
         recipient_id,
+        witness_data,
         donation: true,
         fee_rate: FEE_RATE,
         min_confirmations: 1,

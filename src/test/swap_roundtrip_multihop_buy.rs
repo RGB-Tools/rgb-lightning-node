@@ -32,6 +32,7 @@ async fn swap_roundtrip_multihop_buy() {
         &asset_id,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -297,6 +298,7 @@ async fn swap_roundtrip_multihop_buy() {
         &asset_id,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -310,6 +312,7 @@ async fn swap_roundtrip_multihop_buy() {
         &asset_id,
         Assignment::Fungible(100),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -318,7 +321,14 @@ async fn swap_roundtrip_multihop_buy() {
     refresh_transfers(node2_addr).await;
 
     let recipient_id = rgb_invoice(node4_addr, None, false).await.recipient_id;
-    send_asset(node3_addr, &asset_id, Assignment::Fungible(5), recipient_id).await;
+    send_asset(
+        node3_addr,
+        &asset_id,
+        Assignment::Fungible(5),
+        recipient_id,
+        None,
+    )
+    .await;
     mine(false);
     refresh_transfers(node4_addr).await;
     refresh_transfers(node4_addr).await;

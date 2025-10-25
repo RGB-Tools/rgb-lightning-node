@@ -220,6 +220,7 @@ async fn swap_roundtrip_assets() {
         &asset_id_1,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -233,6 +234,7 @@ async fn swap_roundtrip_assets() {
         &asset_id_2,
         Assignment::Fungible(20),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -246,6 +248,7 @@ async fn swap_roundtrip_assets() {
         &asset_id_1,
         Assignment::Fungible(5),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -259,6 +262,7 @@ async fn swap_roundtrip_assets() {
         &asset_id_2,
         Assignment::Fungible(200),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

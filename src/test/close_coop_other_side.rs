@@ -49,6 +49,7 @@ async fn close_coop_other_side() {
         &asset_id,
         Assignment::Fungible(700),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -62,6 +63,7 @@ async fn close_coop_other_side() {
         &asset_id,
         Assignment::Fungible(50),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

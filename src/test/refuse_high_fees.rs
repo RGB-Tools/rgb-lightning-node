@@ -37,6 +37,7 @@ async fn refuse_high_fees() {
         &asset_id,
         Assignment::Fungible(400),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

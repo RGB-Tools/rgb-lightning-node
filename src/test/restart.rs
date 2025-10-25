@@ -159,6 +159,7 @@ async fn restart() {
         &asset_id,
         Assignment::Fungible(700),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -172,6 +173,7 @@ async fn restart() {
         &asset_id,
         Assignment::Fungible(50),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

@@ -86,6 +86,7 @@ async fn vanilla_payment_on_rgb_channel() {
         &asset_id,
         Assignment::Fungible(900),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

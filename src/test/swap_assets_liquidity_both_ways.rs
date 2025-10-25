@@ -291,6 +291,7 @@ async fn swap_assets_liquidity_both_ways() {
         &asset_id_1,
         Assignment::Fungible(300),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -304,6 +305,7 @@ async fn swap_assets_liquidity_both_ways() {
         &asset_id_2,
         Assignment::Fungible(900),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -317,6 +319,7 @@ async fn swap_assets_liquidity_both_ways() {
         &asset_id_1,
         Assignment::Fungible(500),
         recipient_id,
+        None,
     )
     .await;
     mine(false);

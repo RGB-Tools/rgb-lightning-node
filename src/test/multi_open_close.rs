@@ -66,6 +66,7 @@ async fn multi_open_close() {
         &asset_id,
         Assignment::Fungible(700),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
@@ -79,6 +80,7 @@ async fn multi_open_close() {
         &asset_id,
         Assignment::Fungible(150),
         recipient_id,
+        None,
     )
     .await;
     mine(false);
