@@ -63,10 +63,18 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
 
     let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
@@ -85,10 +93,18 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -99,10 +115,18 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -113,10 +137,18 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    assert!(
+        payment.preimage.is_some(),
+        "Payment preimage should be present for successful payment"
+    );
 
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;
