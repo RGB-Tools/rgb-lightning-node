@@ -94,7 +94,8 @@ use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
     hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, PROXY_ENDPOINT_LOCAL, PROXY_ENDPOINT_PUBLIC,
+    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL,
+    PROXY_ENDPOINT_PUBLIC,
 };
 
 pub(crate) const FEE_RATE: u64 = 7;
@@ -518,10 +519,11 @@ async fn handle_ldk_events(
                 output_script.as_bytes(),
                 match static_state.network {
                     BitcoinNetwork::Mainnet => bitcoin_bech32::constants::Network::Bitcoin,
-                    BitcoinNetwork::Testnet => bitcoin_bech32::constants::Network::Testnet,
+                    BitcoinNetwork::Testnet | BitcoinNetwork::Testnet4 => {
+                        bitcoin_bech32::constants::Network::Testnet
+                    }
                     BitcoinNetwork::Regtest => bitcoin_bech32::constants::Network::Regtest,
                     BitcoinNetwork::Signet => bitcoin_bech32::constants::Network::Signet,
-                    _ => todo!(),
                 },
             )
             .expect("Lightning funding tx should always be to a SegWit output");
@@ -1472,9 +1474,9 @@ pub(crate) async fn start_ldk(
         != match bitcoin_network {
             BitcoinNetwork::Mainnet => "main",
             BitcoinNetwork::Testnet => "test",
+            BitcoinNetwork::Testnet4 => "testnet4",
             BitcoinNetwork::Regtest => "regtest",
             BitcoinNetwork::Signet => "signet",
-            _ => todo!(),
         }
     {
         return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
@@ -1494,8 +1496,8 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Regtest => ELECTRUM_URL_REGTEST,
             BitcoinNetwork::Signet => ELECTRUM_URL_SIGNET,
             BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
+            BitcoinNetwork::Testnet4 => ELECTRUM_URL_TESTNET4,
             BitcoinNetwork::Mainnet => ELECTRUM_URL_MAINNET,
-            _ => todo!(),
         }
     };
     let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
@@ -1505,11 +1507,11 @@ pub(crate) async fn start_ldk(
     } else {
         tracing::info!("Using the default proxy");
         match bitcoin_network {
-            BitcoinNetwork::Signet | BitcoinNetwork::Testnet | BitcoinNetwork::Mainnet => {
-                PROXY_ENDPOINT_PUBLIC
-            }
+            BitcoinNetwork::Signet
+            | BitcoinNetwork::Testnet
+            | BitcoinNetwork::Testnet4
+            | BitcoinNetwork::Mainnet => PROXY_ENDPOINT_PUBLIC,
             BitcoinNetwork::Regtest => PROXY_ENDPOINT_LOCAL,
-            _ => todo!(),
         }
     };
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();

@@ -49,6 +49,7 @@ pub(crate) const LOGS_DIR: &str = "logs";
 pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 pub(crate) const ELECTRUM_URL_SIGNET: &str = "ssl://electrum.iriswallet.com:50033";
 pub(crate) const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
+pub(crate) const ELECTRUM_URL_TESTNET4: &str = "ssl://electrum.iriswallet.com:50053";
 pub(crate) const ELECTRUM_URL_MAINNET: &str = "ssl://electrum.iriswallet.com:50003";
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
 pub(crate) const PROXY_ENDPOINT_PUBLIC: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";

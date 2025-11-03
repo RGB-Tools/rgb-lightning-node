@@ -324,6 +324,7 @@ pub(crate) struct BackupRequest {
 pub(crate) enum BitcoinNetwork {
     Mainnet,
     Testnet,
+    Testnet4,
     Signet,
     Regtest,
 }
@@ -333,6 +334,7 @@ impl From<Network> for BitcoinNetwork {
         match x {
             Network::Bitcoin => Self::Mainnet,
             Network::Testnet => Self::Testnet,
+            Network::Testnet4 => Self::Testnet4,
             Network::Regtest => Self::Regtest,
             Network::Signet => Self::Signet,
             _ => unimplemented!("unsupported network"),
@@ -345,9 +347,9 @@ impl From<RgbLibNetwork> for BitcoinNetwork {
         match x {
             RgbLibNetwork::Mainnet => Self::Mainnet,
             RgbLibNetwork::Testnet => Self::Testnet,
+            RgbLibNetwork::Testnet4 => Self::Testnet4,
             RgbLibNetwork::Regtest => Self::Regtest,
             RgbLibNetwork::Signet => Self::Signet,
-            _ => todo!(),
         }
     }
 }
@@ -2523,10 +2525,9 @@ pub(crate) async fn ln_invoice(
 
         let currency = match state.static_state.network {
             RgbLibNetwork::Mainnet => Currency::Bitcoin,
-            RgbLibNetwork::Testnet => Currency::BitcoinTestnet,
+            RgbLibNetwork::Testnet | RgbLibNetwork::Testnet4 => Currency::BitcoinTestnet,
             RgbLibNetwork::Regtest => Currency::Regtest,
             RgbLibNetwork::Signet => Currency::Signet,
-            _ => todo!(),
         };
         let invoice = match create_invoice_from_channelmanager(
             &unlocked_state.channel_manager,

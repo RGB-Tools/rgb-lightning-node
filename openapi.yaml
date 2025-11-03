@@ -1208,6 +1208,7 @@ components:
       enum:
         - Mainnet
         - Testnet
+        - Testnet4
         - Signet
         - Regtest
     BlockTime:

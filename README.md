@@ -116,11 +116,13 @@ When unlocking regtest nodes use the following local services:
 
 ### Testnet
 
-When running the node on the testnet network the docker services are not needed
+#### Testnet3
+
+When running the node on the testnet3 network the docker services are not needed
 because the node will use some public services.
 
-Here's an example of how to start three testnet nodes, each one using the
-external testnet services:
+Here's an example of how to start three testnet3 nodes, each one using the
+external testnet3 services:
 
 ```sh
 # 1st shell
@@ -139,13 +141,20 @@ rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
     --disable-authentication
 ```
 
-When unlocking testnet nodes you can use the following services:
+When unlocking testnet3 nodes you can use the following services:
 - bitcoind_rpc_username: user
 - bitcoind_rpc_username: password
 - bitcoind_rpc_host: electrum.iriswallet.com
 - bitcoind_rpc_port: 18332
 - indexer_url: ssl://electrum.iriswallet.com:50013
 - proxy_endpoint: rpcs://proxy.iriswallet.com/0.2/json-rpc
+
+#### Testnet4
+
+To run testnet4 use the same options as testnet3 except for:
+- CLI arg: `--network testnet4`
+- bitcoind_rpc_port: 18443
+- indexer_url: ssl://electrum.iriswallet.com:50053
 
 ## Use
 
