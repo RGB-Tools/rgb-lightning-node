@@ -338,6 +338,7 @@ Here is a list of projects using RLN, in alphabetical order:
 - [Lnfi]
 - [Spectrum]
 - [Thunderstack]
+- [Tiramisu Wallet]
 
 
 [Biscuit tokens]: https://www.biscuitsec.org/
@@ -351,3 +352,4 @@ Here is a list of projects using RLN, in alphabetical order:
 [Lnfi]: https://www.lnfi.network/
 [Spectrum]: https://rgbspectrum.pages.dev/
 [Thunderstack]: https://thunderstack.org/
+[Tiramisu Wallet]: https://mainnet.tiramisuwallet.com/
