@@ -38,6 +38,75 @@ running:
 cargo install --locked --debug --path .
 ```
 
+### CLI Tool
+
+The project includes `rln-cli`, a command-line interface tool for interacting with the RGB Lightning Node. To build and install the CLI:
+
+```sh
+# Build the CLI (release mode recommended)
+cargo build --release --bin rln-cli
+
+# Or use the Makefile
+make build-cli-release
+
+# Optional: Install system-wide (adds to ~/.cargo/bin)
+cargo install --path . --bin rln-cli
+```
+
+The CLI binary will be available at `target/release/rln-cli` or, if installed, as `rln-cli` in your PATH.
+
+#### Adding CLI to PATH
+
+If you haven't installed the CLI system-wide, you can add it to your PATH:
+
+```sh
+# Add to ~/.bashrc or ~/.zshrc
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Or use the binary directly from the build directory (replace with your path)
+export PATH="$(pwd)/target/release:$PATH"
+
+# Reload your shell configuration
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+#### CLI Quick Start
+
+```sh
+# Configure CLI (optional, can also use --server flag)
+export RLN_SERVER_URL=http://localhost:3001
+export RLN_AUTH_TOKEN=your_token_here  # if authentication is enabled
+
+# Get node information
+rln-cli node info
+
+# List RGB assets
+rln-cli rgb list-assets
+
+# List Lightning channels
+rln-cli channel list
+
+# Get help
+rln-cli --help
+rln-cli node --help
+```
+
+#### CLI Documentation
+
+For complete CLI documentation and usage examples:
+- Run `rln-cli --help` for command reference
+- See `examples/cli_demo.sh` for interactive examples
+
+The CLI provides access to all API endpoints organized into 8 command groups:
+- **node** - Node management (init, unlock, info, backup, etc.)
+- **onchain** - Bitcoin operations (balance, addresses, transactions)
+- **rgb** - RGB asset operations (issue, send, list assets)
+- **channel** - Lightning channel operations (open, close, list)
+- **peer** - Lightning peer operations (connect, disconnect, list)
+- **payment** - Lightning payments (send, keysend, list)
+- **invoice** - Lightning invoices (create, decode, status)
+- **swap** - Asset swap operations (maker, taker, list)
+
 ## Run
 
 In order to operate, the node will need:

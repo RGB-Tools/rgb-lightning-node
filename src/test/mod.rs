@@ -1794,6 +1794,7 @@ pub fn mock_fee(fee: u32) -> u32 {
 
 mod authentication;
 mod backup_and_restore;
+mod cli_integration;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
 mod close_coop_standard;

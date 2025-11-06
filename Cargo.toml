@@ -7,6 +7,10 @@ rust-version = "1.85.0"
 [[bin]]
 name = "rgb-lightning-node"
 
+[[bin]]
+name = "rln-cli"
+path = "src/cli.rs"
+
 [dependencies]
 amplify = { version = "=4.8.1", default-features = false }
 anyhow = "1.0.93"
@@ -20,9 +24,10 @@ bitcoin = "0.32"
 bitcoin-bech32 = "0.13"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-clap = "4.5.20"
+clap = { version = "4.5.20", features = ["derive"] }
 dirs = "5.0.1"
 futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 hex = { package = "hex-conservative", version = "0.3.0", default-features = false }
 lightning = { version = "0.0.125", features = ["max_level_trace"], path = "./rust-lightning/lightning" }
 lightning-background-processor = { version = "0.0.125", features = ["futures"], path = "./rust-lightning/lightning-background-processor" }
