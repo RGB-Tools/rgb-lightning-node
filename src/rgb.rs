@@ -16,9 +16,9 @@ use rgb_lib::{
     bitcoin::psbt::Psbt as BitcoinPsbt,
     wallet::{
         rust_only::{check_proxy_url, ColoringInfo},
-        AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online, ReceiveData,
-        Recipient, RefreshResult, SendResult, Transaction as RgbLibTransaction, Transfer,
-        TransportEndpoint, Unspent, WalletData,
+        AssetCFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online,
+        OperationResult, ReceiveData, Recipient, RefreshResult, Transaction as RgbLibTransaction,
+        Transfer, TransportEndpoint, Unspent, WalletData,
     },
     AssetSchema, Assignment, BitcoinNetwork, ContractId, Error as RgbLibError, RgbTransfer,
     RgbTransport, RgbTxid, UpdateRes, Wallet as RgbLibWallet, WitnessOrd,
@@ -201,8 +201,13 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.refresh(skip_sync)
     }
 
-    pub(crate) fn rgb_save_new_asset(&self, consignment: RgbTransfer) -> Result<(), RgbLibError> {
-        self.rgb_wallet_wrapper.save_new_asset(consignment)
+    pub(crate) fn rgb_save_new_asset(
+        &self,
+        consignment: RgbTransfer,
+        offchain_txid: String,
+    ) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper
+            .save_new_asset(consignment, offchain_txid)
     }
 
     pub(crate) fn rgb_send(
@@ -212,7 +217,7 @@ impl UnlockedAppState {
         fee_rate: u64,
         min_confirmations: u8,
         skip_sync: bool,
-    ) -> Result<SendResult, RgbLibError> {
+    ) -> Result<OperationResult, RgbLibError> {
         self.rgb_wallet_wrapper.send(
             recipient_map,
             donation,
@@ -258,7 +263,7 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.send_btc_end(signed_psbt)
     }
 
-    pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<SendResult, RgbLibError> {
+    pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<OperationResult, RgbLibError> {
         self.rgb_wallet_wrapper.send_end(signed_psbt)
     }
 
@@ -521,8 +526,13 @@ impl RgbLibWalletWrapper {
             .refresh(self.online.clone(), None, vec![], skip_sync)
     }
 
-    pub(crate) fn save_new_asset(&self, consignment: RgbTransfer) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().save_new_asset(consignment)
+    pub(crate) fn save_new_asset(
+        &self,
+        consignment: RgbTransfer,
+        offchain_txid: String,
+    ) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet()
+            .save_new_asset(consignment, offchain_txid)
     }
 
     pub(crate) fn send(
@@ -532,7 +542,7 @@ impl RgbLibWalletWrapper {
         fee_rate: u64,
         min_confirmations: u8,
         skip_sync: bool,
-    ) -> Result<SendResult, RgbLibError> {
+    ) -> Result<OperationResult, RgbLibError> {
         self.get_rgb_wallet().send(
             self.online.clone(),
             recipient_map,
@@ -585,7 +595,7 @@ impl RgbLibWalletWrapper {
             .send_btc_end(self.online.clone(), signed_psbt, false)
     }
 
-    pub(crate) fn send_end(&self, signed_psbt: String) -> Result<SendResult, RgbLibError> {
+    pub(crate) fn send_end(&self, signed_psbt: String) -> Result<OperationResult, RgbLibError> {
         self.get_rgb_wallet()
             .send_end(self.online.clone(), signed_psbt, false)
     }

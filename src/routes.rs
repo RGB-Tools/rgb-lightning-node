@@ -152,7 +152,9 @@ pub(crate) struct AssetMetadataRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AssetMetadataResponse {
     pub(crate) asset_schema: AssetSchema,
-    pub(crate) issued_supply: u64,
+    pub(crate) initial_supply: u64,
+    pub(crate) max_supply: u64,
+    pub(crate) known_circulating_supply: u64,
     pub(crate) timestamp: i64,
     pub(crate) name: String,
     pub(crate) precision: u8,
@@ -256,7 +258,6 @@ pub(crate) struct AssetUDA {
     pub(crate) name: String,
     pub(crate) details: Option<String>,
     pub(crate) precision: u8,
-    pub(crate) issued_supply: u64,
     pub(crate) timestamp: i64,
     pub(crate) added_at: i64,
     pub(crate) balance: AssetBalanceResponse,
@@ -271,7 +272,6 @@ impl From<RgbLibAssetUDA> for AssetUDA {
             name: value.name,
             details: value.details,
             precision: value.precision,
-            issued_supply: value.issued_supply,
             timestamp: value.timestamp,
             added_at: value.added_at,
             balance: value.balance.into(),
@@ -347,6 +347,7 @@ impl From<RgbLibNetwork> for BitcoinNetwork {
             RgbLibNetwork::Testnet => Self::Testnet,
             RgbLibNetwork::Regtest => Self::Regtest,
             RgbLibNetwork::Signet => Self::Signet,
+            _ => todo!(),
         }
     }
 }
@@ -1143,6 +1144,7 @@ pub(crate) enum TransferKind {
     ReceiveBlind,
     ReceiveWitness,
     Send,
+    Inflation,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -1320,7 +1322,9 @@ pub(crate) async fn asset_metadata(
 
     Ok(Json(AssetMetadataResponse {
         asset_schema: metadata.asset_schema.into(),
-        issued_supply: metadata.issued_supply,
+        initial_supply: metadata.initial_supply,
+        max_supply: metadata.max_supply,
+        known_circulating_supply: metadata.known_circulating_supply,
         timestamp: metadata.timestamp,
         name: metadata.name,
         precision: metadata.precision,
@@ -2445,6 +2449,7 @@ pub(crate) async fn list_transfers(
                 rgb_lib::TransferKind::ReceiveBlind => TransferKind::ReceiveBlind,
                 rgb_lib::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
                 rgb_lib::TransferKind::Send => TransferKind::Send,
+                rgb_lib::TransferKind::Inflation => TransferKind::Inflation,
             },
             txid: transfer.txid,
             recipient_id: transfer.recipient_id,
@@ -2521,6 +2526,7 @@ pub(crate) async fn ln_invoice(
             RgbLibNetwork::Testnet => Currency::BitcoinTestnet,
             RgbLibNetwork::Regtest => Currency::Regtest,
             RgbLibNetwork::Signet => Currency::Signet,
+            _ => todo!(),
         };
         let invoice = match create_invoice_from_channelmanager(
             &unlocked_state.channel_manager,

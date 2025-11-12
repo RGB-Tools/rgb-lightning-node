@@ -521,6 +521,7 @@ async fn handle_ldk_events(
                     BitcoinNetwork::Testnet => bitcoin_bech32::constants::Network::Testnet,
                     BitcoinNetwork::Regtest => bitcoin_bech32::constants::Network::Regtest,
                     BitcoinNetwork::Signet => bitcoin_bech32::constants::Network::Signet,
+                    _ => todo!(),
                 },
             )
             .expect("Lightning funding tx should always be to a SegWit output");
@@ -1013,7 +1014,7 @@ async fn handle_ldk_events(
                 let consignment =
                     RgbTransfer::load_file(consignment_path).expect("successful consignment load");
 
-                match unlocked_state.rgb_save_new_asset(consignment) {
+                match unlocked_state.rgb_save_new_asset(consignment, funding_txid) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {e}"),
@@ -1473,6 +1474,7 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Testnet => "test",
             BitcoinNetwork::Regtest => "regtest",
             BitcoinNetwork::Signet => "signet",
+            _ => todo!(),
         }
     {
         return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
@@ -1493,6 +1495,7 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Signet => ELECTRUM_URL_SIGNET,
             BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
             BitcoinNetwork::Mainnet => ELECTRUM_URL_MAINNET,
+            _ => todo!(),
         }
     };
     let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
@@ -1506,6 +1509,7 @@ pub(crate) async fn start_ldk(
                 PROXY_ENDPOINT_PUBLIC
             }
             BitcoinNetwork::Regtest => PROXY_ENDPOINT_LOCAL,
+            _ => todo!(),
         }
     };
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
