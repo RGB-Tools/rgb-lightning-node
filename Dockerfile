@@ -1,11 +1,11 @@
-FROM rust:1.91-slim-bookworm AS builder
+FROM rust:1.91-slim-trixie AS builder
 
 COPY . .
 
 RUN cargo build --release
 
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 COPY --from=builder ./target/release/rgb-lightning-node /usr/bin/rgb-lightning-node
 
