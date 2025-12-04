@@ -70,3 +70,7 @@ lightning-background-processor = { path = "./rust-lightning/lightning-background
 
 [lints.rust.unexpected_cfgs]
 level = "allow"
+
+[profile.reldebug]
+inherits = "release"
+debug = 1
