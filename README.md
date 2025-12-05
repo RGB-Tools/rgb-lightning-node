@@ -280,7 +280,7 @@ half signs new tokens, and the public half is shared with your node so it can
 verify them.
 
 ```sh
-# install the biscuit CLI (or download a prebuilt binary from the Biscuit releases page
+# install the biscuit CLI (or download a prebuilt binary from the Biscuit releases page)
 cargo install biscuit-cli
 
 # generate a root keypair (prints both keys)

@@ -122,7 +122,7 @@ pub(crate) async fn conditional_auth_middleware(
 
     let op = request.uri().path().to_string();
 
-    if is_ready_only_role(&token) {
+    if is_read_only_role(&token) {
         if is_operation_readonly(&op) {
             return Ok(next.run(request).await);
         } else {
@@ -149,7 +149,7 @@ fn is_custom_role(token: &Biscuit) -> bool {
     is_role(token, "custom")
 }
 
-fn is_ready_only_role(token: &Biscuit) -> bool {
+fn is_read_only_role(token: &Biscuit) -> bool {
     is_role(token, "read-only")
 }
 
