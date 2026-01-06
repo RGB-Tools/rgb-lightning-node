@@ -24,13 +24,15 @@ clap = "4.5.20"
 dirs = "5.0.1"
 futures = "0.3"
 hex = { package = "hex-conservative", version = "0.3.0", default-features = false }
-lightning = { version = "0.0.125", features = ["max_level_trace"], path = "./rust-lightning/lightning" }
-lightning-background-processor = { version = "0.0.125", features = ["futures"], path = "./rust-lightning/lightning-background-processor" }
-lightning-block-sync = { version = "0.0.125", features = ["rpc-client", "tokio"] }
-lightning-invoice = { version = "0.32.0", features = ["std"], path = "./rust-lightning/lightning-invoice" }
-lightning-net-tokio = { version = "0.0.125" }
-lightning-persister = { version = "0.0.125", path = "./rust-lightning/lightning-persister" }
-lightning-rapid-gossip-sync = { version = "0.0.125", path = "./rust-lightning/lightning-rapid-gossip-sync" }
+lightning = { version = "0.2.0", path = "./rust-lightning/lightning", features = ["dnssec"] }
+lightning-background-processor = { version = "0.2.0", path = "./rust-lightning/lightning-background-processor" }
+lightning-block-sync = { version = "0.2.0", features = ["rpc-client", "tokio"] }
+lightning-dns-resolver = { version = "0.3.0", path = "./rust-lightning/lightning-dns-resolver" }
+lightning-invoice = { version = "0.34.0", features = ["std"], path = "./rust-lightning/lightning-invoice" }
+lightning-macros = { version = "0.2.0" }
+lightning-net-tokio = { version = "0.2.0" }
+lightning-persister = { version = "0.2.0", path = "./rust-lightning/lightning-persister", features = ["tokio"] }
+lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/lightning-rapid-gossip-sync" }
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }

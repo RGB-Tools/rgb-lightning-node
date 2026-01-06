@@ -371,13 +371,13 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
     println!(
         "creating{}{} UTXOs{} for node {node_address}",
         if up_to { " up to" } else { "" },
-        if num.is_some() {
-            format!(" {}", num.unwrap())
+        if let Some(num) = num {
+            format!(" {}", num)
         } else {
             s!("")
         },
-        if size.is_some() {
-            format!(" of size {}", size.unwrap())
+        if let Some(size) = size {
+            format!(" of size {}", size)
         } else {
             s!("")
         },

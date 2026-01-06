@@ -1,4 +1,4 @@
-use lightning::{impl_writeable_tlv_based, ln::PaymentHash};
+use lightning::{impl_writeable_tlv_based, types::payment::PaymentHash};
 use rgb_lib::ContractId;
 use std::convert::TryInto;
 use std::fmt;

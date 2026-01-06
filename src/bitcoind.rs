@@ -127,7 +127,7 @@ impl BitcoindClient {
             rpc_user.clone(),
             rpc_password.clone()
         ));
-        let bitcoind_rpc_client = RpcClient::new(&rpc_credentials, http_endpoint)?;
+        let bitcoind_rpc_client = RpcClient::new(&rpc_credentials, http_endpoint);
         let _dummy = bitcoind_rpc_client
             .call_method::<BlockchainInfo>("getblockchaininfo", &[])
             .await
