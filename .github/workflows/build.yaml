@@ -35,4 +35,4 @@ jobs:
           toolchain: ${{matrix.toolchain}}
           rustflags: ""
       - name: Build
-        run: cargo build
+        run: cargo build --release
