@@ -3629,7 +3629,6 @@ pub(crate) async fn send_payment(
             ) {
                 Ok(_) => {
                     let payee_pubkey = invoice.recover_payee_pub_key();
-                    let amt_msat = invoice.amount_milli_satoshis().unwrap();
                     tracing::info!(
                         "EVENT: initiated sending {} msats to {}",
                         amt_msat,
