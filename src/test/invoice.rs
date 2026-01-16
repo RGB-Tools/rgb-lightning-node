@@ -62,3 +62,82 @@ async fn invoice() {
         .await;
     assert!(res.is_ok());
 }
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn zero_amount_invoice() {
+    initialize();
+
+    let test_dir_base = format!("{TEST_DIR_BASE}zero_amount/");
+    let test_dir_node1 = format!("{test_dir_base}node1");
+    let test_dir_node2 = format!("{test_dir_base}node2");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
+
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+
+    // Open a channel between node1 and node2
+    open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    // Create a zero-amount invoice on node2
+    println!("Creating zero-amount invoice on node {node2_addr}");
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node2_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap();
+    let invoice = res.invoice;
+
+    // Decode the invoice to verify it's zero-amount
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    assert_eq!(decoded.amt_msat, None, "Invoice should have no amount");
+
+    // Pay the zero-amount invoice with a specific amount (5000 msat)
+    let payment_amount = 5000u64;
+    println!("Paying zero-amount invoice from node {node1_addr} with amount {payment_amount}");
+    let payload = SendPaymentRequest {
+        invoice: invoice.clone(),
+        amt_msat: Some(payment_amount),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+
+    // Check that the payment succeeded
+    let status_code = res.status();
+    let response_text = res.text().await.unwrap();
+    assert_eq!(
+        status_code,
+        reqwest::StatusCode::OK,
+        "Payment should succeed. Response: {response_text}"
+    );
+
+    // Wait for payment to complete
+    wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
+}
