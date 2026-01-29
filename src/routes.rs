@@ -78,7 +78,7 @@ use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRM
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
-    encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
+    encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_route, hex_str,
     hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
 };
 use crate::{
@@ -86,7 +86,6 @@ use crate::{
     rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional},
 };
 use crate::{
-    disk::{self, CHANNEL_PEER_DATA},
     error::APIError,
     ldk::{PaymentInfo, FEE_RATE, UTXO_SIZE_SAT},
     utils::{
@@ -1340,8 +1339,7 @@ pub(crate) async fn backup(
     no_cancel(async move {
         let _guard = state.check_locked().await?;
 
-        let _mnemonic =
-            check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
+        let _mnemonic = check_password_validity(&payload.password, &state.static_state.database)?;
 
         do_backup(
             &state.static_state.storage_dir_path,
@@ -1388,12 +1386,12 @@ pub(crate) async fn change_password(
         check_password_strength(payload.new_password.clone())?;
 
         let mnemonic =
-            check_password_validity(&payload.old_password, &state.static_state.storage_dir_path)?;
+            check_password_validity(&payload.old_password, &state.static_state.database)?;
 
         encrypt_and_save_mnemonic(
             payload.new_password,
             mnemonic.to_string(),
-            &get_mnemonic_path(&state.static_state.storage_dir_path),
+            &state.static_state.database,
         )?;
 
         Ok(Json(EmptyResponse {}))
@@ -1509,11 +1507,8 @@ pub(crate) async fn connect_peer(
         if let Some(peer_addr) = peer_addr {
             connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
                 .await?;
-            disk::persist_channel_peer(
-                &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
-                &peer_pubkey,
-                &peer_addr,
-            )?;
+            let db = state.get_db();
+            db.persist_channel_peer(&peer_pubkey, &peer_addr)?;
         } else {
             return Err(APIError::InvalidPeerInfo(s!(
                 "incorrectly formatted peer info. Should be formatted as: `pubkey@host:port`"
@@ -1614,10 +1609,8 @@ pub(crate) async fn disconnect_peer(
             }
         }
 
-        disk::delete_channel_peer(
-            &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
-            payload.peer_pubkey,
-        )?;
+        let db = state.get_db();
+        db.delete_channel_peer(&payload.peer_pubkey)?;
 
         //check the pubkey matches a valid connected peer
         if unlocked_state
@@ -1724,14 +1717,17 @@ pub(crate) async fn init(
 
         check_password_strength(payload.password.clone())?;
 
-        let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
-        check_already_initialized(&mnemonic_path)?;
+        check_already_initialized(&state.static_state.database)?;
 
         let keys = generate_keys(state.static_state.network);
 
         let mnemonic = keys.mnemonic;
 
-        encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &mnemonic_path)?;
+        encrypt_and_save_mnemonic(
+            payload.password,
+            mnemonic.clone(),
+            &state.static_state.database,
+        )?;
 
         Ok(Json(InitResponse { mnemonic }))
     })
@@ -3027,7 +3023,7 @@ pub(crate) async fn open_channel(
         let (peer_pubkey, mut peer_addr) =
             parse_peer_info(payload.peer_pubkey_and_opt_addr.to_string())?;
 
-        let peer_data_path = state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA);
+        let db = state.get_db();
         if peer_addr.is_none() {
             if let Some(peer) = unlocked_state.peer_manager.peer_by_node_id(&peer_pubkey) {
                 if let Some(socket_address) = peer.socket_address {
@@ -3039,7 +3035,7 @@ pub(crate) async fn open_channel(
             }
         }
         if peer_addr.is_none() {
-            let peer_info = disk::read_channel_peer_data(&peer_data_path)?;
+            let peer_info = db.read_channel_peer_data()?;
             for (pubkey, addr) in peer_info.into_iter() {
                 if pubkey == peer_pubkey {
                     peer_addr = Some(addr);
@@ -3050,7 +3046,7 @@ pub(crate) async fn open_channel(
         if let Some(peer_addr) = peer_addr {
             connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
                 .await?;
-            disk::persist_channel_peer(&peer_data_path, &peer_pubkey, &peer_addr)?;
+            db.persist_channel_peer(&peer_pubkey, &peer_addr)?;
         } else {
             return Err(APIError::InvalidPeerInfo(s!(
                 "cannot find the address for the provided pubkey"
@@ -3283,8 +3279,7 @@ pub(crate) async fn restore(
     no_cancel(async move {
         let _unlocked_state = state.check_locked().await?;
 
-        let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
-        check_already_initialized(&mnemonic_path)?;
+        check_already_initialized(&state.static_state.database)?;
 
         restore_backup(
             Path::new(&payload.backup_path),
@@ -3292,8 +3287,7 @@ pub(crate) async fn restore(
             &state.static_state.storage_dir_path,
         )?;
 
-        let _mnemonic =
-            check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
+        let _mnemonic = check_password_validity(&payload.password, &state.static_state.database)?;
 
         Ok(Json(EmptyResponse {}))
     })
@@ -3751,16 +3745,14 @@ pub(crate) async fn unlock(
             }
         }
 
-        let mnemonic = match check_password_validity(
-            &payload.password,
-            &state.static_state.storage_dir_path,
-        ) {
-            Ok(mnemonic) => mnemonic,
-            Err(e) => {
-                state.update_changing_state(false);
-                return Err(e);
-            }
-        };
+        let mnemonic =
+            match check_password_validity(&payload.password, &state.static_state.database) {
+                Ok(mnemonic) => mnemonic,
+                Err(e) => {
+                    state.update_changing_state(false);
+                    return Err(e);
+                }
+            };
 
         tracing::debug!("Starting LDK...");
         let (new_ldk_background_services, new_unlocked_app_state) =

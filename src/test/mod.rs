@@ -1177,8 +1177,8 @@ async fn open_channel_raw(
                 && c.asset_id == asset_id.map(|id| id.to_string())
                 && c.asset_local_amount == asset_amount
         }) {
-            if let Some(txid) = &channel.funding_txid {
-                let txout = _get_txout(txid);
+            if let Some(funding_txid) = &channel.funding_txid {
+                let txout = _get_txout(funding_txid);
                 if !txout.is_empty() {
                     mine_n_blocks(false, 6);
                     channel_id = Some(channel.channel_id.clone());

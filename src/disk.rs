@@ -1,38 +1,18 @@
-use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use chrono::Utc;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringDecayParameters};
-use lightning::util::hash_tables::new_hash_map;
 use lightning::util::logger::{Logger, Record};
-use lightning::util::ser::{Readable, ReadableArgs, Writer};
-use std::collections::HashMap;
+use lightning::util::ser::{ReadableArgs, Writer};
 use std::fs;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::net::SocketAddr;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::error::APIError;
-use crate::ldk::{
-    ChannelIdsMap, InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage,
-    OutputSpenderTxes, SwapMap,
-};
-use crate::utils::{parse_peer_info, LOGS_DIR};
+use crate::ldk::NetworkGraph;
+use crate::utils::LOGS_DIR;
 
 pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
-
-pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
-pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
-
-pub(crate) const CHANNEL_PEER_DATA: &str = "channel_peer_data";
-
-pub(crate) const OUTPUT_SPENDER_TXES: &str = "output_spender_txes";
-
-pub(crate) const CHANNEL_IDS_FNAME: &str = "channel_ids";
-
-pub(crate) const MAKER_SWAPS_FNAME: &str = "maker_swaps";
-pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
 
 pub(crate) struct FilesystemLogger {
     data_dir: PathBuf,
@@ -73,76 +53,6 @@ impl Logger for FilesystemLogger {
     }
 }
 
-pub(crate) fn persist_channel_peer(
-    path: &Path,
-    pubkey: &PublicKey,
-    address: &SocketAddr,
-) -> Result<(), APIError> {
-    let pubkey = pubkey.to_string();
-    let peer_info = if path.exists() {
-        let mut updated_peer_info = fs::read_to_string(path)?
-            .lines()
-            .filter(|&line| !line.trim().starts_with(&pubkey))
-            .map(|line| line.trim())
-            .collect::<Vec<_>>()
-            .join("\n");
-        updated_peer_info += format!(
-            "{}{pubkey}@{address}",
-            if updated_peer_info.is_empty() {
-                ""
-            } else {
-                "\n"
-            }
-        )
-        .as_str();
-        updated_peer_info
-    } else {
-        format!("{pubkey}@{address}")
-    };
-    let mut tmp_path = path.to_path_buf();
-    tmp_path.set_extension("ptmp");
-    fs::write(&tmp_path, peer_info.to_string().as_bytes())?;
-    fs::rename(tmp_path, path)?;
-    tracing::info!("persisted peer (pubkey: {pubkey}, addr: {address})");
-    Ok(())
-}
-
-pub(crate) fn delete_channel_peer(path: &Path, pubkey: String) -> Result<(), APIError> {
-    if path.exists() {
-        let updated_peer_info = fs::read_to_string(path)?
-            .lines()
-            .filter(|&line| !line.trim().starts_with(&pubkey))
-            .map(|line| line.trim())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut tmp_path = path.to_path_buf();
-        tmp_path.set_extension("dtmp");
-        fs::write(&tmp_path, updated_peer_info.to_string().as_bytes())?;
-        fs::rename(tmp_path, path)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn read_channel_peer_data(
-    path: &Path,
-) -> Result<HashMap<PublicKey, SocketAddr>, APIError> {
-    let mut peer_data = HashMap::new();
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    for line in reader.lines() {
-        match parse_peer_info(line.unwrap()) {
-            Ok((pubkey, socket_addr)) => {
-                peer_data.insert(pubkey, socket_addr.expect("saved info with address"));
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(peer_data)
-}
-
 pub(crate) fn read_network(
     path: &Path,
     network: Network,
@@ -154,48 +64,6 @@ pub(crate) fn read_network(
         }
     }
     NetworkGraph::new(network, logger)
-}
-
-pub(crate) fn read_inbound_payment_info(path: &Path) -> InboundPaymentInfoStorage {
-    if let Ok(file) = File::open(path) {
-        if let Ok(info) = InboundPaymentInfoStorage::read(&mut BufReader::new(file)) {
-            return info;
-        }
-    }
-    InboundPaymentInfoStorage {
-        payments: new_hash_map(),
-    }
-}
-
-pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStorage {
-    if let Ok(file) = File::open(path) {
-        if let Ok(info) = OutboundPaymentInfoStorage::read(&mut BufReader::new(file)) {
-            return info;
-        }
-    }
-    OutboundPaymentInfoStorage {
-        payments: new_hash_map(),
-    }
-}
-
-pub(crate) fn read_output_spender_txes(path: &Path) -> OutputSpenderTxes {
-    if let Ok(file) = File::open(path) {
-        if let Ok(info) = OutputSpenderTxes::read(&mut BufReader::new(file)) {
-            return info;
-        }
-    }
-    new_hash_map()
-}
-
-pub(crate) fn read_swaps_info(path: &Path) -> SwapMap {
-    if let Ok(file) = File::open(path) {
-        if let Ok(info) = SwapMap::read(&mut BufReader::new(file)) {
-            return info;
-        }
-    }
-    SwapMap {
-        swaps: new_hash_map(),
-    }
 }
 
 pub(crate) fn read_scorer(
@@ -211,15 +79,4 @@ pub(crate) fn read_scorer(
         }
     }
     ProbabilisticScorer::new(params, graph, logger)
-}
-
-pub(crate) fn read_channel_ids_info(path: &Path) -> ChannelIdsMap {
-    if let Ok(file) = File::open(path) {
-        if let Ok(info) = ChannelIdsMap::read(&mut BufReader::new(file)) {
-            return info;
-        }
-    }
-    ChannelIdsMap {
-        channel_ids: new_hash_map(),
-    }
 }
