@@ -289,7 +289,7 @@ biscuit keypair
 # alternatively, you can export just the private key
 biscuit keypair --only-private-key > private-key-file
 # and later derive the public key from it
-biscuit keypair --from-private-key-file private-key-file --only-public-key
+biscuit keypair --from-file private-key-file --only-public-key
 ```
 
 Save the private key in a secure way (e.g. in a secret manager).
