@@ -257,12 +257,16 @@ The node currently exposes the following APIs:
 To get more details about the available APIs see the [OpenAPI specification].
 A Swagger UI for the `master` branch is generated from the specification and
 available at https://rgb-tools.github.io/rgb-lightning-node.
-Otherwise you can can browse a local copy exposing it with a web server.  As a
-quick example, from the project root you can run:
-```bash
-python3 -m http.server
+Otherwise a local copy can be exposed. To do so, from the project root, run:
+
+```sh
+docker run -it \
+  -p 8246:8080 \
+  -e SWAGGER_JSON=/var/specs/openapi.yaml \
+  -v $PWD/openapi.yaml:/var/specs/openapi.yaml \
+  swaggerapi/swagger-ui
 ```
-Then point a browser to `http://localhost:8000`.
+It can then be accessed by pointing a browser at `http://localhost:8246`.
 
 If a daemon is running on your machine on one of the example ports
 given above, you can even call the APIs directly from the Swagger UI.

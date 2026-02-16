@@ -16,6 +16,6 @@
 .idea/
 .vscode/
 
-# MaxOS files
+# MacOS files
 .DS_Store
 *.swp
