@@ -837,6 +837,7 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) push_msat: u64,
     pub(crate) asset_amount: Option<u64>,
     pub(crate) asset_id: Option<String>,
+    pub(crate) push_asset_amount: Option<u64>,
     pub(crate) public: bool,
     pub(crate) with_anchors: bool,
     pub(crate) fee_base_msat: Option<u32>,
@@ -3035,6 +3036,24 @@ pub(crate) async fn open_channel(
             )));
         }
 
+        // Validate push_asset_amount
+        if let Some(push_asset_amount) = payload.push_asset_amount {
+            // push_asset_amount can only be used with RGB channels
+            if colored_info.is_none() {
+                return Err(APIError::InvalidAmount(s!(
+                    "push_asset_amount can only be used with RGB channels (asset_id must be specified)"
+                )));
+            }
+            
+            if let Some((_, asset_amount)) = &colored_info {
+                if push_asset_amount > *asset_amount {
+                    return Err(APIError::InvalidAmount(s!(
+                        "push_asset_amount cannot be higher than asset_amount"
+                    )));
+                }
+            }
+        }
+
         if colored_info.is_some() && !payload.with_anchors {
             return Err(APIError::AnchorsRequired);
         }
@@ -3192,11 +3211,18 @@ pub(crate) async fn open_channel(
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 
         if let Some((contract_id, asset_amount)) = &colored_info {
+            // Calculate local and remote amounts based on push_asset_amount
+            let (local_amount, remote_amount) = if let Some(push_amount) = payload.push_asset_amount {
+                (*asset_amount - push_amount, push_amount)
+            } else {
+                (*asset_amount, 0)
+            };
+            
             let rgb_info = RgbInfo {
                 contract_id: *contract_id,
                 schema: schema.unwrap(),
-                local_rgb_amount: *asset_amount,
-                remote_rgb_amount: 0,
+                local_rgb_amount: local_amount,
+                remote_rgb_amount: remote_amount,
             };
             write_rgb_channel_info(
                 &get_rgb_channel_info_path(
