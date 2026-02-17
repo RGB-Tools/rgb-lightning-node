@@ -3575,7 +3575,7 @@ pub(crate) async fn send_payment(
                     preimage: None,
                     secret,
                     status,
-                    amt_msat: invoice.amount_milli_satoshis(),
+                    amt_msat: Some(amt_msat),
                     created_at,
                     updated_at: created_at,
                     payee_pubkey: invoice.get_payee_pub_key(),
