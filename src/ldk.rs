@@ -319,6 +319,9 @@ impl UnlockedAppState {
                 payment_info.status = status;
                 payment_info.preimage = preimage;
                 payment_info.secret = secret;
+                if amt_msat.is_some() {
+                    payment_info.amt_msat = amt_msat;
+                }
                 payment_info.updated_at = get_current_timestamp();
             }
             Entry::Vacant(e) => {
