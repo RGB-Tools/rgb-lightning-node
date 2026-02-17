@@ -52,9 +52,9 @@ use rgb_lib::{
         },
         AssetCFA as RgbLibAssetCFA, AssetNIA as RgbLibAssetNIA, AssetUDA as RgbLibAssetUDA,
         Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia, Invoice as RgbLibInvoice,
-        Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves, Recipient, RecipientInfo,
-        RecipientType as RgbLibRecipientType, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
-        WitnessData as RgbLibWitnessData,
+        Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
+        Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
+        Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
     BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
@@ -919,6 +919,25 @@ pub(crate) struct RevokeTokenRequest {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct Recipient {
+    pub(crate) recipient_id: String,
+    pub(crate) witness_data: Option<WitnessData>,
+    pub(crate) assignment: Assignment,
+    pub(crate) transport_endpoints: Vec<String>,
+}
+
+impl From<Recipient> for RgbLibRecipient {
+    fn from(value: Recipient) -> Self {
+        Self {
+            recipient_id: value.recipient_id,
+            witness_data: value.witness_data.map(|w| w.into()),
+            assignment: value.assignment.into(),
+            transport_endpoints: value.transport_endpoints,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RgbAllocation {
     pub(crate) asset_id: Option<String>,
     pub(crate) assignment: Assignment,
@@ -940,24 +959,6 @@ pub(crate) struct RgbInvoiceResponse {
     pub(crate) invoice: String,
     pub(crate) expiration_timestamp: Option<i64>,
     pub(crate) batch_transfer_idx: i32,
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct SendAssetRequest {
-    pub(crate) asset_id: String,
-    pub(crate) assignment: Assignment,
-    pub(crate) recipient_id: String,
-    pub(crate) witness_data: Option<WitnessData>,
-    pub(crate) donation: bool,
-    pub(crate) fee_rate: u64,
-    pub(crate) min_confirmations: u8,
-    pub(crate) transport_endpoints: Vec<String>,
-    pub(crate) skip_sync: bool,
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct SendAssetResponse {
-    pub(crate) txid: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -992,6 +993,20 @@ pub(crate) struct SendPaymentResponse {
     pub(crate) payment_hash: Option<String>,
     pub(crate) payment_secret: Option<String>,
     pub(crate) status: HTLCStatus,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SendRgbRequest {
+    pub(crate) donation: bool,
+    pub(crate) fee_rate: u64,
+    pub(crate) min_confirmations: u8,
+    pub(crate) recipient_map: HashMap<String, Vec<Recipient>>,
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SendRgbResponse {
+    pub(crate) txid: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3112,7 +3127,7 @@ pub(crate) async fn open_channel(
             };
 
             let recipient_map = map! {
-                asset_id => vec![Recipient {
+                asset_id => vec![RgbLibRecipient {
                     recipient_id,
                     witness_data: Some(RgbLibWitnessData {
                         amount_sat: payload.capacity_sat,
@@ -3352,48 +3367,6 @@ pub(crate) async fn rgb_invoice(
             invoice: receive_data.invoice,
             expiration_timestamp: receive_data.expiration_timestamp,
             batch_transfer_idx: receive_data.batch_transfer_idx,
-        }))
-    })
-    .await
-}
-
-pub(crate) async fn send_asset(
-    State(state): State<Arc<AppState>>,
-    WithRejection(Json(payload), _): WithRejection<Json<SendAssetRequest>, APIError>,
-) -> Result<Json<SendAssetResponse>, APIError> {
-    no_cancel(async move {
-        let guard = state.check_unlocked().await?;
-        let unlocked_state = guard.as_ref().unwrap();
-
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
-        RecipientInfo::new(payload.recipient_id.clone())?;
-        let recipient_map = map! {
-            payload.asset_id => vec![Recipient {
-                recipient_id: payload.recipient_id,
-                witness_data: payload.witness_data.map(|w| w.into()),
-                assignment: payload.assignment.into(),
-                transport_endpoints: payload.transport_endpoints,
-            }]
-        };
-
-        let unlocked_state_copy = unlocked_state.clone();
-        let send_result = tokio::task::spawn_blocking(move || {
-            unlocked_state_copy.rgb_send(
-                recipient_map,
-                payload.donation,
-                payload.fee_rate,
-                payload.min_confirmations,
-                payload.skip_sync,
-            )
-        })
-        .await
-        .unwrap()?;
-
-        Ok(Json(SendAssetResponse {
-            txid: send_result.txid,
         }))
     })
     .await
@@ -3650,6 +3623,46 @@ pub(crate) async fn send_payment(
             payment_hash: payment_hash.map(|h| hex_str(&h.0)),
             payment_secret: payment_secret.map(|s| hex_str(&s.0)),
             status,
+        }))
+    })
+    .await
+}
+
+pub(crate) async fn send_rgb(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<SendRgbRequest>, APIError>,
+) -> Result<Json<SendRgbResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
+        let recipient_map: HashMap<String, Vec<RgbLibRecipient>> = payload
+            .recipient_map
+            .into_iter()
+            .map(|(asset_id, recipients)| {
+                (asset_id, recipients.into_iter().map(|r| r.into()).collect())
+            })
+            .collect();
+
+        let unlocked_state_copy = unlocked_state.clone();
+        let send_result = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_send(
+                recipient_map,
+                payload.donation,
+                payload.fee_rate,
+                payload.min_confirmations,
+                payload.skip_sync,
+            )
+        })
+        .await
+        .unwrap()?;
+
+        Ok(Json(SendRgbResponse {
+            txid: send_result.txid,
         }))
     })
     .await

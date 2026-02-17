@@ -820,24 +820,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RgbInvoiceResponse'
-  /sendasset:
-    post:
-      tags:
-        - RGB
-      summary: Send assets
-      description: Send RGB assets on-chain
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SendAssetRequest'
-      responses:
-        '200':
-          description: Successful operation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SendAssetResponse'
   /sendbtc:
     post:
       tags:
@@ -892,6 +874,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SendPaymentResponse'
+  /sendrgb:
+    post:
+      tags:
+        - RGB
+      summary: Send RGB assets
+      description: Send RGB assets on-chain, supporting batch transfers to multiple recipients and/or multiple assets in a single transaction
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendRgbRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendRgbResponse'
   /shutdown:
     post:
       tags:
@@ -2003,6 +2003,21 @@ components:
           items:
             type: integer
           example: [6, 36, 87, 13, 5, 17]
+    Recipient:
+      type: object
+      properties:
+        recipient_id:
+          type: string
+          example: bcrt:utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
+        witness_data:
+          $ref: '#/components/schemas/WitnessData'
+        assignment:
+          $ref: '#/components/schemas/Assignment'
+        transport_endpoints:
+          type: array
+          items:
+            type: string
+            example: rpc://127.0.0.1:3000/json-rpc
     RecipientType:
       type: string
       enum:
@@ -2072,42 +2087,6 @@ components:
         batch_transfer_idx:
           type: integer
           example: 1
-    SendAssetRequest:
-      type: object
-      properties:
-        asset_id:
-          type: string
-          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
-        assignment:
-          $ref: '#/components/schemas/AssignmentFungible'
-        recipient_id:
-          type: string
-          example: bcrt:utxob:2FZsSuk-iyVQLVuU4-Gc6J4qkE8-mLS17N4jd-MEx6cWz9F-MFkyE1n
-        witness_data:
-          $ref: '#/components/schemas/WitnessData'
-        donation:
-          type: boolean
-          example: false
-        fee_rate:
-          type: number
-          example: 5
-        min_confirmations:
-          type: integer
-          example: 1
-        transport_endpoints:
-          type: array
-          items:
-            type: string
-            example: rpc://127.0.0.1:3000/json-rpc
-        skip_sync:
-          type: boolean
-          example: false
-    SendAssetResponse:
-      type: object
-      properties:
-        txid:
-          type: string
-          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
     SendBtcRequest:
       type: object
       properties:
@@ -2160,6 +2139,51 @@ components:
           example: 777a7756c620868199ed5fdc35bee4095b5709d543e5c2bf0494396bf27d2ea2
         status:
           $ref: '#/components/schemas/HTLCStatus'
+    SendRgbRequest:
+      type: object
+      properties:
+        donation:
+          type: boolean
+          example: false
+        fee_rate:
+          type: number
+          example: 5
+        min_confirmations:
+          type: integer
+          example: 1
+        recipient_map:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/Recipient'
+          example:
+            rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8:
+              - recipient_id: "utxob:2FjRqgQ-eEWCVHY5-zmpFtYzT-gGm3MdR-sTnxNcS-7RtUbY9-4NYuuh"
+                assignment:
+                  Fungible: 400
+                transport_endpoints:
+                  - rpc://127.0.0.1:3000/json-rpc
+              - recipient_id: "utxob:3GkRrhR-fFXDLIZ6-0anqGuzU-hHn4NeS-tUoyOdT-8SuVcZ0-5OZvvi"
+                assignment:
+                  Fungible: 200
+                transport_endpoints:
+                  - rpc://127.0.0.1:3000/json-rpc
+            rgb:d8qDVS5X-ICVG2uM-CPr3yO4-lfBhgjt-7FN1EPE-ApY1LcM:
+              - recipient_id: "utxob:4HlSsiS-gGYEMKA7-1borHvaV-iIo5OfT-uVpzPeU-9TvWdA1-6PAwwj"
+                assignment:
+                  Fungible: 100
+                transport_endpoints:
+                  - rpc://127.0.0.1:3000/json-rpc
+        skip_sync:
+          type: boolean
+          example: false
+    SendRgbResponse:
+      type: object
+      properties:
+        txid:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
     SignMessageRequest:
       type: object
       properties:

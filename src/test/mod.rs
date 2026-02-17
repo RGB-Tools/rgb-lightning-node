@@ -7,6 +7,7 @@ use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use reqwest::Response;
 use rgb_lib::BitcoinNetwork;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -35,10 +36,10 @@ use crate::routes::{
     ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
     ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
     NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    PostAssetMediaResponse, RefreshRequest, RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest,
-    RgbInvoiceResponse, SendAssetRequest, SendAssetResponse, SendBtcRequest, SendBtcResponse,
-    SendPaymentRequest, SendPaymentResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer,
-    UnlockRequest, Unspent, WitnessData,
+    PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
+    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, SwapStatus, TakerRequest,
+    Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
@@ -1347,26 +1348,43 @@ async fn send_asset(
     println!(
         "sending on-chain {assignment:?} of asset {asset_id} from node {node_address} to {recipient_id}"
     );
-    let payload = SendAssetRequest {
-        asset_id: asset_id.to_string(),
-        assignment,
-        recipient_id,
-        witness_data,
-        donation: true,
+    let recipient_map = HashMap::from([(
+        asset_id.to_string(),
+        vec![Recipient {
+            recipient_id,
+            witness_data,
+            assignment,
+            transport_endpoints: vec![PROXY_ENDPOINT_LOCAL.to_string()],
+        }],
+    )]);
+    send_assets(node_address, recipient_map, true).await;
+}
+
+async fn send_assets(
+    node_address: SocketAddr,
+    recipient_map: HashMap<String, Vec<Recipient>>,
+    donation: bool,
+) {
+    println!(
+        "batch sending {} asset(s) from node {node_address}",
+        recipient_map.len()
+    );
+    let payload = SendRgbRequest {
+        donation,
         fee_rate: FEE_RATE,
         min_confirmations: 1,
-        transport_endpoints: vec![PROXY_ENDPOINT_LOCAL.to_string()],
+        recipient_map,
         skip_sync: false,
     };
     let res = reqwest::Client::new()
-        .post(format!("http://{node_address}/sendasset"))
+        .post(format!("http://{node_address}/sendrgb"))
         .json(&payload)
         .send()
         .await
         .unwrap();
     _check_response_is_ok(res)
         .await
-        .json::<SendAssetResponse>()
+        .json::<SendRgbResponse>()
         .await
         .unwrap();
 }
