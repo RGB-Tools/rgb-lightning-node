@@ -7,11 +7,10 @@ use bitcoin::{Address, Network, OutPoint, Transaction, TxOut, WPubkeyHash};
 use hex::DisplayHex;
 use lightning::events::bump_transaction::{Utxo, WalletSource};
 use lightning::ln::types::ChannelId;
-use lightning::rgb_utils::{
-    get_rgb_channel_info_path, is_channel_rgb, parse_rgb_channel_info, RgbInfo,
-};
+use lightning::rgb_utils::{read_rgb_channel_info, RgbInfo};
 use lightning::sign::ChangeDestinationSource;
 use lightning::util::async_poll::AsyncResult;
+use lightning::util::persist::KVStoreSync;
 use rgb_lib::{
     bdk_wallet::SignOptions,
     bitcoin::psbt::Psbt as BitcoinPsbt,
@@ -735,14 +734,9 @@ pub(crate) async fn check_rgb_proxy_endpoint(proxy_endpoint: &str) -> Result<(),
 
 pub(crate) fn get_rgb_channel_info_optional(
     channel_id: &ChannelId,
-    ldk_data_dir: &Path,
     pending: bool,
-) -> Option<(RgbInfo, PathBuf)> {
-    if !is_channel_rgb(channel_id, ldk_data_dir) {
-        return None;
-    }
-    let info_file_path =
-        get_rgb_channel_info_path(&channel_id.0.as_hex().to_string(), ldk_data_dir, pending);
-    let rgb_info = parse_rgb_channel_info(&info_file_path);
-    Some((rgb_info, info_file_path))
+    kv_store: &dyn KVStoreSync,
+) -> Option<RgbInfo> {
+    let channel_id_str = channel_id.0.as_hex().to_string();
+    read_rgb_channel_info(kv_store, &channel_id_str, pending).ok()
 }

@@ -1,6 +1,9 @@
+use crate::database::RlnDatabase;
+use crate::kv_store::SeaOrmKvStore;
 use amplify::s;
 use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
+use futures::executor::block_on;
 use futures::Future;
 use lightning::ln::channel_state::ChannelDetails;
 use lightning::ln::types::ChannelId;
@@ -11,15 +14,16 @@ use lightning::routing::router::{
 use lightning::{
     onion_message::packet::OnionMessageContents,
     sign::KeysManager,
+    util::persist::KVStoreSync,
     util::ser::{Writeable, Writer},
 };
-use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
+use rln_migration::{Migrator, MigratorTrait};
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use std::{
     collections::HashSet,
     fmt::Write,
-    fs,
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     path::PathBuf,
@@ -66,6 +70,10 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn get_db(&self) -> RlnDatabase {
+        RlnDatabase::new((*self.static_state.database).clone())
+    }
+
     pub(crate) fn get_changing_state(&self) -> MutexGuard<'_, bool> {
         self.changing_state.lock().unwrap()
     }
@@ -90,6 +98,8 @@ pub(crate) struct StaticState {
     pub(crate) ldk_data_dir: PathBuf,
     pub(crate) logger: Arc<FilesystemLogger>,
     pub(crate) max_media_upload_size_mb: u16,
+    /// Shared database connection for mnemonic storage and LDK KVStore
+    pub(crate) database: Arc<DatabaseConnection>,
 }
 
 pub(crate) struct UnlockedAppState {
@@ -101,7 +111,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) onion_messenger: Arc<OnionMessenger>,
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
-    pub(crate) fs_store: Arc<FilesystemStore>,
+    pub(crate) kv_store: Arc<SeaOrmKvStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) taker_swaps: Arc<Mutex<SwapMap>>,
@@ -156,8 +166,9 @@ impl Writeable for UserOnionMessageContents {
     }
 }
 
-pub(crate) fn check_already_initialized(mnemonic_path: &Path) -> Result<(), APIError> {
-    if mnemonic_path.exists() {
+pub(crate) fn check_already_initialized(database: &DatabaseConnection) -> Result<(), APIError> {
+    let db = crate::database::RlnDatabase::new(database.clone());
+    if db.mnemonic_exists()? {
         return Err(APIError::AlreadyInitialized);
     }
     Ok(())
@@ -174,13 +185,13 @@ pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> 
 
 pub(crate) fn check_password_validity(
     password: &str,
-    storage_dir_path: &Path,
+    database: &DatabaseConnection,
 ) -> Result<Mnemonic, APIError> {
-    let mnemonic_path = get_mnemonic_path(storage_dir_path);
-    if let Ok(encrypted_mnemonic) = fs::read_to_string(mnemonic_path) {
+    let db = crate::database::RlnDatabase::new(database.clone());
+    if let Some(mnemonic_record) = db.get_mnemonic()? {
         let mcrypt = new_magic_crypt!(password, 256);
         let mnemonic_str = mcrypt
-            .decrypt_base64_to_string(encrypted_mnemonic)
+            .decrypt_base64_to_string(mnemonic_record.encrypted_mnemonic)
             .map_err(|_| APIError::WrongPassword)?;
         Ok(Mnemonic::from_str(&mnemonic_str).expect("valid mnemonic"))
     } else {
@@ -206,27 +217,21 @@ pub(crate) fn check_port_is_available(port: u16) -> Result<(), AppError> {
     Ok(())
 }
 
-pub(crate) fn get_mnemonic_path(storage_dir_path: &Path) -> PathBuf {
-    storage_dir_path.join("mnemonic")
+pub(crate) fn get_db_path(storage_dir_path: &Path) -> PathBuf {
+    storage_dir_path.join("rln_db")
 }
 
 pub(crate) fn encrypt_and_save_mnemonic(
     password: String,
     mnemonic: String,
-    mnemonic_path: &Path,
+    database: &DatabaseConnection,
 ) -> Result<(), APIError> {
     let mcrypt = new_magic_crypt!(password, 256);
     let encrypted_mnemonic = mcrypt.encrypt_str_to_base64(mnemonic);
-    match fs::write(mnemonic_path, encrypted_mnemonic) {
-        Ok(()) => {
-            tracing::info!("Created a new wallet");
-            Ok(())
-        }
-        Err(e) => Err(APIError::FailedKeysCreation(
-            mnemonic_path.to_string_lossy().to_string(),
-            e.to_string(),
-        )),
-    }
+    let db = crate::database::RlnDatabase::new(database.clone());
+    db.save_mnemonic(encrypted_mnemonic)?;
+    tracing::info!("Saved wallet mnemonic");
+    Ok(())
 }
 
 pub(crate) async fn connect_peer_if_necessary(
@@ -350,6 +355,28 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
 
+    // Initialize the shared database connection
+    let db_path = get_db_path(&args.storage_dir_path);
+    let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+    let mut opt = ConnectOptions::new(connection_string);
+    // Use single connection to avoid deadlocks
+    opt.max_connections(1)
+        .min_connections(0)
+        .connect_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(8));
+
+    let database = block_on(Database::connect(opt)).map_err(|e| {
+        AppError::IO(std::io::Error::other(format!(
+            "Database connection failed: {e}"
+        )))
+    })?;
+
+    block_on(Migrator::up(&database, None))
+        .map_err(|e| AppError::IO(std::io::Error::other(format!("Migration failed: {e}"))))?;
+
+    tracing::info!(db_path = %db_path.display(), "Shared database initialized");
+
     let cancel_token = CancellationToken::new();
 
     let static_state = Arc::new(StaticState {
@@ -359,6 +386,7 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         ldk_data_dir,
         logger,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
+        database: Arc::new(database),
     });
 
     let app_state = Arc::new(AppState {
@@ -389,13 +417,13 @@ pub(crate) fn get_current_timestamp() -> u64 {
 
 pub(crate) fn get_max_local_rgb_amount<'r>(
     contract_id: ContractId,
-    ldk_data_dir_path: &Path,
     channels: impl Iterator<Item = &'r ChannelDetails>,
+    kv_store: &dyn KVStoreSync,
 ) -> u64 {
     let mut max_balance = 0;
     for chan_info in channels {
-        if let Some((rgb_info, _)) =
-            get_rgb_channel_info_optional(&chan_info.channel_id, ldk_data_dir_path, false)
+        if let Some(rgb_info) =
+            get_rgb_channel_info_optional(&chan_info.channel_id, false, kv_store)
         {
             if rgb_info.contract_id == contract_id && rgb_info.local_rgb_amount > max_balance {
                 max_balance = rgb_info.local_rgb_amount;
