@@ -142,25 +142,6 @@ impl From<RgbLibBalance> for AssetBalanceResponse {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct AssetMetadataRequest {
-    pub(crate) asset_id: String,
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct AssetMetadataResponse {
-    pub(crate) asset_schema: AssetSchema,
-    pub(crate) initial_supply: u64,
-    pub(crate) max_supply: u64,
-    pub(crate) known_circulating_supply: u64,
-    pub(crate) timestamp: i64,
-    pub(crate) name: String,
-    pub(crate) precision: u8,
-    pub(crate) ticker: Option<String>,
-    pub(crate) details: Option<String>,
-    pub(crate) token: Option<Token>,
-}
-
-#[derive(Deserialize, Serialize)]
 pub(crate) struct AssetCFA {
     pub(crate) asset_id: String,
     pub(crate) name: String,
@@ -187,6 +168,25 @@ impl From<RgbLibAssetCFA> for AssetCFA {
             media: value.media.map(|m| m.into()),
         }
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetMetadataRequest {
+    pub(crate) asset_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AssetMetadataResponse {
+    pub(crate) asset_schema: AssetSchema,
+    pub(crate) initial_supply: u64,
+    pub(crate) max_supply: u64,
+    pub(crate) known_circulating_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) name: String,
+    pub(crate) precision: u8,
+    pub(crate) ticker: Option<String>,
+    pub(crate) details: Option<String>,
+    pub(crate) token: Option<Token>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -887,6 +887,25 @@ impl From<RgbLibProofOfReserves> for ProofOfReserves {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Recipient {
+    pub(crate) recipient_id: String,
+    pub(crate) witness_data: Option<WitnessData>,
+    pub(crate) assignment: Assignment,
+    pub(crate) transport_endpoints: Vec<String>,
+}
+
+impl From<Recipient> for RgbLibRecipient {
+    fn from(value: Recipient) -> Self {
+        Self {
+            recipient_id: value.recipient_id,
+            witness_data: value.witness_data.map(|w| w.into()),
+            assignment: value.assignment.into(),
+            transport_endpoints: value.transport_endpoints,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub(crate) enum RecipientType {
     Blind,
@@ -916,25 +935,6 @@ pub(crate) struct RestoreRequest {
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct RevokeTokenRequest {
     pub(crate) token: String,
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct Recipient {
-    pub(crate) recipient_id: String,
-    pub(crate) witness_data: Option<WitnessData>,
-    pub(crate) assignment: Assignment,
-    pub(crate) transport_endpoints: Vec<String>,
-}
-
-impl From<Recipient> for RgbLibRecipient {
-    fn from(value: Recipient) -> Self {
-        Self {
-            recipient_id: value.recipient_id,
-            witness_data: value.witness_data.map(|w| w.into()),
-            assignment: value.assignment.into(),
-            transport_endpoints: value.transport_endpoints,
-        }
-    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1730,6 +1730,144 @@ pub(crate) async fn get_channel_id(
     Ok(Json(GetChannelIdResponse { channel_id }))
 }
 
+pub(crate) async fn get_payment(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetPaymentRequest>, APIError>,
+) -> Result<Json<GetPaymentResponse>, APIError> {
+    let guard = state.check_unlocked().await?;
+    let unlocked_state = guard.as_ref().unwrap();
+
+    let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
+    if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
+        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
+    }
+    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
+
+    let inbound_payments = unlocked_state.inbound_payments();
+    let outbound_payments = unlocked_state.outbound_payments();
+
+    for (payment_hash, payment_info) in &inbound_payments {
+        if payment_hash == &requested_ph {
+            let rgb_payment_info_path_inbound =
+                get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, true);
+
+            let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
+                let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
+                (Some(info.amount), Some(info.contract_id.to_string()))
+            } else {
+                (None, None)
+            };
+
+            return Ok(Json(GetPaymentResponse {
+                payment: Payment {
+                    amt_msat: payment_info.amt_msat,
+                    asset_amount,
+                    asset_id,
+                    payment_hash: hex_str(&payment_hash.0),
+                    inbound: true,
+                    status: payment_info.status,
+                    created_at: payment_info.created_at,
+                    updated_at: payment_info.updated_at,
+                    payee_pubkey: payment_info.payee_pubkey.to_string(),
+                },
+            }));
+        }
+    }
+
+    for (payment_id, payment_info) in &outbound_payments {
+        let payment_hash = &PaymentHash(payment_id.0);
+        if payment_hash == &requested_ph {
+            let rgb_payment_info_path_outbound =
+                get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, false);
+
+            let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
+                let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
+                (Some(info.amount), Some(info.contract_id.to_string()))
+            } else {
+                (None, None)
+            };
+
+            return Ok(Json(GetPaymentResponse {
+                payment: Payment {
+                    amt_msat: payment_info.amt_msat,
+                    asset_amount,
+                    asset_id,
+                    payment_hash: hex_str(&payment_hash.0),
+                    inbound: false,
+                    status: payment_info.status,
+                    created_at: payment_info.created_at,
+                    updated_at: payment_info.updated_at,
+                    payee_pubkey: payment_info.payee_pubkey.to_string(),
+                },
+            }));
+        }
+    }
+
+    Err(APIError::PaymentNotFound(payload.payment_hash))
+}
+
+pub(crate) async fn get_swap(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetSwapRequest>, APIError>,
+) -> Result<Json<GetSwapResponse>, APIError> {
+    let guard = state.check_unlocked().await?;
+    let unlocked_state = guard.as_ref().unwrap();
+
+    let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
+    if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
+        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
+    }
+    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
+
+    let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
+        let mut status = swap_data.status.clone();
+        if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
+            status = SwapStatus::Expired;
+        } else if status == SwapStatus::Pending
+            && get_current_timestamp() > swap_data.initiated_at.unwrap() + 86400
+        {
+            status = SwapStatus::Failed;
+        }
+        if status != swap_data.status {
+            if taker {
+                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
+            } else {
+                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
+            }
+        }
+        Swap {
+            payment_hash: payment_hash.to_string(),
+            qty_from: swap_data.swap_info.qty_from,
+            qty_to: swap_data.swap_info.qty_to,
+            from_asset: swap_data.swap_info.from_asset.map(|c| c.to_string()),
+            to_asset: swap_data.swap_info.to_asset.map(|c| c.to_string()),
+            status,
+            requested_at: swap_data.requested_at,
+            initiated_at: swap_data.initiated_at,
+            expires_at: swap_data.swap_info.expiry,
+            completed_at: swap_data.completed_at,
+        }
+    };
+
+    if payload.taker {
+        let taker_swaps = unlocked_state.taker_swaps();
+        if let Some(sd) = taker_swaps.get(&requested_ph) {
+            return Ok(Json(GetSwapResponse {
+                swap: map_swap(&requested_ph, sd, true),
+            }));
+        }
+    } else {
+        let maker_swaps = unlocked_state.maker_swaps();
+        if let Some(sd) = maker_swaps.get(&requested_ph) {
+            return Ok(Json(GetSwapResponse {
+                swap: map_swap(&requested_ph, sd, false),
+            }));
+        }
+    }
+
+    Err(APIError::SwapNotFound(payload.payment_hash))
+}
+
 pub(crate) async fn init(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<InitRequest>, APIError>,
@@ -2201,82 +2339,6 @@ pub(crate) async fn list_payments(
     Ok(Json(ListPaymentsResponse { payments }))
 }
 
-pub(crate) async fn get_payment(
-    State(state): State<Arc<AppState>>,
-    WithRejection(Json(payload), _): WithRejection<Json<GetPaymentRequest>, APIError>,
-) -> Result<Json<GetPaymentResponse>, APIError> {
-    let guard = state.check_unlocked().await?;
-    let unlocked_state = guard.as_ref().unwrap();
-
-    let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
-    if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
-        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
-    }
-    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
-
-    let inbound_payments = unlocked_state.inbound_payments();
-    let outbound_payments = unlocked_state.outbound_payments();
-
-    for (payment_hash, payment_info) in &inbound_payments {
-        if payment_hash == &requested_ph {
-            let rgb_payment_info_path_inbound =
-                get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, true);
-
-            let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
-                let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
-                (Some(info.amount), Some(info.contract_id.to_string()))
-            } else {
-                (None, None)
-            };
-
-            return Ok(Json(GetPaymentResponse {
-                payment: Payment {
-                    amt_msat: payment_info.amt_msat,
-                    asset_amount,
-                    asset_id,
-                    payment_hash: hex_str(&payment_hash.0),
-                    inbound: true,
-                    status: payment_info.status,
-                    created_at: payment_info.created_at,
-                    updated_at: payment_info.updated_at,
-                    payee_pubkey: payment_info.payee_pubkey.to_string(),
-                },
-            }));
-        }
-    }
-
-    for (payment_id, payment_info) in &outbound_payments {
-        let payment_hash = &PaymentHash(payment_id.0);
-        if payment_hash == &requested_ph {
-            let rgb_payment_info_path_outbound =
-                get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, false);
-
-            let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
-                let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
-                (Some(info.amount), Some(info.contract_id.to_string()))
-            } else {
-                (None, None)
-            };
-
-            return Ok(Json(GetPaymentResponse {
-                payment: Payment {
-                    amt_msat: payment_info.amt_msat,
-                    asset_amount,
-                    asset_id,
-                    payment_hash: hex_str(&payment_hash.0),
-                    inbound: false,
-                    status: payment_info.status,
-                    created_at: payment_info.created_at,
-                    updated_at: payment_info.updated_at,
-                    payee_pubkey: payment_info.payee_pubkey.to_string(),
-                },
-            }));
-        }
-    }
-
-    Err(APIError::PaymentNotFound(payload.payment_hash))
-}
-
 pub(crate) async fn list_peers(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListPeersResponse>, APIError> {
@@ -2342,68 +2404,6 @@ pub(crate) async fn list_swaps(
             .map(|(ph, sd)| map_swap(ph, sd, false))
             .collect(),
     }))
-}
-
-pub(crate) async fn get_swap(
-    State(state): State<Arc<AppState>>,
-    WithRejection(Json(payload), _): WithRejection<Json<GetSwapRequest>, APIError>,
-) -> Result<Json<GetSwapResponse>, APIError> {
-    let guard = state.check_unlocked().await?;
-    let unlocked_state = guard.as_ref().unwrap();
-
-    let payment_hash_vec = hex_str_to_vec(&payload.payment_hash);
-    if payment_hash_vec.is_none() || payment_hash_vec.as_ref().unwrap().len() != 32 {
-        return Err(APIError::InvalidPaymentHash(payload.payment_hash));
-    }
-    let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
-
-    let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
-        let mut status = swap_data.status.clone();
-        if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
-            status = SwapStatus::Expired;
-        } else if status == SwapStatus::Pending
-            && get_current_timestamp() > swap_data.initiated_at.unwrap() + 86400
-        {
-            status = SwapStatus::Failed;
-        }
-        if status != swap_data.status {
-            if taker {
-                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
-            } else {
-                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
-            }
-        }
-        Swap {
-            payment_hash: payment_hash.to_string(),
-            qty_from: swap_data.swap_info.qty_from,
-            qty_to: swap_data.swap_info.qty_to,
-            from_asset: swap_data.swap_info.from_asset.map(|c| c.to_string()),
-            to_asset: swap_data.swap_info.to_asset.map(|c| c.to_string()),
-            status,
-            requested_at: swap_data.requested_at,
-            initiated_at: swap_data.initiated_at,
-            expires_at: swap_data.swap_info.expiry,
-            completed_at: swap_data.completed_at,
-        }
-    };
-
-    if payload.taker {
-        let taker_swaps = unlocked_state.taker_swaps();
-        if let Some(sd) = taker_swaps.get(&requested_ph) {
-            return Ok(Json(GetSwapResponse {
-                swap: map_swap(&requested_ph, sd, true),
-            }));
-        }
-    } else {
-        let maker_swaps = unlocked_state.maker_swaps();
-        if let Some(sd) = maker_swaps.get(&requested_ph) {
-            return Ok(Json(GetSwapResponse {
-                swap: map_swap(&requested_ph, sd, false),
-            }));
-        }
-    }
-
-    Err(APIError::SwapNotFound(payload.payment_hash))
 }
 
 pub(crate) async fn list_transactions(

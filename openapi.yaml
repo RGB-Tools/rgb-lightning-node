@@ -905,19 +905,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
-  /sync:
-    post:
-      tags:
-        - RGB
-      summary: Sync the RGB wallet
-      description: Sync the RGB wallet
-      responses:
-        '200':
-          description: Successful operation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyResponse'
   /signmessage:
     post:
       tags:
@@ -936,6 +923,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SignMessageResponse'
+  /sync:
+    post:
+      tags:
+        - RGB
+      summary: Sync the RGB wallet
+      description: Sync the RGB wallet
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /taker:
     post:
       tags:
@@ -1004,6 +1004,34 @@ components:
         offchain_inbound:
           type: integer
           example: 0
+    AssetCFA:
+      type: object
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        name:
+          type: string
+          example: Collectible
+        details:
+          type: string
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        issued_supply:
+          type: integer
+          example: 777
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/AssetBalanceResponse'
+        media:
+          $ref: '#/components/schemas/Media'
     AssetMetadataRequest:
       type: object
       properties:
@@ -1041,34 +1069,6 @@ components:
           example: asset details
         token:
           $ref: '#/components/schemas/Token'
-    AssetCFA:
-      type: object
-      properties:
-        asset_id:
-          type: string
-          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
-        name:
-          type: string
-          example: Collectible
-        details:
-          type: string
-          example: asset details
-        precision:
-          type: integer
-          example: 0
-        issued_supply:
-          type: integer
-          example: 777
-        timestamp:
-          type: integer
-          example: 1691160565
-        added_at:
-          type: integer
-          example: 1691161979
-        balance:
-          $ref: '#/components/schemas/AssetBalanceResponse'
-        media:
-          $ref: '#/components/schemas/Media'
     AssetNIA:
       type: object
       properties:
