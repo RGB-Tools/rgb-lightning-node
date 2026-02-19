@@ -137,6 +137,9 @@ pub enum APIError {
     #[error("Trying to request fee estimation for an invalid block number")]
     InvalidEstimationBlocks,
 
+    #[error("Invalid expiration")]
+    InvalidExpiration,
+
     #[error("Invalid fee rate: {0}")]
     InvalidFeeRate(String),
 
@@ -190,6 +193,9 @@ pub enum APIError {
 
     #[error("The provided recipient ID is neither a blinded UTXO or a script")]
     InvalidRecipientID,
+
+    #[error("The provided recipient map is invalid")]
+    InvalidRecipientMap,
 
     #[error("The provided recipient ID is for a different network than the wallet's one")]
     InvalidRecipientNetwork,
@@ -359,12 +365,12 @@ impl From<RgbLibError> for APIError {
             }
             RgbLibError::InvalidAddress { details } => APIError::InvalidAddress(details),
             RgbLibError::InvalidAmountZero => APIError::InvalidAmount(s!("0")),
-            RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
             RgbLibError::InvalidAssignment => APIError::InvalidAssignment,
             RgbLibError::InvalidAttachments { details } => APIError::InvalidAttachments(details),
             RgbLibError::InvalidDetails { details } => APIError::InvalidDetails(details),
             RgbLibError::InvalidElectrum { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidEstimationBlocks => APIError::InvalidEstimationBlocks,
+            RgbLibError::InvalidExpiration => APIError::InvalidExpiration,
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
             RgbLibError::InvalidFilePath { .. } => APIError::MediaFileNotProvided,
             RgbLibError::InvalidIndexer { details } => APIError::InvalidIndexer(details),
@@ -378,6 +384,7 @@ impl From<RgbLibError> for APIError {
                 APIError::InvalidRecipientData(details)
             }
             RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
+            RgbLibError::InvalidRecipientMap => APIError::InvalidRecipientMap,
             RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
             RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
             RgbLibError::InvalidTransportEndpoint { details } => {
@@ -450,6 +457,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidChannelID
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
+            | APIError::InvalidExpiration
             | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidMediaDigest
@@ -465,6 +473,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidPubkey
             | APIError::InvalidRecipientData(_)
             | APIError::InvalidRecipientID
+            | APIError::InvalidRecipientMap
             | APIError::InvalidRecipientNetwork
             | APIError::InvalidRequest(_)
             | APIError::InvalidSwap(_)

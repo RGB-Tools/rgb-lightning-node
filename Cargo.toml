@@ -2,7 +2,7 @@
 name = "rgb-lightning-node"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 
 [[bin]]
 name = "rgb-lightning-node"
@@ -36,7 +36,7 @@ lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/ligh
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "0.3.0-beta.4", features = [
+rgb-lib = { version = "0.3.0-beta.5", features = [
     "electrum",
     "esplora",
 ] }

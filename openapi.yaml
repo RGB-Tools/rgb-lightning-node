@@ -1298,7 +1298,6 @@ components:
         - $ref: '#/components/schemas/AssignmentFungible'
         - $ref: '#/components/schemas/AssignmentNonFungible'
         - $ref: '#/components/schemas/AssignmentInflationRight'
-        - $ref: '#/components/schemas/AssignmentReplaceRight'
         - $ref: '#/components/schemas/AssignmentAny'
       discriminator:
         propertyName: type
@@ -1306,7 +1305,6 @@ components:
           Fungible: '#/components/schemas/AssignmentFungible'
           NonFungible: '#/components/schemas/AssignmentNonFungible'
           InflationRight: '#/components/schemas/AssignmentInflationRight'
-          ReplaceRight: '#/components/schemas/AssignmentReplaceRight'
           Any: '#/components/schemas/AssignmentAny'
     AssignmentAny:
       type: object
@@ -1351,14 +1349,6 @@ components:
         type:
           type: string
           enum: [NonFungible]
-    AssignmentReplaceRight:
-      type: object
-      required:
-        - type
-      properties:
-        type:
-          type: string
-          enum: [ReplaceRight]
     BackupRequest:
       type: object
       required:
@@ -1953,7 +1943,6 @@ components:
         - ticker
         - name
         - precision
-        - replace_rights_num
       properties:
         amounts:
           type: array
@@ -1973,9 +1962,6 @@ components:
           type: string
           example: Tether
         precision:
-          type: integer
-          example: 0
-        replace_rights_num:
           type: integer
           example: 0
         reject_list_url:
@@ -2652,11 +2638,11 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Assignment'
             - type: 'null'
-        duration_seconds:
+        expiration_timestamp:
           type:
             - integer
             - 'null'
-          example: 86400
+          example: 1695811760
         witness:
           type: boolean
           example: false
@@ -2789,6 +2775,11 @@ components:
         min_confirmations:
           type: integer
           example: 1
+        expiration_timestamp:
+          type:
+            - integer
+            - 'null'
+          example: 1695811760
         recipient_map:
           type: object
           additionalProperties:
@@ -3075,7 +3066,7 @@ components:
             - string
             - 'null'
           example: null
-        expiration:
+        expiration_timestamp:
           type:
             - integer
             - 'null'
@@ -3096,6 +3087,7 @@ components:
     TransferStatus:
       type: string
       enum:
+        - Initiated
         - WaitingCounterparty
         - WaitingConfirmations
         - Settled

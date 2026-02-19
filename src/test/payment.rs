@@ -205,7 +205,7 @@ async fn success() {
     assert!(xfer_1.recipient_id.is_none());
     assert!(xfer_1.receive_utxo.is_none());
     assert!(xfer_1.change_utxo.is_none());
-    assert!(xfer_1.expiration.is_none());
+    assert!(xfer_1.expiration_timestamp.is_none());
     assert!(xfer_1.transport_endpoints.is_empty());
     let xfer_2 = transfers.iter().find(|t| t.idx == 2).unwrap();
     assert_eq!(xfer_2.status, TransferStatus::Settled);
@@ -216,7 +216,7 @@ async fn success() {
     assert!(xfer_2.recipient_id.is_some());
     assert!(xfer_2.receive_utxo.is_none());
     assert!(xfer_2.change_utxo.is_some());
-    assert!(xfer_2.expiration.is_some());
+    assert!(xfer_2.expiration_timestamp.is_none());
     assert!(!xfer_2.transport_endpoints.is_empty());
     let xfer_3 = transfers.iter().find(|t| t.idx == 3).unwrap();
     assert_eq!(xfer_3.status, TransferStatus::Settled);
@@ -226,7 +226,7 @@ async fn success() {
     assert!(xfer_3.recipient_id.is_some());
     assert!(xfer_3.receive_utxo.is_some());
     assert!(xfer_3.change_utxo.is_none());
-    assert!(xfer_3.expiration.is_some());
+    assert!(xfer_3.expiration_timestamp.is_none());
     assert!(!xfer_3.transport_endpoints.is_empty());
 }
 

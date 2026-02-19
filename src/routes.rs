@@ -44,7 +44,7 @@ use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use regex::Regex;
 use rgb_lib::{
     bdk_wallet::keys::bip39::Mnemonic,
-    generate_keys,
+    keys::generate_keys,
     utils::recipient_id_from_script_buf,
     wallet::{
         rust_only::{
@@ -323,7 +323,6 @@ pub(crate) enum Assignment {
     Fungible(u64),
     NonFungible,
     InflationRight(u64),
-    ReplaceRight,
     Any,
 }
 
@@ -333,7 +332,6 @@ impl From<RgbLibAssignment> for Assignment {
             RgbLibAssignment::Fungible(amt) => Self::Fungible(amt),
             RgbLibAssignment::NonFungible => Self::NonFungible,
             RgbLibAssignment::InflationRight(amt) => Self::InflationRight(amt),
-            RgbLibAssignment::ReplaceRight => Self::ReplaceRight,
             RgbLibAssignment::Any => Self::Any,
         }
     }
@@ -345,7 +343,6 @@ impl From<Assignment> for RgbLibAssignment {
             Assignment::Fungible(amt) => Self::Fungible(amt),
             Assignment::NonFungible => Self::NonFungible,
             Assignment::InflationRight(amt) => Self::InflationRight(amt),
-            Assignment::ReplaceRight => Self::ReplaceRight,
             Assignment::Any => Self::Any,
         }
     }
@@ -374,7 +371,6 @@ impl From<Network> for BitcoinNetwork {
             Network::Testnet4 => Self::Testnet4,
             Network::Regtest => Self::Regtest,
             Network::Signet => Self::Signet,
-            _ => unimplemented!("unsupported network"),
         }
     }
 }
@@ -387,6 +383,7 @@ impl From<RgbLibNetwork> for BitcoinNetwork {
             RgbLibNetwork::Testnet4 => Self::Testnet4,
             RgbLibNetwork::Regtest => Self::Regtest,
             RgbLibNetwork::Signet => Self::Signet,
+            RgbLibNetwork::SignetCustom => todo!("fix when adding support to custom signet"),
         }
     }
 }
@@ -518,7 +515,7 @@ pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) asset_id: Option<String>,
     pub(crate) assignment: Assignment,
     pub(crate) network: BitcoinNetwork,
-    pub(crate) expiration_timestamp: Option<i64>,
+    pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) transport_endpoints: Vec<String>,
 }
 
@@ -700,7 +697,6 @@ pub(crate) struct IssueAssetIFARequest {
     pub(crate) ticker: String,
     pub(crate) name: String,
     pub(crate) precision: u8,
-    pub(crate) replace_rights_num: u8,
     pub(crate) reject_list_url: Option<String>,
 }
 
@@ -1021,7 +1017,7 @@ pub(crate) struct RgbAllocation {
 pub(crate) struct RgbInvoiceRequest {
     pub(crate) asset_id: Option<String>,
     pub(crate) assignment: Option<Assignment>,
-    pub(crate) duration_seconds: Option<u32>,
+    pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) min_confirmations: u8,
     pub(crate) witness: bool,
 }
@@ -1030,7 +1026,7 @@ pub(crate) struct RgbInvoiceRequest {
 pub(crate) struct RgbInvoiceResponse {
     pub(crate) recipient_id: String,
     pub(crate) invoice: String,
-    pub(crate) expiration_timestamp: Option<i64>,
+    pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) batch_transfer_idx: i32,
 }
 
@@ -1075,6 +1071,7 @@ pub(crate) struct SendRgbRequest {
     pub(crate) donation: bool,
     pub(crate) fee_rate: u64,
     pub(crate) min_confirmations: u8,
+    pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) recipient_map: HashMap<String, Vec<Recipient>>,
     pub(crate) skip_sync: bool,
 }
@@ -1223,7 +1220,7 @@ pub(crate) struct Transfer {
     pub(crate) recipient_id: Option<String>,
     pub(crate) receive_utxo: Option<String>,
     pub(crate) change_utxo: Option<String>,
-    pub(crate) expiration: Option<i64>,
+    pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) transport_endpoints: Vec<TransferTransportEndpoint>,
 }
 
@@ -1238,6 +1235,7 @@ pub(crate) enum TransferKind {
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransferStatus {
+    Initiated,
     WaitingCounterparty,
     WaitingConfirmations,
     Settled,
@@ -2081,7 +2079,6 @@ pub(crate) async fn issue_asset_ifa(
             payload.precision,
             payload.amounts,
             payload.inflation_amounts,
-            payload.replace_rights_num,
             payload.reject_list_url,
         )?;
 
@@ -2573,10 +2570,10 @@ pub(crate) async fn list_transactions(
     for tx in unlocked_state.rgb_list_transactions(payload.skip_sync)? {
         transactions.push(Transaction {
             transaction_type: match tx.transaction_type {
-                rgb_lib::TransactionType::RgbSend => TransactionType::RgbSend,
-                rgb_lib::TransactionType::Drain => TransactionType::Drain,
-                rgb_lib::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
-                rgb_lib::TransactionType::User => TransactionType::User,
+                rgb_lib::wallet::TransactionType::RgbSend => TransactionType::RgbSend,
+                rgb_lib::wallet::TransactionType::Drain => TransactionType::Drain,
+                rgb_lib::wallet::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
+                rgb_lib::wallet::TransactionType::User => TransactionType::User,
             },
             txid: tx.txid,
             received: tx.received,
@@ -2606,6 +2603,7 @@ pub(crate) async fn list_transfers(
             created_at: transfer.created_at,
             updated_at: transfer.updated_at,
             status: match transfer.status {
+                rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
                 rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
                 rgb_lib::TransferStatus::WaitingConfirmations => {
                     TransferStatus::WaitingConfirmations
@@ -2616,17 +2614,17 @@ pub(crate) async fn list_transfers(
             requested_assignment: transfer.requested_assignment.map(|a| a.into()),
             assignments: transfer.assignments.into_iter().map(|a| a.into()).collect(),
             kind: match transfer.kind {
-                rgb_lib::TransferKind::Issuance => TransferKind::Issuance,
-                rgb_lib::TransferKind::ReceiveBlind => TransferKind::ReceiveBlind,
-                rgb_lib::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
-                rgb_lib::TransferKind::Send => TransferKind::Send,
-                rgb_lib::TransferKind::Inflation => TransferKind::Inflation,
+                rgb_lib::wallet::TransferKind::Issuance => TransferKind::Issuance,
+                rgb_lib::wallet::TransferKind::ReceiveBlind => TransferKind::ReceiveBlind,
+                rgb_lib::wallet::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
+                rgb_lib::wallet::TransferKind::Send => TransferKind::Send,
+                rgb_lib::wallet::TransferKind::Inflation => TransferKind::Inflation,
             },
             txid: transfer.txid,
             recipient_id: transfer.recipient_id,
             receive_utxo: transfer.receive_utxo.map(|u| u.to_string()),
             change_utxo: transfer.change_utxo.map(|u| u.to_string()),
-            expiration: transfer.expiration,
+            expiration_timestamp: transfer.expiration_timestamp,
             transport_endpoints: transfer
                 .transport_endpoints
                 .iter()
@@ -3118,8 +3116,8 @@ pub(crate) async fn node_info(
         eventual_close_fees_sat,
         pending_outbound_payments_sat,
         num_peers: unlocked_state.peer_manager.list_peers().len(),
-        account_xpub_vanilla: unlocked_state.rgb_get_wallet_data().account_xpub_vanilla,
-        account_xpub_colored: unlocked_state.rgb_get_wallet_data().account_xpub_colored,
+        account_xpub_vanilla: unlocked_state.rgb_get_keys().account_xpub_vanilla,
+        account_xpub_colored: unlocked_state.rgb_get_keys().account_xpub_colored,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
         rgb_htlc_min_msat: HTLC_MIN_MSAT,
         rgb_channel_capacity_min_sat: OPENRGBCHANNEL_MIN_SAT,
@@ -3315,6 +3313,8 @@ pub(crate) async fn open_channel(
                     true,
                     FEE_RATE,
                     MIN_CHANNEL_CONFIRMATIONS,
+                    None,
+                    true,
                 )
             })
             .await
@@ -3521,7 +3521,7 @@ pub(crate) async fn rgb_invoice(
             unlocked_state.rgb_witness_receive(
                 payload.asset_id,
                 assignment,
-                payload.duration_seconds,
+                payload.expiration_timestamp,
                 vec![unlocked_state.proxy_endpoint.clone()],
                 payload.min_confirmations,
             )?
@@ -3529,7 +3529,7 @@ pub(crate) async fn rgb_invoice(
             unlocked_state.rgb_blind_receive(
                 payload.asset_id,
                 assignment,
-                payload.duration_seconds,
+                payload.expiration_timestamp,
                 vec![unlocked_state.proxy_endpoint.clone()],
                 payload.min_confirmations,
             )?
@@ -3843,6 +3843,7 @@ pub(crate) async fn send_rgb(
                 payload.donation,
                 payload.fee_rate,
                 payload.min_confirmations,
+                payload.expiration_timestamp,
                 payload.skip_sync,
             )
         })

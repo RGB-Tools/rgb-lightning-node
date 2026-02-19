@@ -56,6 +56,8 @@ const NODE4_PEER_PORT: u16 = 9804;
 const NODE5_PEER_PORT: u16 = 9805;
 const NODE6_PEER_PORT: u16 = 9806;
 
+const DURATION_SECONDS: u64 = 999;
+
 static INIT: Once = Once::new();
 
 static MINER: Lazy<RwLock<Miner>> = Lazy::new(|| RwLock::new(Miner { no_mine_count: 0 }));
@@ -650,7 +652,6 @@ async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
         ticker: s!("USDT"),
         name: s!("Tether"),
         precision: 0,
-        replace_rights_num: 0,
         reject_list_url: None,
     };
     let res = reqwest::Client::new()
@@ -1427,7 +1428,9 @@ async fn rgb_invoice_with_assignment(
         min_confirmations: 1,
         asset_id,
         assignment,
-        duration_seconds: None,
+        expiration_timestamp: Some(
+            OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
+        ),
         witness,
     };
     let res = reqwest::Client::new()
@@ -1478,6 +1481,9 @@ async fn send_assets(
         donation,
         fee_rate: FEE_RATE,
         min_confirmations: 1,
+        expiration_timestamp: Some(
+            OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
+        ),
         recipient_map,
         skip_sync: false,
     };
