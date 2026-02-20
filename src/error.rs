@@ -548,3 +548,35 @@ pub enum AppError {
     #[error("Port {0} is unavailable")]
     UnavailablePort(u16),
 }
+
+/// The error variants returned by the authentication checks
+#[derive(Debug)]
+pub enum AuthError {
+    Unauthorized,
+    Forbidden,
+}
+
+impl IntoResponse for AuthError {
+    fn into_response(self) -> Response {
+        match self {
+            AuthError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                Json(APIErrorResponse {
+                    code: StatusCode::UNAUTHORIZED.as_u16(),
+                    error: s!("Missing or invalid credentials"),
+                    name: s!("Unauthorized"),
+                }),
+            )
+                .into_response(),
+            AuthError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                Json(APIErrorResponse {
+                    code: StatusCode::FORBIDDEN.as_u16(),
+                    error: s!("You don't have access to this resource"),
+                    name: s!("Forbidden"),
+                }),
+            )
+                .into_response(),
+        }
+    }
+}

@@ -2,6 +2,22 @@ use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/authentication/";
 
+async fn check_forbidden(res: reqwest::Response) {
+    assert_eq!(res.status(), reqwest::StatusCode::FORBIDDEN);
+    let body: APIErrorResponse = res.json().await.unwrap();
+    assert_eq!(body.code, 403);
+    assert_eq!(body.error, "You don't have access to this resource");
+    assert_eq!(body.name, "Forbidden");
+}
+
+async fn check_unauthorized(res: reqwest::Response) {
+    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: APIErrorResponse = res.json().await.unwrap();
+    assert_eq!(body.code, 401);
+    assert_eq!(body.error, "Missing or invalid credentials");
+    assert_eq!(body.name, "Unauthorized");
+}
+
 fn create_token(
     root: &KeyPair,
     user_role: Option<&str>,
@@ -105,7 +121,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::FORBIDDEN);
+    check_forbidden(res).await;
     while Utc::now() < ten_seconds_later {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
@@ -115,7 +131,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 
     // user with no role cannot do any operation
     let user_token = create_token(&root_keypair, None, vec!["/nodeinfo"], None);
@@ -125,7 +141,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 
     // user with unknown role cannot do any operation
     let user_token = create_token(&root_keypair, Some("unknown"), vec!["/nodeinfo"], None);
@@ -135,7 +151,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 
     // user with read-only role can only call read-only APIs
     let user_token = create_token(&root_keypair, Some("read-only"), vec![], None);
@@ -156,7 +172,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::FORBIDDEN);
+    check_forbidden(res).await;
 
     // user cannot call any API after token revocation
     let user_token = create_token(&root_keypair, Some("custom"), vec!["/nodeinfo"], None);
@@ -192,7 +208,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 
     // with no token no API can be called
     let res = reqwest::Client::new()
@@ -200,7 +216,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 
     // with an invalid token no API can be called
     let res = reqwest::Client::new()
@@ -209,5 +225,5 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+    check_unauthorized(res).await;
 }

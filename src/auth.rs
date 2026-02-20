@@ -1,10 +1,4 @@
-use axum::{
-    body::Body,
-    extract::State,
-    http::{Request, StatusCode},
-    middleware::Next,
-    response::Response,
-};
+use axum::{body::Body, extract::State, http::Request, middleware::Next, response::Response};
 use biscuit_auth::{macros::authorizer, Biscuit, PublicKey};
 use std::{
     collections::HashSet,
@@ -16,7 +10,7 @@ use std::{
 use tempfile::NamedTempFile;
 
 use crate::{
-    error::{APIError, AppError},
+    error::{APIError, AppError, AuthError},
     utils::{hex_str, hex_str_to_vec, AppState},
 };
 
@@ -88,7 +82,7 @@ pub(crate) async fn conditional_auth_middleware(
     State(app_state): State<Arc<AppState>>,
     request: Request<Body>,
     next: Next,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, AuthError> {
     let Some(root_pubkey) = app_state.root_public_key else {
         // if no root key is configured, skip authentication
         return Ok(next.run(request).await);
@@ -101,19 +95,19 @@ pub(crate) async fn conditional_auth_middleware(
         .and_then(|s| s.strip_prefix("Bearer "));
     let auth_token = match auth_header {
         Some(token) => token,
-        None => return Err(StatusCode::UNAUTHORIZED),
+        None => return Err(AuthError::Unauthorized),
     };
 
     // verify the token
     let token =
-        Biscuit::from_base64(auth_token, root_pubkey).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        Biscuit::from_base64(auth_token, root_pubkey).map_err(|_| AuthError::Unauthorized)?;
 
     if app_state.is_token_revoked(&token) {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(AuthError::Unauthorized);
     }
 
     if is_token_expired(&token) {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(AuthError::Unauthorized);
     }
 
     if is_admin_role(&token) {
@@ -126,7 +120,7 @@ pub(crate) async fn conditional_auth_middleware(
         if is_operation_readonly(&op) {
             return Ok(next.run(request).await);
         } else {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AuthError::Forbidden);
         }
     }
 
@@ -134,11 +128,11 @@ pub(crate) async fn conditional_auth_middleware(
         if is_operation_permitted(&token, &op) {
             return Ok(next.run(request).await);
         } else {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(AuthError::Forbidden);
         }
     }
 
-    Err(StatusCode::UNAUTHORIZED)
+    Err(AuthError::Unauthorized)
 }
 
 fn is_admin_role(token: &Biscuit) -> bool {
