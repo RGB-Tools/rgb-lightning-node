@@ -1,6 +1,5 @@
 use amplify::s;
 use axum::{
-    extract::rejection::JsonRejection,
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -192,6 +191,9 @@ pub enum APIError {
     #[error("The provided recipient ID is for a different network than the wallet's one")]
     InvalidRecipientNetwork,
 
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
+
     #[error("Invalid swap: {0}")]
     InvalidSwap(String),
 
@@ -212,9 +214,6 @@ pub enum APIError {
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
-
-    #[error(transparent)]
-    JsonExtractorRejection(#[from] JsonRejection),
 
     #[error("Node is locked (hint: call unlock)")]
     LockedNode,
@@ -314,6 +313,18 @@ impl APIError {
     }
 }
 
+impl From<axum::extract::rejection::JsonRejection> for APIError {
+    fn from(err: axum::extract::rejection::JsonRejection) -> Self {
+        APIError::InvalidRequest(err.to_string())
+    }
+}
+
+impl From<axum::extract::multipart::MultipartRejection> for APIError {
+    fn from(err: axum::extract::multipart::MultipartRejection) -> Self {
+        APIError::InvalidRequest(err.to_string())
+    }
+}
+
 impl From<RgbLibError> for APIError {
     fn from(error: RgbLibError) -> Self {
         match error {
@@ -395,11 +406,6 @@ impl From<RgbLibError> for APIError {
 impl IntoResponse for APIError {
     fn into_response(self) -> Response {
         let (status, error, name) = match self {
-            APIError::JsonExtractorRejection(ref json_rejection) => (
-                json_rejection.status(),
-                json_rejection.body_text(),
-                self.name(),
-            ),
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
@@ -444,6 +450,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidRecipientData(_)
             | APIError::InvalidRecipientID
             | APIError::InvalidRecipientNetwork
+            | APIError::InvalidRequest(_)
             | APIError::InvalidSwap(_)
             | APIError::InvalidSwapString(_, _)
             | APIError::InvalidTicker(_)

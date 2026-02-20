@@ -3225,7 +3225,7 @@ pub(crate) async fn open_channel(
 
 pub(crate) async fn post_asset_media(
     State(state): State<Arc<AppState>>,
-    mut multipart: Multipart,
+    WithRejection(mut multipart, _): WithRejection<Multipart, APIError>,
 ) -> Result<Json<PostAssetMediaResponse>, APIError> {
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
