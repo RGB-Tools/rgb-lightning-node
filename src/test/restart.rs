@@ -89,7 +89,7 @@ async fn restart() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), Some(100), 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), Some(100), 900, None).await;
     let send_payment = send_payment(node1_addr, invoice).await;
 
     println!("5 - restart 1+2");

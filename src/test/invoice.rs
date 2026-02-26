@@ -21,6 +21,7 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
+        payment_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -36,6 +37,7 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
+        payment_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -51,6 +53,7 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: None,
         asset_amount: None,
+        payment_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -99,6 +102,7 @@ async fn zero_amount_invoice() {
         expiry_sec: 900,
         asset_id: None,
         asset_amount: None,
+        payment_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))

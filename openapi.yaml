@@ -115,6 +115,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BtcBalanceResponse'
+  /cancelhodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Cancel a HODL invoice
+      description: Cancel a held HTLC for a HODL invoice. Rejects cancellation if a settlement is already in progress.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCancelRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /changepassword:
     post:
       tags:
@@ -368,6 +386,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetPaymentResponse'
+  /getpaymentpreimage:
+    post:
+      tags:
+        - Payments
+      summary: Get a payment preimage by its payment hash
+      description: Get the preimage for an outbound payment when it has been completed successfully
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetPaymentPreimageRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPaymentPreimageResponse'
   /getswap:
     post:
       tags:
@@ -636,7 +672,7 @@ paths:
       tags:
         - Invoices
       summary: Get a LN invoice
-      description: Get a LN invoice to receive a payment
+      description: Get a LN invoice to receive a payment. Provide `payment_hash` to create a HODL invoice.
       requestBody:
         content:
           application/json:
@@ -892,6 +928,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SendRgbResponse'
+  /settlehodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Settle a HODL invoice
+      description: Claim a held HTLC for a HODL invoice
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettleHodlInvoiceRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettleHodlInvoiceResponse'
   /shutdown:
     post:
       tags:
@@ -1245,6 +1299,14 @@ components:
           $ref: '#/components/schemas/BtcBalance'
         colored:
           $ref: '#/components/schemas/BtcBalance'
+    CancelHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+      properties:
+        payment_hash:
+          type: string
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     ChangePasswordRequest:
       type: object
       properties:
@@ -1330,7 +1392,7 @@ components:
     CheckProxyEndpointRequest:
       type: object
       properties:
-        proxy_url:
+        proxy_endpoint:
           type: string
           example: rpc://127.0.0.1:3000/json-rpc
     CloseChannelRequest:
@@ -1519,6 +1581,23 @@ components:
       properties:
         payment:
           $ref: '#/components/schemas/Payment'
+    GetPaymentPreimageRequest:
+      type: object
+      required:
+        - payment_hash
+      properties:
+        payment_hash:
+          type: string
+          example: b4cb2da889477082a2e47f37a07e646e60ef6f97ffa7a4d88c823efd673da94b
+    GetPaymentPreimageResponse:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/HTLCStatus'
+        preimage:
+          type: string
+          nullable: true
+          example: eade701c7b23b8799465f4284ad84710fc16a776fbc6483001291149122695a8
     GetSwapRequest:
       type: object
       properties:
@@ -1537,7 +1616,9 @@ components:
       type: string
       enum:
         - Pending
+        - Claimable
         - Succeeded
+        - Cancelled
         - Failed
     IndexerProtocol:
       type: string
@@ -1561,6 +1642,7 @@ components:
       enum:
         - Pending
         - Succeeded
+        - Cancelled
         - Failed
         - Expired
     InvoiceStatusRequest:
@@ -1784,6 +1866,10 @@ components:
         asset_amount:
           type: integer
           example: 42
+        payment_hash:
+          type: string
+          description: Optional. When provided, the invoice is created as HODL.
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     LNInvoiceResponse:
       type: object
       properties:
@@ -2184,6 +2270,24 @@ components:
         txid:
           type: string
           example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
+    SettleHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+        - payment_preimage
+      properties:
+        payment_hash:
+          type: string
+          example: b4cb2da889477082a2e47f37a07e646e60ef6f97ffa7a4d88c823efd673da94b
+        payment_preimage:
+          type: string
+          example: eade701c7b23b8799465f4284ad84710fc16a776fbc6483001291149122695a8
+    SettleHodlInvoiceResponse:
+      type: object
+      properties:
+        changed:
+          type: boolean
+          example: true
     SignMessageRequest:
       type: object
       properties:

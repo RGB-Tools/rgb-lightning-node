@@ -67,7 +67,7 @@ async fn with_anchors() {
     assert_eq!(list_payments(node1_addr).await.len(), 2);
     assert_eq!(list_payments(node2_addr).await.len(), 2);
 
-    let invoice = ln_invoice(node1_addr, Some(50000000), None, None, 900)
+    let invoice = ln_invoice(node1_addr, Some(50000000), None, None, 900, None)
         .await
         .invoice;
     let _ = send_payment(node2_addr, invoice).await;
@@ -146,7 +146,7 @@ async fn without_anchors() {
     assert_eq!(list_payments(node1_addr).await.len(), 2);
     assert_eq!(list_payments(node2_addr).await.len(), 2);
 
-    let invoice = ln_invoice(node1_addr, Some(50000000), None, None, 900)
+    let invoice = ln_invoice(node1_addr, Some(50000000), None, None, 900, None)
         .await
         .invoice;
     let _ = send_payment(node2_addr, invoice).await;

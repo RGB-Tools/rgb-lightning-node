@@ -65,9 +65,9 @@ async fn concurrent_btc_payments() {
     let amt_msat_1 = 4000000;
     let amt_msat_2 = 5000000;
     let LNInvoiceResponse { invoice: invoice_1 } =
-        ln_invoice(node1_addr, Some(amt_msat_1), None, None, 900).await;
+        ln_invoice(node1_addr, Some(amt_msat_1), None, None, 900, None).await;
     let LNInvoiceResponse { invoice: invoice_2 } =
-        ln_invoice(node1_addr, Some(amt_msat_2), None, None, 900).await;
+        ln_invoice(node1_addr, Some(amt_msat_2), None, None, 900, None).await;
 
     // send payments
     let payload_1 = SendPaymentRequest {

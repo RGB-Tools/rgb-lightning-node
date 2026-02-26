@@ -47,7 +47,7 @@ async fn success() {
 
     let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     send_payment_with_ln_balance(node1_addr, node2_addr, invoice.clone(), Some(600), Some(0)).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -70,7 +70,7 @@ async fn success() {
 
     let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     send_payment_with_ln_balance(
         node2_addr,
         node1_addr,
@@ -91,7 +91,7 @@ async fn success() {
     assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     let _ = send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -105,7 +105,7 @@ async fn success() {
     assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     let _ = send_payment(node2_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -247,7 +247,7 @@ async fn same_invoice_twice() {
 
     let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
 
     send_payment_raw(node1_addr, invoice.clone()).await;
 
