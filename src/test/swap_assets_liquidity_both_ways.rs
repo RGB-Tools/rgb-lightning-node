@@ -211,7 +211,7 @@ async fn swap_assets_liquidity_both_ways() {
 
     println!("\nsend most asset 1 to taker off-chain");
     let LNInvoiceResponse { invoice } =
-        ln_invoice(taker_addr, None, Some(&asset_id_1), Some(530), 900).await;
+        ln_invoice(taker_addr, None, Some(&asset_id_1), Some(530), 900, None).await;
     let _ = send_payment(maker_addr, invoice).await;
 
     wait_for_ln_balance(maker_addr, &asset_id_1, 65).await;

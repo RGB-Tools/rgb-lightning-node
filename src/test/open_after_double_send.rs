@@ -68,7 +68,7 @@ async fn open_after_double_send() {
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), Some(50), 900, None).await;
     let _ = send_payment(node2_addr, invoice).await;
 
     close_channel(node1_addr, &channel.channel_id, &node2_pubkey, false).await;

@@ -42,15 +42,16 @@ use crate::auth::conditional_auth_middleware;
 use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
-    address, asset_balance, asset_metadata, backup, btc_balance, change_password,
-    check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
-    decode_ln_invoice, decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers,
-    get_asset_media, get_channel_id, get_payment, get_swap, init, invoice_status, issue_asset_cfa,
-    issue_asset_nia, issue_asset_uda, keysend, list_assets, list_channels, list_payments,
-    list_peers, list_swaps, list_transactions, list_transfers, list_unspents, ln_invoice, lock,
-    maker_execute, maker_init, network_info, node_info, open_channel, post_asset_media,
-    refresh_transfers, restore, revoke_token, rgb_invoice, send_btc, send_onion_message,
-    send_payment, send_rgb, shutdown, sign_message, sync, taker, unlock,
+    address, asset_balance, asset_metadata, backup, btc_balance, cancel_hodl_invoice,
+    change_password, check_indexer_url, check_proxy_endpoint, close_channel, connect_peer,
+    create_utxos, decode_ln_invoice, decode_rgb_invoice, disconnect_peer, estimate_fee,
+    fail_transfers, get_asset_media, get_channel_id, get_payment, get_payment_preimage, get_swap,
+    init, invoice_status, issue_asset_cfa, issue_asset_nia, issue_asset_uda, keysend, list_assets,
+    list_channels, list_payments, list_peers, list_swaps, list_transactions, list_transfers,
+    list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info, node_info,
+    open_channel, post_asset_media, refresh_transfers, restore, revoke_token, rgb_invoice,
+    send_btc, send_onion_message, send_payment, send_rgb, settle_hodl_invoice, shutdown,
+    sign_message, sync, taker, unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -109,6 +110,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/assetmetadata", post(asset_metadata))
         .route("/backup", post(backup))
         .route("/btcbalance", post(btc_balance))
+        .route("/cancelhodlinvoice", post(cancel_hodl_invoice))
         .route("/changepassword", post(change_password))
         .route("/checkindexerurl", post(check_indexer_url))
         .route("/checkproxyendpoint", post(check_proxy_endpoint))
@@ -123,6 +125,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/getassetmedia", post(get_asset_media))
         .route("/getchannelid", post(get_channel_id))
         .route("/getpayment", post(get_payment))
+        .route("/getpaymentpreimage", post(get_payment_preimage))
         .route("/getswap", post(get_swap))
         .route("/init", post(init))
         .route("/invoicestatus", post(invoice_status))
@@ -153,6 +156,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/sendonionmessage", post(send_onion_message))
         .route("/sendpayment", post(send_payment))
         .route("/sendrgb", post(send_rgb))
+        .route("/settlehodlinvoice", post(settle_hodl_invoice))
         .route("/shutdown", post(shutdown))
         .route("/signmessage", post(sign_message))
         .route("/sync", post(sync))

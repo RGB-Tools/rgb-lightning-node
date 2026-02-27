@@ -1,4 +1,6 @@
 use amplify::s;
+use bitcoin::hashes::sha256::Hash as Sha256;
+use bitcoin::hashes::Hash;
 use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
 use futures::Future;
@@ -11,6 +13,7 @@ use lightning::routing::router::{
 use lightning::{
     onion_message::packet::OnionMessageContents,
     sign::KeysManager,
+    types::payment::{PaymentHash, PaymentPreimage},
     util::ser::{Writeable, Writer},
 };
 use lightning_persister::fs_store::FilesystemStore;
@@ -38,9 +41,9 @@ use crate::{
     disk::FilesystemLogger,
     error::{APIError, AppError},
     ldk::{
-        BumpTxEventHandler, ChainMonitor, ChannelManager, InboundPaymentInfoStorage,
-        LdkBackgroundServices, NetworkGraph, OnionMessenger, OutboundPaymentInfoStorage,
-        OutputSweeper, PeerManager, SwapMap,
+        BumpTxEventHandler, ChainMonitor, ChannelManager, ClaimablePaymentStorage,
+        InboundPaymentInfoStorage, InvoiceMetadataStorage, LdkBackgroundServices, NetworkGraph,
+        OnionMessenger, OutboundPaymentInfoStorage, OutputSweeper, PeerManager, SwapMap,
     },
 };
 
@@ -95,6 +98,8 @@ pub(crate) struct StaticState {
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
+    pub(crate) invoice_metadata: Arc<Mutex<InvoiceMetadataStorage>>,
+    pub(crate) claimable_htlcs: Arc<Mutex<ClaimablePaymentStorage>>,
     pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,
     pub(crate) chain_monitor: Arc<ChainMonitor>,
@@ -116,6 +121,14 @@ pub(crate) struct UnlockedAppState {
 impl UnlockedAppState {
     pub(crate) fn get_inbound_payments(&self) -> MutexGuard<'_, InboundPaymentInfoStorage> {
         self.inbound_payments.lock().unwrap()
+    }
+
+    pub(crate) fn get_invoice_metadata(&self) -> MutexGuard<'_, InvoiceMetadataStorage> {
+        self.invoice_metadata.lock().unwrap()
+    }
+
+    pub(crate) fn get_claimable_htlcs(&self) -> MutexGuard<'_, ClaimablePaymentStorage> {
+        self.claimable_htlcs.lock().unwrap()
     }
 
     pub(crate) fn get_outbound_payments(&self) -> MutexGuard<'_, OutboundPaymentInfoStorage> {
@@ -444,4 +457,42 @@ pub(crate) fn get_route(
     );
 
     route.ok()
+}
+
+pub(crate) fn validate_and_parse_payment_hash(
+    payment_hash_str: &str,
+) -> Result<PaymentHash, APIError> {
+    if payment_hash_str.is_empty() {
+        return Err(APIError::InvalidPaymentHash("missing payment_hash".into()));
+    }
+    let hash_vec = hex_str_to_vec(payment_hash_str)
+        .ok_or_else(|| APIError::InvalidPaymentHash(payment_hash_str.to_string()))?;
+    if hash_vec.len() != 32 {
+        return Err(APIError::InvalidPaymentHash(payment_hash_str.to_string()));
+    }
+    let hash_bytes: [u8; 32] = hash_vec
+        .try_into()
+        .map_err(|_| APIError::InvalidPaymentHash(payment_hash_str.to_string()))?;
+    Ok(PaymentHash(hash_bytes))
+}
+
+pub(crate) fn validate_and_parse_payment_preimage(
+    payment_preimage_str: &str,
+    payment_hash: &PaymentHash,
+) -> Result<PaymentPreimage, APIError> {
+    let preimage_vec =
+        hex_str_to_vec(payment_preimage_str).ok_or(APIError::InvalidPaymentPreimage)?;
+    if preimage_vec.len() != 32 {
+        return Err(APIError::InvalidPaymentPreimage);
+    }
+    let preimage = PaymentPreimage(
+        preimage_vec
+            .try_into()
+            .map_err(|_| APIError::InvalidPaymentPreimage)?,
+    );
+    let computed_hash = PaymentHash(Sha256::hash(&preimage.0).to_byte_array());
+    if computed_hash != *payment_hash {
+        return Err(APIError::InvalidPaymentPreimage);
+    }
+    Ok(preimage)
 }

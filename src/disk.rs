@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use crate::error::APIError;
 use crate::ldk::{
-    ChannelIdsMap, InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage,
-    OutputSpenderTxes, SwapMap,
+    ChannelIdsMap, ClaimablePaymentStorage, InboundPaymentInfoStorage, InvoiceMetadataStorage,
+    NetworkGraph, OutboundPaymentInfoStorage, OutputSpenderTxes, SwapMap,
 };
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
@@ -24,6 +24,8 @@ pub(crate) const LDK_LOGS_FILE: &str = "logs.txt";
 
 pub(crate) const INBOUND_PAYMENTS_FNAME: &str = "inbound_payments";
 pub(crate) const OUTBOUND_PAYMENTS_FNAME: &str = "outbound_payments";
+pub(crate) const INVOICE_METADATA_FNAME: &str = "invoice_metadata";
+pub(crate) const CLAIMABLE_HTLCS_FNAME: &str = "claimable_htlcs";
 
 pub(crate) const CHANNEL_PEER_DATA: &str = "channel_peer_data";
 
@@ -174,6 +176,28 @@ pub(crate) fn read_outbound_payment_info(path: &Path) -> OutboundPaymentInfoStor
         }
     }
     OutboundPaymentInfoStorage {
+        payments: new_hash_map(),
+    }
+}
+
+pub(crate) fn read_invoice_metadata(path: &Path) -> InvoiceMetadataStorage {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = InvoiceMetadataStorage::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    InvoiceMetadataStorage {
+        invoices: new_hash_map(),
+    }
+}
+
+pub(crate) fn read_claimable_htlcs(path: &Path) -> ClaimablePaymentStorage {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = ClaimablePaymentStorage::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    ClaimablePaymentStorage {
         payments: new_hash_map(),
     }
 }

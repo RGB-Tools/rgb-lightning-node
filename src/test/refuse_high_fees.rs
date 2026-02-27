@@ -76,7 +76,7 @@ async fn refuse_high_fees() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 100);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900, None).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await;
 
     let file = File::open(

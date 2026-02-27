@@ -43,7 +43,8 @@ async fn vanilla_payment_on_rgb_channel() {
     let chan_2_before = channels_2_before.first().unwrap();
 
     let amount = 5000000;
-    let LNInvoiceResponse { invoice } = ln_invoice(node2_addr, Some(amount), None, None, 900).await;
+    let LNInvoiceResponse { invoice } =
+        ln_invoice(node2_addr, Some(amount), None, None, 900, None).await;
     send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;

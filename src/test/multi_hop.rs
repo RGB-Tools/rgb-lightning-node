@@ -148,7 +148,7 @@ async fn multi_hop() {
     assert_eq!(node3_info.num_peers, 1);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900, None).await;
     let _ = send_payment(node1_addr, invoice).await;
 
     println!("check balances and channels after payment");
