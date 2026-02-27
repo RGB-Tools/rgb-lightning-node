@@ -73,6 +73,8 @@ async fn concurrent_btc_payments() {
     let payload_1 = SendPaymentRequest {
         invoice: invoice_1.clone(),
         amt_msat: None,
+        asset_id: None,
+        asset_amount: None,
     };
     let res_1 = reqwest::Client::new()
         .post(format!("http://{node3_addr}/sendpayment"))
@@ -86,6 +88,8 @@ async fn concurrent_btc_payments() {
     let payload_2 = SendPaymentRequest {
         invoice: invoice_2.clone(),
         amt_msat: None,
+        asset_id: None,
+        asset_amount: None,
     };
     let res_2 = reqwest::Client::new()
         .post(format!("http://{node4_addr}/sendpayment"))

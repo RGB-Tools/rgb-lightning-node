@@ -121,6 +121,8 @@ async fn zero_amount_invoice() {
     let payload = SendPaymentRequest {
         invoice: invoice.clone(),
         amt_msat: Some(payment_amount),
+        asset_id: None,
+        asset_amount: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/sendpayment"))
@@ -158,4 +160,177 @@ async fn zero_amount_invoice() {
         "Receiver payment should have the amount that was received, not zero"
     );
     assert_eq!(payment_receiver.status, HTLCStatus::Succeeded);
+
+    // Also cover RGB invoice payment where RGB amount is provided at send time.
+    let asset_id = issue_asset_nia(node1_addr).await.asset_id;
+    open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        Some(3_500_000),
+        Some(600),
+        Some(&asset_id),
+    )
+    .await;
+
+    let payload = LNInvoiceRequest {
+        amt_msat: Some(3_000_000),
+        expiry_sec: 900,
+        asset_id: Some(asset_id.clone()),
+        asset_amount: None,
+    };
+    let invoice_without_amount = reqwest::Client::new()
+        .post(format!("http://{node2_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap()
+        .invoice;
+
+    let decoded_without_amount = decode_ln_invoice(node1_addr, &invoice_without_amount).await;
+    assert_eq!(decoded_without_amount.asset_id, Some(asset_id.clone()));
+    assert_eq!(decoded_without_amount.asset_amount, None);
+
+    // If the RGB invoice already includes asset_id and asset_amount, sendpayment can omit both.
+    let payload = LNInvoiceRequest {
+        amt_msat: Some(3_000_000),
+        expiry_sec: 900,
+        asset_id: Some(asset_id.clone()),
+        asset_amount: Some(50),
+    };
+    let invoice_with_amount = reqwest::Client::new()
+        .post(format!("http://{node2_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap()
+        .invoice;
+
+    let decoded_with_amount = decode_ln_invoice(node1_addr, &invoice_with_amount).await;
+    assert_eq!(decoded_with_amount.asset_id, Some(asset_id.clone()));
+    assert_eq!(decoded_with_amount.asset_amount, Some(50));
+
+    let payload = SendPaymentRequest {
+        invoice: invoice_with_amount,
+        amt_msat: Some(3_000_000),
+        asset_id: None,
+        asset_amount: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<SendPaymentResponse>()
+        .await
+        .unwrap();
+    wait_for_ln_payment(
+        node2_addr,
+        &res.payment_hash.unwrap(),
+        HTLCStatus::Succeeded,
+    )
+    .await;
+    let payment = get_payment(node2_addr, &decoded_with_amount.payment_hash).await;
+    assert_eq!(payment.asset_id, Some(asset_id.clone()));
+    assert_eq!(payment.asset_amount, Some(50));
+
+    // Attempting to pay without both RGB fields should fail.
+    let payload = SendPaymentRequest {
+        invoice: invoice_without_amount.clone(),
+        amt_msat: Some(3_000_000),
+        asset_id: None,
+        asset_amount: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "both asset_id and asset_amount must be set",
+        "IncompleteRGBInfo",
+    )
+    .await;
+
+    // Providing an invalid RGB asset_id format should fail.
+    let payload = SendPaymentRequest {
+        invoice: invoice_without_amount.clone(),
+        amt_msat: Some(3_000_000),
+        asset_id: Some(s!("not-a-valid-contract-id")),
+        asset_amount: Some(100),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid asset ID",
+        "InvalidAssetID",
+    )
+    .await;
+
+    // Providing a different but valid RGB asset_id should fail with contract mismatch.
+    let other_asset_id = issue_asset_nia(node1_addr).await.asset_id;
+    let payload = SendPaymentRequest {
+        invoice: invoice_without_amount.clone(),
+        amt_msat: Some(3_000_000),
+        asset_id: Some(other_asset_id),
+        asset_amount: Some(100),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "contract ID doesn't match the requested one",
+        "InvalidInvoice",
+    )
+    .await;
+
+    // Providing the RGB fields in sendpayment should succeed.
+    let payload = SendPaymentRequest {
+        invoice: invoice_without_amount,
+        amt_msat: Some(3_000_000),
+        asset_id: Some(asset_id),
+        asset_amount: Some(100),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/sendpayment"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        reqwest::StatusCode::OK,
+        "paying RGB invoice by providing asset_amount in sendpayment should succeed"
+    );
+    let res = res.json::<SendPaymentResponse>().await.unwrap();
+    wait_for_ln_payment(
+        node2_addr,
+        &res.payment_hash.unwrap(),
+        HTLCStatus::Succeeded,
+    )
+    .await;
+    let payment = get_payment(node2_addr, &decoded_without_amount.payment_hash).await;
+    assert_eq!(payment.asset_amount, Some(100));
 }
