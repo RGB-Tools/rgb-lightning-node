@@ -1416,6 +1416,8 @@ async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaym
     let payload = SendPaymentRequest {
         invoice,
         amt_msat: None,
+        asset_id: None,
+        asset_amount: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/sendpayment"))

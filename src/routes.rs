@@ -985,6 +985,8 @@ pub(crate) struct SendOnionMessageRequest {
 pub(crate) struct SendPaymentRequest {
     pub(crate) invoice: String,
     pub(crate) amt_msat: Option<u64>,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) asset_amount: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3550,17 +3552,30 @@ pub(crate) async fn send_payment(
                 (Some(rgb_contract_id), Some(rgb_amount)) => {
                     if amt_msat < INVOICE_MIN_MSAT {
                         return Err(APIError::InvalidAmount(format!(
-                            "msat amount in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
+                            "amt_msat in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
                         )));
                     }
                     Some((rgb_contract_id, rgb_amount))
                 },
-                (None, None) => None,
-                (Some(_), None) => {
-                    return Err(APIError::InvalidInvoice(s!(
-                        "invoice has an RGB contract ID but not an RGB amount"
-                    )))
+                (Some(rgb_contract_id), None) => {
+                    if amt_msat < INVOICE_MIN_MSAT {
+                        return Err(APIError::InvalidAmount(format!(
+                            "amt_msat in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
+                        )));
+                    }
+                    if let Some(asset_id) = payload.asset_id.as_ref() {
+                        let payload_contract_id = ContractId::from_str(asset_id)
+                            .map_err(|_| APIError::InvalidAssetID(asset_id.clone()))?;
+                        if payload_contract_id != rgb_contract_id {
+                            return Err(APIError::InvalidInvoice(s!(
+                                "invoice RGB contract ID doesn't match the requested one"
+                            )));
+                        }
+                    }
+                    let rgb_amount = payload.asset_amount.ok_or(APIError::IncompleteRGBInfo)?;
+                    Some((rgb_contract_id, rgb_amount))
                 }
+                (None, None) => None,
                 (None, Some(_)) => {
                     return Err(APIError::InvalidInvoice(s!(
                         "invoice has an RGB amount but not an RGB contract ID"
