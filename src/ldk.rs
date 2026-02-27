@@ -127,6 +127,7 @@ pub(crate) struct PaymentInfo {
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: PublicKey,
+    pub(crate) expires_at: Option<u64>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -137,6 +138,7 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (8, created_at, required),
     (10, updated_at, required),
     (12, payee_pubkey, required),
+    (14, expires_at, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -283,6 +285,30 @@ impl UnlockedAppState {
         }
     }
 
+    pub(crate) fn list_updated_inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
+        let now = get_current_timestamp();
+        let mut inbound = self.get_inbound_payments();
+        let mut failed = false;
+        for (_, payment_info) in inbound
+            .payments
+            .iter_mut()
+            .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
+        {
+            if let Some(expires_at) = payment_info.expires_at {
+                if now > expires_at {
+                    payment_info.status = HTLCStatus::Failed;
+                    payment_info.updated_at = now;
+                    failed = true;
+                }
+            }
+        }
+        let payments = inbound.payments.clone();
+        if failed {
+            self.save_inbound_payments(inbound);
+        }
+        payments
+    }
+
     pub(crate) fn inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
         self.get_inbound_payments().payments.clone()
     }
@@ -334,6 +360,7 @@ impl UnlockedAppState {
                     created_at,
                     updated_at: created_at,
                     payee_pubkey,
+                    expires_at: None,
                 });
             }
         }
