@@ -210,6 +210,46 @@ async fn authentication() {
         .unwrap();
     check_unauthorized(res).await;
 
+    // revoked token remains rejected after node restart (DB persistence check)
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/shutdown"))
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res).await;
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if TcpListener::bind(node_address).await.is_ok() {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("node socket not becoming available")
+        }
+    }
+    let node_address = start_daemon(&test_dir_node1, NODE1_PEER_PORT, Some(root_public_key)).await;
+    let payload = unlock_req(password);
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/unlock"))
+        .json(&payload)
+        .bearer_auth(&admin_token)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+    let res = reqwest::Client::new()
+        .get(format!("http://{node_address}/nodeinfo"))
+        .bearer_auth(&user_token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), reqwest::StatusCode::UNAUTHORIZED);
+
     // with no token no API can be called
     let res = reqwest::Client::new()
         .get(format!("http://{node_address}/nodeinfo"))

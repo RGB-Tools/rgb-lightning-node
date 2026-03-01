@@ -1,0 +1,21 @@
+[package]
+name = "rln-migration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "rln_migration"
+path = "src/lib.rs"
+
+[dependencies]
+async-std = { version = "1.13", default-features = false, features = [
+    "attributes",
+    "tokio1",
+] }
+sea-orm-migration = { version = "1.1.19", default-features = false, features = [
+    "cli",
+    "runtime-async-std-rustls",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+] }
