@@ -3,6 +3,7 @@ use crate::routes::{BitcoinNetwork, TransactionType, TransferKind, TransferStatu
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/payment/";
+const SHORT_EXPIRY_SEC: u32 = 1;
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -212,7 +213,7 @@ async fn success() {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-async fn same_invoice_twice() {
+async fn same_invoice_twice_and_expired_inbound_payments() {
     initialize();
 
     let test_dir_base = format!("{TEST_DIR_BASE}same_invoice_twice/");
@@ -273,4 +274,87 @@ async fn same_invoice_twice() {
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
     wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
+    // create several invoices with a very short expiry that will NOT be paid
+    let LNInvoiceResponse { invoice: invoice1 } =
+        ln_invoice(node2_addr, Some(50000), None, None, SHORT_EXPIRY_SEC).await;
+    let LNInvoiceResponse { invoice: invoice2 } =
+        ln_invoice(node2_addr, Some(100000), None, None, SHORT_EXPIRY_SEC).await;
+    let LNInvoiceResponse { invoice: invoice3 } =
+        ln_invoice(node2_addr, None, None, None, SHORT_EXPIRY_SEC).await;
+
+    let decoded1 = decode_ln_invoice(node2_addr, &invoice1).await;
+    let decoded2 = decode_ln_invoice(node2_addr, &invoice2).await;
+    let decoded3 = decode_ln_invoice(node2_addr, &invoice3).await;
+
+    // verify all three start as Pending on the receiver node
+    let payments_before = list_payments(node2_addr).await;
+    let pending_before: Vec<_> = payments_before
+        .iter()
+        .filter(|p| {
+            p.inbound
+                && matches!(p.status, HTLCStatus::Pending)
+                && [
+                    decoded1.payment_hash.as_str(),
+                    decoded2.payment_hash.as_str(),
+                    decoded3.payment_hash.as_str(),
+                ]
+                .contains(&p.payment_hash.as_str())
+        })
+        .collect();
+    assert_eq!(
+        pending_before.len(),
+        3,
+        "expected all 3 unpaid invoices to be Pending"
+    );
+
+    // wait for the invoices to expire
+    tokio::time::sleep(std::time::Duration::from_secs(SHORT_EXPIRY_SEC as u64 + 1)).await;
+
+    // getting a payment should trigger expiration-based status transition
+    let payment = get_payment(node2_addr, &decoded1.payment_hash).await;
+    assert_eq!(
+        payment.status,
+        HTLCStatus::Failed,
+        "expected expired inbound payment {} to be Failed via getpayment, got {:?}",
+        decoded1.payment_hash,
+        payment.status
+    );
+
+    // listing payments should trigger expiration-based status transition
+    let payments_after = list_payments(node2_addr).await;
+
+    for hash in [
+        decoded2.payment_hash.as_str(),
+        decoded3.payment_hash.as_str(),
+    ] {
+        let payment = payments_after
+            .iter()
+            .find(|p| p.payment_hash == hash)
+            .unwrap_or_else(|| panic!("payment {hash} not found"));
+        assert_eq!(
+            payment.status,
+            HTLCStatus::Failed,
+            "expected expired inbound payment {hash} to be Failed, got {:?}",
+            payment.status
+        );
+    }
+
+    // sanity: no new Pending inbound payments should have appeared
+    let still_pending: Vec<_> = payments_after
+        .iter()
+        .filter(|p| {
+            p.inbound
+                && matches!(p.status, HTLCStatus::Pending)
+                && [
+                    decoded1.payment_hash.as_str(),
+                    decoded2.payment_hash.as_str(),
+                    decoded3.payment_hash.as_str(),
+                ]
+                .contains(&p.payment_hash.as_str())
+        })
+        .collect();
+    assert!(
+        still_pending.is_empty(),
+        "found expired inbound payments still Pending: {still_pending:?}"
+    );
 }
