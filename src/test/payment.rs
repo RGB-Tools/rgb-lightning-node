@@ -257,6 +257,8 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     let payload = SendPaymentRequest {
         invoice: invoice.clone(),
         amt_msat: None,
+        asset_id: None,
+        asset_amount: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/sendpayment"))

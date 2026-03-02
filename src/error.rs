@@ -89,7 +89,7 @@ pub enum APIError {
     #[error("Failed to send onion message: {0}")]
     FailedSendingOnionMessage(String),
 
-    #[error("For an RGB operation both asset_id and asset_amount must be set")]
+    #[error("For an RGB operation both the asset ID and amount are necessary")]
     IncompleteRGBInfo,
 
     #[error("Not enough assets")]
