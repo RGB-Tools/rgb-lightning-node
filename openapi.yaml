@@ -1918,6 +1918,9 @@ components:
         push_msat:
           type: integer
           example: 1394000
+        push_asset_amount:
+          type: integer
+          example: 100
         asset_amount:
           type: integer
           example: 333
