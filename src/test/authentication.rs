@@ -57,6 +57,7 @@ async fn authentication() {
     let password = "a_password";
     let payload = InitRequest {
         password: password.to_string(),
+        mnemonic: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/init"))

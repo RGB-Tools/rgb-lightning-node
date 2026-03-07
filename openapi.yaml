@@ -1550,6 +1550,10 @@ components:
         password:
           type: string
           example: nodepassword
+        mnemonic:
+          type: string
+          description: Optional BIP39 mnemonic to initialize an existing wallet
+          example: skill lamp please gown put season degree collect decline account monitor insane
     InitResponse:
       type: object
       properties:

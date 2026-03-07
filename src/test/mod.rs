@@ -176,6 +176,7 @@ async fn start_node(
     if !keep_node_dir {
         let payload = InitRequest {
             password: password.clone(),
+            mnemonic: None,
         };
         let res = reqwest::Client::new()
             .post(format!("http://{node_address}/init"))
@@ -1827,6 +1828,7 @@ mod concurrent_openchannel;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
+mod init;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
