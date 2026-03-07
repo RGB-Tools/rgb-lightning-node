@@ -43,6 +43,7 @@ use lightning::{
 use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use regex::Regex;
 use rgb_lib::{
+    bdk_wallet::keys::bip39::Mnemonic,
     generate_keys,
     utils::recipient_id_from_script_buf,
     wallet::{
@@ -600,6 +601,7 @@ impl From<RgbLibIndexerProtocol> for IndexerProtocol {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct InitRequest {
     pub(crate) password: String,
+    pub(crate) mnemonic: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1882,9 +1884,12 @@ pub(crate) async fn init(
         let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
         check_already_initialized(&mnemonic_path)?;
 
-        let keys = generate_keys(state.static_state.network);
-
-        let mnemonic = keys.mnemonic;
+        let mnemonic = match payload.mnemonic {
+            Some(mnemonic) => Mnemonic::from_str(&mnemonic)
+                .map_err(|e| APIError::InvalidMnemonic(e.to_string()))?
+                .to_string(),
+            None => generate_keys(state.static_state.network).mnemonic,
+        };
 
         encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &mnemonic_path)?;
 
