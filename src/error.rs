@@ -167,6 +167,9 @@ pub enum APIError {
     #[error("Invalid payment hash: {0}")]
     InvalidPaymentHash(String),
 
+    #[error("Invalid payment preimage")]
+    InvalidPaymentPreimage,
+
     #[error("Invalid payment secret")]
     InvalidPaymentSecret,
 
@@ -221,6 +224,24 @@ pub enum APIError {
     #[error("Invalid transport endpoints: {0}")]
     InvalidTransportEndpoints(String),
 
+    #[error("HTLC claim deadline exceeded")]
+    ClaimDeadlineExceeded,
+
+    #[error("Invoice is already claimed")]
+    InvoiceAlreadyClaimed,
+
+    #[error("Invoice is expired")]
+    InvoiceExpired,
+
+    #[error("No claimable HTLC found for this invoice")]
+    InvoiceNotClaimable,
+
+    #[error("Invoice is not marked as HODL")]
+    InvoiceNotHodl,
+
+    #[error("Invoice settlement is in progress")]
+    InvoiceSettlingInProgress,
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
 
@@ -265,6 +286,9 @@ pub enum APIError {
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
+
+    #[error("Payment hash already used")]
+    PaymentHashAlreadyUsed,
 
     #[error("Payment not found: {0}")]
     PaymentNotFound(String),
@@ -467,6 +491,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidOnionData(_)
             | APIError::InvalidPassword(_)
             | APIError::InvalidPaymentHash(_)
+            | APIError::PaymentHashAlreadyUsed
+            | APIError::InvalidPaymentPreimage
             | APIError::InvalidPaymentSecret
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
@@ -482,10 +508,12 @@ impl IntoResponse for APIError {
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoint(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::InvoiceExpired
             | APIError::MediaFileEmpty
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
+            | APIError::ClaimDeadlineExceeded
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string(), self.name())
             }
@@ -510,6 +538,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidIndexer(_)
             | APIError::InvalidProxyEndpoint
             | APIError::InvalidProxyProtocol(_)
+            | APIError::InvoiceNotHodl
+            | APIError::InvoiceSettlingInProgress
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)
             | APIError::MinFeeNotMet(_)
@@ -532,6 +562,10 @@ impl IntoResponse for APIError {
             | APIError::UnsupportedTransportType => {
                 (StatusCode::FORBIDDEN, self.to_string(), self.name())
             }
+            APIError::InvoiceAlreadyClaimed => {
+                (StatusCode::CONFLICT, self.to_string(), self.name())
+            }
+            APIError::InvoiceNotClaimable => (StatusCode::NOT_FOUND, self.to_string(), self.name()),
             APIError::Network(_) | APIError::NoValidTransportEndpoint => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),
