@@ -391,7 +391,9 @@ paths:
       tags:
         - Other
       summary: Init the node
-      description: Initialize a new node
+      description: Initialize a new node, optionally providing a mnemonic.
+        If no mnemonic is provided a new one is generated.
+        Note that a mnemonic alone is not sufficient to recover RGB state, which also requires client-side data.
       requestBody:
         content:
           application/json:
@@ -1550,6 +1552,9 @@ components:
         password:
           type: string
           example: nodepassword
+        mnemonic:
+          type: string
+          example: skill lamp please gown put season degree collect decline account monitor insane
     InitResponse:
       type: object
       properties:

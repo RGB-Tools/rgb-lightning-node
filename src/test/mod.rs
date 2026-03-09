@@ -140,7 +140,11 @@ async fn start_daemon(
     node_test_dir: &str,
     node_peer_port: u16,
     root_public_key: Option<biscuit_auth::PublicKey>,
+    keep_node_dir: bool,
 ) -> SocketAddr {
+    if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
+        std::fs::remove_dir_all(node_test_dir).unwrap();
+    }
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let node_address = listener.local_addr().unwrap();
     std::fs::create_dir_all(node_test_dir).unwrap();
@@ -160,34 +164,64 @@ async fn start_daemon(
     node_address
 }
 
+async fn init(node_address: SocketAddr, password: &str, mnemonic: Option<String>) -> InitResponse {
+    let res = init_res(node_address, password, mnemonic).await;
+    _check_response_is_ok(res)
+        .await
+        .json::<InitResponse>()
+        .await
+        .unwrap()
+}
+
+async fn init_res(node_address: SocketAddr, password: &str, mnemonic: Option<String>) -> Response {
+    let payload = InitRequest {
+        password: password.to_string(),
+        mnemonic,
+    };
+    reqwest::Client::new()
+        .post(format!("http://{node_address}/init"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn init_with_bearer(
+    node_address: SocketAddr,
+    password: &str,
+    mnemonic: Option<String>,
+    token: &str,
+) -> InitResponse {
+    let payload = InitRequest {
+        password: password.to_string(),
+        mnemonic,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/init"))
+        .json(&payload)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<InitResponse>()
+        .await
+        .unwrap()
+}
+
 async fn start_node(
     node_test_dir: &str,
     node_peer_port: u16,
     keep_node_dir: bool,
 ) -> (SocketAddr, String) {
     println!("starting node with peer port {node_peer_port}");
-    if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
-        std::fs::remove_dir_all(node_test_dir).unwrap();
-    }
-    let node_address = start_daemon(node_test_dir, node_peer_port, None).await;
+    let node_address = start_daemon(node_test_dir, node_peer_port, None, keep_node_dir).await;
 
     let password = format!("{node_test_dir}.{node_peer_port}");
 
     if !keep_node_dir {
-        let payload = InitRequest {
-            password: password.clone(),
-        };
-        let res = reqwest::Client::new()
-            .post(format!("http://{node_address}/init"))
-            .json(&payload)
-            .send()
-            .await
-            .unwrap();
-        _check_response_is_ok(res)
-            .await
-            .json::<InitResponse>()
-            .await
-            .unwrap();
+        init(node_address, &password, None).await;
     }
 
     unlock(node_address, &password).await;
@@ -1827,6 +1861,7 @@ mod concurrent_openchannel;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
+mod init;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
