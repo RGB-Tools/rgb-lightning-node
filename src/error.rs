@@ -149,6 +149,9 @@ pub enum APIError {
     #[error("Invalid media digest")]
     InvalidMediaDigest,
 
+    #[error("Invalid mnemonic: {0}")]
+    InvalidMnemonic(String),
+
     #[error("Invalid name: {0}")]
     InvalidName(String),
 
@@ -438,6 +441,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidMediaDigest
+            | APIError::InvalidMnemonic(_)
             | APIError::InvalidName(_)
             | APIError::InvalidNodeIds(_)
             | APIError::InvalidOnionData(_)

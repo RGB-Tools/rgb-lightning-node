@@ -49,27 +49,18 @@ async fn authentication() {
     let root_keypair = KeyPair::new();
     let root_public_key = root_keypair.public();
 
-    let _ = std::fs::remove_dir_all(&test_dir_node1);
-    let node_address = start_daemon(&test_dir_node1, NODE1_PEER_PORT, Some(root_public_key)).await;
+    let node_address = start_daemon(
+        &test_dir_node1,
+        NODE1_PEER_PORT,
+        Some(root_public_key),
+        false,
+    )
+    .await;
 
     // admin can do everything
     let admin_token = create_token(&root_keypair, Some("admin"), vec![], None);
     let password = "a_password";
-    let payload = InitRequest {
-        password: password.to_string(),
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node_address}/init"))
-        .json(&payload)
-        .bearer_auth(&admin_token)
-        .send()
-        .await
-        .unwrap();
-    _check_response_is_ok(res)
-        .await
-        .json::<InitResponse>()
-        .await
-        .unwrap();
+    init_with_bearer(node_address, password, None, &admin_token).await;
     let payload = unlock_req(password);
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/unlock"))
