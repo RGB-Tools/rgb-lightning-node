@@ -45,7 +45,7 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::{ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
-use lightning::{chain, impl_writeable_tlv_based};
+use lightning::{chain, impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
 use lightning_block_sync::gossip::TokioSpawner;
 use lightning_block_sync::init;
@@ -111,6 +111,17 @@ pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InvoiceMode {
+    AutoClaim,
+    Hodl,
+}
+
+impl_writeable_tlv_based_enum!(InvoiceMode,
+    (0, AutoClaim) => {},
+    (1, Hodl) => {},
+);
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,
@@ -120,25 +131,31 @@ pub(crate) struct LdkBackgroundServices {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PaymentInfo {
+    pub(crate) amt_msat: Option<u64>,
+    pub(crate) claim_deadline_height: Option<u32>,
+    pub(crate) claiming_since: Option<u64>,
+    pub(crate) created_at: u64,
+    pub(crate) expires_at: Option<u64>,
+    pub(crate) mode: Option<InvoiceMode>,
+    pub(crate) payee_pubkey: PublicKey,
     pub(crate) preimage: Option<PaymentPreimage>,
     pub(crate) secret: Option<PaymentSecret>,
     pub(crate) status: HTLCStatus,
-    pub(crate) amt_msat: Option<u64>,
-    pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
-    pub(crate) payee_pubkey: PublicKey,
-    pub(crate) expires_at: Option<u64>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
-    (0, preimage, required),
-    (2, secret, required),
-    (4, status, required),
-    (6, amt_msat, required),
-    (8, created_at, required),
-    (10, updated_at, required),
+    (0, amt_msat, required),
+    (2, claim_deadline_height, option),
+    (4, claiming_since, option),
+    (6, created_at, required),
+    (8, expires_at, option),
+    (10, mode, option),
     (12, payee_pubkey, required),
-    (14, expires_at, option),
+    (14, preimage, required),
+    (16, secret, required),
+    (18, status, required),
+    (20, updated_at, required),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -180,6 +197,75 @@ impl UnlockedAppState {
         self.save_maker_swaps(maker_swaps);
     }
 
+    fn claimable_should_expire(payment: &PaymentInfo, now_ts: u64, current_height: u32) -> bool {
+        if !matches!(payment.status, HTLCStatus::Claimable) {
+            return false;
+        }
+        if let Some(since) = payment.claiming_since {
+            const ONE_DAY_SECS: u64 = 24 * 60 * 60;
+            if now_ts <= since.saturating_add(ONE_DAY_SECS) {
+                return false;
+            }
+        }
+        let deadline_passed = payment
+            .claim_deadline_height
+            .map(|h| current_height >= h)
+            .unwrap_or(false);
+        let invoice_expired = payment.expires_at.map(|e| now_ts >= e).unwrap_or(false);
+        deadline_passed || invoice_expired
+    }
+
+    pub(crate) fn expire_claimables(&self) {
+        let now = get_current_timestamp();
+        let height = self.channel_manager.current_best_block().height;
+        let candidates: Vec<PaymentHash> = {
+            let inbound = self.get_inbound_payments();
+            inbound
+                .payments
+                .iter()
+                .filter_map(|(hash, payment)| {
+                    if Self::claimable_should_expire(payment, now, height) {
+                        Some(*hash)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        for payment_hash in candidates {
+            let Some(claimable) = self
+                .get_inbound_payments()
+                .payments
+                .get(&payment_hash)
+                .filter(|p| matches!(p.status, HTLCStatus::Claimable))
+                .cloned()
+            else {
+                continue;
+            };
+            if !Self::claimable_should_expire(&claimable, now, height) {
+                continue;
+            }
+            tracing::info!(
+                "Expiring claimable payment {:?} (deadline: {:?}, expiry: {:?})",
+                payment_hash,
+                claimable.claim_deadline_height,
+                claimable.expires_at
+            );
+
+            self.channel_manager.fail_htlc_backwards(&payment_hash);
+
+            self.upsert_inbound_payment(
+                payment_hash,
+                HTLCStatus::Failed,
+                None,
+                None,
+                claimable.amt_msat,
+                self.channel_manager.get_our_node_id(),
+            );
+        }
+    }
+
     pub(crate) fn update_maker_swap_status(&self, payment_hash: &PaymentHash, status: SwapStatus) {
         let mut maker_swaps = self.get_maker_swaps();
         let maker_swap = maker_swaps.swaps.get_mut(payment_hash).unwrap();
@@ -202,6 +288,46 @@ impl UnlockedAppState {
         let mut taker_swaps = self.get_taker_swaps();
         taker_swaps.swaps.insert(payment_hash, swap);
         self.save_taker_swaps(taker_swaps);
+    }
+
+    pub(crate) fn upsert_claimable_payment(
+        &self,
+        payment_hash: PaymentHash,
+        secret: Option<PaymentSecret>,
+        amt_msat: u64,
+        claim_deadline_height: Option<u32>,
+        payee_pubkey: PublicKey,
+    ) {
+        let now_ts = get_current_timestamp();
+        let mut inbound = self.get_inbound_payments();
+        match inbound.payments.entry(payment_hash) {
+            Entry::Occupied(mut e) => {
+                let payment = e.get_mut();
+                payment.status = HTLCStatus::Claimable;
+                payment.preimage = None;
+                payment.secret = secret;
+                payment.amt_msat = Some(amt_msat);
+                payment.claim_deadline_height = claim_deadline_height;
+                payment.claiming_since = None;
+                payment.updated_at = now_ts;
+            }
+            Entry::Vacant(e) => {
+                e.insert(PaymentInfo {
+                    amt_msat: Some(amt_msat),
+                    claim_deadline_height,
+                    claiming_since: None,
+                    created_at: now_ts,
+                    expires_at: None,
+                    mode: Some(InvoiceMode::Hodl),
+                    payee_pubkey,
+                    preimage: None,
+                    secret,
+                    status: HTLCStatus::Claimable,
+                    updated_at: now_ts,
+                });
+            }
+        }
+        self.save_inbound_payments(inbound);
     }
 
     pub(crate) fn update_taker_swap_status(&self, payment_hash: &PaymentHash, status: SwapStatus) {
@@ -317,7 +443,7 @@ impl UnlockedAppState {
         self.get_outbound_payments().payments.clone()
     }
 
-    fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
+    pub(crate) fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
         self.fs_store
             .write("", "", INBOUND_PAYMENTS_FNAME, inbound.encode())
             .unwrap();
@@ -329,7 +455,7 @@ impl UnlockedAppState {
             .unwrap();
     }
 
-    fn upsert_inbound_payment(
+    pub fn upsert_inbound_payment(
         &self,
         payment_hash: PaymentHash,
         status: HTLCStatus,
@@ -348,19 +474,26 @@ impl UnlockedAppState {
                 if amt_msat.is_some() {
                     payment_info.amt_msat = amt_msat;
                 }
+                if !matches!(status, HTLCStatus::Claimable) {
+                    payment_info.claim_deadline_height = None;
+                    payment_info.claiming_since = None;
+                }
                 payment_info.updated_at = get_current_timestamp();
             }
             Entry::Vacant(e) => {
                 let created_at = get_current_timestamp();
                 e.insert(PaymentInfo {
+                    amt_msat,
+                    claim_deadline_height: None,
+                    claiming_since: None,
+                    created_at,
+                    expires_at: None,
+                    mode: None,
+                    payee_pubkey,
                     preimage,
                     secret,
                     status,
-                    amt_msat,
-                    created_at,
                     updated_at: created_at,
-                    payee_pubkey,
-                    expires_at: None,
                 });
             }
         }
@@ -701,7 +834,7 @@ async fn handle_ldk_events(
             purpose,
             amount_msat,
             receiver_node_id: _,
-            claim_deadline: _,
+            claim_deadline,
             onion_fields: _,
             counterparty_skimmed_fee_msat: _,
             receiving_channel_ids: _,
@@ -712,21 +845,123 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
-            let payment_preimage = match purpose {
+
+            let (payment_preimage, payment_secret) = match purpose {
                 PaymentPurpose::Bolt11InvoicePayment {
-                    payment_preimage, ..
-                } => payment_preimage,
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => (payment_preimage, Some(payment_secret)),
                 PaymentPurpose::Bolt12OfferPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => (payment_preimage, Some(payment_secret)),
                 PaymentPurpose::Bolt12RefundPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => (payment_preimage, Some(payment_secret)),
+                PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            let stored_invoice = unlocked_state
+                .inbound_payments()
+                .get(&payment_hash)
+                .cloned();
+            let Some(invoice_payment) = stored_invoice else {
+                let Some(preimage) = payment_preimage else {
+                    tracing::error!(
+                        "Missing payment preimage for payment {:?}, cannot claim",
+                        payment_hash
+                    );
+                    unlocked_state
+                        .channel_manager
+                        .fail_htlc_backwards(&payment_hash);
+                    return Ok(());
+                };
+                tracing::info!("Auto-claiming payment without metadata {:?}", payment_hash);
+                unlocked_state.channel_manager.claim_funds(preimage);
+                return Ok(());
+            };
+
+            let now_ts = get_current_timestamp();
+            if let Some(expiry) = invoice_payment.expires_at {
+                if now_ts >= expiry {
+                    tracing::warn!(
+                        "Received HTLC for expired invoice {payment_hash:?} (expiry {expiry})"
+                    );
+                    unlocked_state
+                        .channel_manager
+                        .fail_htlc_backwards(&payment_hash);
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                        payment_preimage,
+                        payment_secret,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                    );
+                    return Ok(());
+                }
+            }
+
+            if let Some(expected) = invoice_payment.amt_msat {
+                if amount_msat < expected {
+                    tracing::warn!(
+                        "Received {} msat for invoice {} but expected at least {} msat",
+                        amount_msat,
+                        payment_hash,
+                        expected
+                    );
+                    unlocked_state
+                        .channel_manager
+                        .fail_htlc_backwards(&payment_hash);
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                        payment_preimage,
+                        payment_secret,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                    );
+                    return Ok(());
+                }
+            }
+
+            match invoice_payment.mode.unwrap_or(InvoiceMode::AutoClaim) {
+                InvoiceMode::AutoClaim => {
+                    let preimage = if let Some(preimage) = payment_preimage {
+                        preimage
+                    } else if let Some(stored_preimage) = invoice_payment.preimage {
+                        tracing::info!(
+                            "Using stored preimage from inbound_payment for invoice {:?}",
+                            payment_hash
+                        );
+                        stored_preimage
+                    } else {
+                        tracing::error!(
+                            "Missing payment preimage for standard invoice {:?}, cannot claim",
+                            payment_hash
+                        );
+                        unlocked_state
+                            .channel_manager
+                            .fail_htlc_backwards(&payment_hash);
+                        return Ok(());
+                    };
+
+                    unlocked_state.channel_manager.claim_funds(preimage);
+                }
+                InvoiceMode::Hodl => {
+                    unlocked_state.upsert_claimable_payment(
+                        payment_hash,
+                        payment_secret,
+                        amount_msat,
+                        claim_deadline,
+                        unlocked_state.channel_manager.get_our_node_id(),
+                    );
+                }
+            }
         }
         Event::PaymentClaimed {
             payment_hash,

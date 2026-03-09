@@ -55,11 +55,11 @@ async fn htlc_amount_checks_3nodes() {
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 910);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), Some(45), 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), Some(45), 900, None).await;
     let _ = send_payment(node2_addr, invoice).await;
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node3_addr, None, Some(&asset_id), Some(30), 900).await;
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(30), 900, None).await;
     let _ = send_payment(node2_addr, invoice).await;
 
     let channels_1 = list_channels(node1_addr).await;
@@ -70,7 +70,7 @@ async fn htlc_amount_checks_3nodes() {
     assert_eq!(channels_3.len(), 1);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node3_addr, None, Some(&asset_id), Some(25), 900).await;
+        ln_invoice(node3_addr, None, Some(&asset_id), Some(25), 900, None).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await; // RetriesExhausted
 
     println!("\nafter sending multi-hop payment");
@@ -124,7 +124,7 @@ async fn htlc_amount_checks_2nodes() {
 
     // check payment fails (due to RouteNotFound)
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), Some(500), 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), Some(500), 900, None).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await;
 
     // check channel is still open after payment failed
