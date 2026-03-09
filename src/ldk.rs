@@ -45,7 +45,7 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::{ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
-use lightning::{chain, impl_writeable_tlv_based};
+use lightning::{chain, impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
 use lightning_block_sync::gossip::TokioSpawner;
 use lightning_block_sync::init;
@@ -111,6 +111,17 @@ pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InvoiceType {
+    AutoClaim,
+    Hodl,
+}
+
+impl_writeable_tlv_based_enum!(InvoiceType,
+    (0, AutoClaim) => {},
+    (1, Hodl) => {},
+);
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,
@@ -128,6 +139,8 @@ pub(crate) struct PaymentInfo {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: PublicKey,
     pub(crate) expires_at: Option<u64>,
+    pub(crate) claim_deadline_height: Option<u32>,
+    pub(crate) invoice_type: Option<InvoiceType>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -139,6 +152,8 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (10, updated_at, required),
     (12, payee_pubkey, required),
     (14, expires_at, option),
+    (16, claim_deadline_height, option),
+    (18, invoice_type, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -266,6 +281,24 @@ impl UnlockedAppState {
         Ok(())
     }
 
+    pub(crate) fn fail_htlc_backwards_and_update_inbound_payment(
+        &self,
+        payment_hash: PaymentHash,
+        status: HTLCStatus,
+    ) {
+        self.channel_manager.fail_htlc_backwards(&payment_hash);
+        self.upsert_inbound_payment(
+            payment_hash,
+            status,
+            None,
+            None,
+            None,
+            self.channel_manager.get_our_node_id(),
+            None,
+            None,
+        );
+    }
+
     fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {
         let mut outbound = self.get_outbound_payments();
         let mut failed = false;
@@ -287,26 +320,68 @@ impl UnlockedAppState {
 
     pub(crate) fn list_updated_inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
         let now = get_current_timestamp();
+        let height = self.channel_manager.current_best_block().height;
         let mut inbound = self.get_inbound_payments();
         let mut failed = false;
-        for (_, payment_info) in inbound
-            .payments
-            .iter_mut()
-            .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
-        {
-            if let Some(expires_at) = payment_info.expires_at {
-                if now > expires_at {
-                    payment_info.status = HTLCStatus::Failed;
-                    payment_info.updated_at = now;
-                    failed = true;
+        let mut claimables_to_fail = vec![];
+        for (payment_hash, payment_info) in inbound.payments.iter_mut() {
+            match payment_info.status {
+                HTLCStatus::Pending => {
+                    if let Some(expires_at) = payment_info.expires_at {
+                        if now > expires_at {
+                            payment_info.status = HTLCStatus::Failed;
+                            payment_info.updated_at = now;
+                            failed = true;
+                        }
+                    }
                 }
+                HTLCStatus::Claimable => {
+                    let deadline_passed = payment_info
+                        .claim_deadline_height
+                        .map(|h| height >= h)
+                        .unwrap_or(false);
+                    let invoice_expired = payment_info
+                        .expires_at
+                        .map(|expires_at| now >= expires_at)
+                        .unwrap_or(false);
+
+                    if deadline_passed || invoice_expired {
+                        claimables_to_fail.push((
+                            *payment_hash,
+                            payment_info.claim_deadline_height,
+                            payment_info.expires_at,
+                        ));
+                    }
+                }
+                _ => {}
             }
         }
-        let payments = inbound.payments.clone();
+
+        if claimables_to_fail.is_empty() {
+            let payments = inbound.payments.clone();
+            if failed {
+                self.save_inbound_payments(inbound);
+            }
+            return payments;
+        }
+
         if failed {
             self.save_inbound_payments(inbound);
+        } else {
+            drop(inbound);
         }
-        payments
+
+        for (payment_hash, claim_deadline_height, expires_at) in claimables_to_fail {
+            tracing::info!(
+                "Expiring claimable payment {:?} (deadline: {:?}, expiry: {:?})",
+                payment_hash,
+                claim_deadline_height,
+                expires_at
+            );
+            self.fail_htlc_backwards_and_update_inbound_payment(payment_hash, HTLCStatus::Failed);
+        }
+
+        self.inbound_payments()
     }
 
     pub(crate) fn inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
@@ -317,7 +392,7 @@ impl UnlockedAppState {
         self.get_outbound_payments().payments.clone()
     }
 
-    fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
+    pub(crate) fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
         self.fs_store
             .write("", "", INBOUND_PAYMENTS_FNAME, inbound.encode())
             .unwrap();
@@ -329,7 +404,8 @@ impl UnlockedAppState {
             .unwrap();
     }
 
-    fn upsert_inbound_payment(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upsert_inbound_payment(
         &self,
         payment_hash: PaymentHash,
         status: HTLCStatus,
@@ -337,6 +413,8 @@ impl UnlockedAppState {
         secret: Option<PaymentSecret>,
         amt_msat: Option<u64>,
         payee_pubkey: PublicKey,
+        claim_deadline_height: Option<u32>,
+        invoice_type: Option<InvoiceType>,
     ) {
         let mut inbound = self.get_inbound_payments();
         match inbound.payments.entry(payment_hash) {
@@ -349,6 +427,9 @@ impl UnlockedAppState {
                     payment_info.amt_msat = amt_msat;
                 }
                 payment_info.updated_at = get_current_timestamp();
+                if claim_deadline_height.is_some() {
+                    payment_info.claim_deadline_height = claim_deadline_height;
+                }
             }
             Entry::Vacant(e) => {
                 let created_at = get_current_timestamp();
@@ -361,6 +442,8 @@ impl UnlockedAppState {
                     updated_at: created_at,
                     payee_pubkey,
                     expires_at: None,
+                    claim_deadline_height,
+                    invoice_type,
                 });
             }
         }
@@ -720,7 +803,7 @@ async fn handle_ldk_events(
             purpose,
             amount_msat,
             receiver_node_id: _,
-            claim_deadline: _,
+            claim_deadline,
             onion_fields: _,
             counterparty_skimmed_fee_msat: _,
             receiving_channel_ids: _,
@@ -731,21 +814,93 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
-            let payment_preimage = match purpose {
+
+            let (payment_preimage, payment_secret, invoice) = match purpose {
+                PaymentPurpose::SpontaneousPayment(preimage) => {
+                    unlocked_state.channel_manager.claim_funds(preimage);
+                    return Ok(());
+                }
                 PaymentPurpose::Bolt11InvoicePayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12OfferPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12RefundPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12OfferPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12RefundPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => {
+                    let Some(invoice) = unlocked_state
+                        .get_inbound_payments()
+                        .payments
+                        .get(&payment_hash)
+                        .cloned()
+                    else {
+                        tracing::error!(
+                            "Missing inbound payment state for claimable payment {:?}",
+                            payment_hash
+                        );
+                        return Err(ReplayEvent());
+                    };
+
+                    (payment_preimage, Some(payment_secret), invoice)
+                }
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            let now_ts = get_current_timestamp();
+            if let Some(expiry) = invoice.expires_at {
+                if now_ts >= expiry {
+                    tracing::warn!(
+                        "Received HTLC for expired invoice {payment_hash:?} (expiry {expiry})"
+                    );
+                    unlocked_state.fail_htlc_backwards_and_update_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                    );
+                    return Ok(());
+                }
+            }
+
+            if let Some(expected) = invoice.amt_msat {
+                if amount_msat < expected {
+                    tracing::warn!(
+                        "Received {} msat for invoice {} but expected at least {} msat",
+                        amount_msat,
+                        payment_hash,
+                        expected
+                    );
+                    unlocked_state.fail_htlc_backwards_and_update_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                    );
+                    return Ok(());
+                }
+            }
+
+            match invoice.invoice_type.unwrap_or(InvoiceType::AutoClaim) {
+                InvoiceType::AutoClaim => {
+                    unlocked_state
+                        .channel_manager
+                        .claim_funds(payment_preimage.unwrap());
+                }
+                InvoiceType::Hodl => {
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Claimable,
+                        payment_preimage,
+                        payment_secret,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                        claim_deadline,
+                        None,
+                    );
+                }
+            }
         }
         Event::PaymentClaimed {
             payment_hash,
@@ -812,6 +967,8 @@ async fn handle_ldk_events(
                     payment_secret,
                     Some(amount_msat),
                     receiver_node_id.unwrap(),
+                    None,
+                    None,
                 );
             }
         }

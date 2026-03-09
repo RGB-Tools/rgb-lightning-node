@@ -78,6 +78,7 @@ _start_services() {
     $COMPOSE up -d bitcoind
     echo && echo "preparing bitcoind wallet"
     _wait_for_bitcoind
+    $COMPOSE up -d electrs proxy
     $BITCOIN_CLI createwallet miner >/dev/null
     $BITCOIN_CLI -rpcwallet=miner -generate $INITIAL_BLOCKS >/dev/null
     $COMPOSE up -d
