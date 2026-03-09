@@ -48,7 +48,7 @@ async fn success() {
 
     let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     send_payment_with_ln_balance(node1_addr, node2_addr, invoice.clone(), Some(600), Some(0)).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -71,7 +71,7 @@ async fn success() {
 
     let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     send_payment_with_ln_balance(
         node2_addr,
         node1_addr,
@@ -92,7 +92,7 @@ async fn success() {
     assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     let _ = send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -106,7 +106,7 @@ async fn success() {
     assert_eq!(payment.status, HTLCStatus::Succeeded);
 
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900, None).await;
     let _ = send_payment(node2_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
@@ -248,7 +248,7 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
 
     let asset_amount = Some(100);
     let LNInvoiceResponse { invoice } =
-        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
+        ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900, None).await;
 
     send_payment_raw(node1_addr, invoice.clone()).await;
 
@@ -278,11 +278,11 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
     // create several invoices with a very short expiry that will NOT be paid
     let LNInvoiceResponse { invoice: invoice1 } =
-        ln_invoice(node2_addr, Some(50000), None, None, SHORT_EXPIRY_SEC).await;
+        ln_invoice(node2_addr, Some(50000), None, None, SHORT_EXPIRY_SEC, None).await;
     let LNInvoiceResponse { invoice: invoice2 } =
-        ln_invoice(node2_addr, Some(100000), None, None, SHORT_EXPIRY_SEC).await;
+        ln_invoice(node2_addr, Some(100000), None, None, SHORT_EXPIRY_SEC, None).await;
     let LNInvoiceResponse { invoice: invoice3 } =
-        ln_invoice(node2_addr, None, None, None, SHORT_EXPIRY_SEC).await;
+        ln_invoice(node2_addr, None, None, None, SHORT_EXPIRY_SEC, None).await;
 
     let decoded1 = decode_ln_invoice(node2_addr, &invoice1).await;
     let decoded2 = decode_ln_invoice(node2_addr, &invoice2).await;
