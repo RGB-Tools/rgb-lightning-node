@@ -1,0 +1,13 @@
+{
+  "name": "rgb-lightning-node-docs",
+  "version": "0.1.0",
+  "description": "API documentation for RGB Lightning Node",
+  "scripts": {
+    "build": "mkdir -p docs && cp -r node_modules/swagger-ui-dist/* docs/ && cp openapi.yaml docs/ && sed -i 's|https://petstore.swagger.io/v2/swagger.json|./openapi.yaml|g' docs/swagger-initializer.js"
+  },
+  "dependencies": {
+    "swagger-ui-dist": "^5.31.0"
+  },
+  "devDependencies": {},
+  "private": true
+}
