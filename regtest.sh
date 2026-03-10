@@ -36,12 +36,12 @@ _is_port_bound() {
 }
 
 _wait_for_bitcoind() {
-    # wait for bitcoind to be up
+    # wait until bitcoind RPC is actually ready
     start_time=$(date +%s)
-    until $COMPOSE logs bitcoind |grep -q 'Bound to'; do
+    until $BITCOIN_CLI getblockchaininfo >/dev/null 2>&1; do
         current_time=$(date +%s)
         if [ $((current_time - start_time)) -gt $TIMEOUT ]; then
-            echo "Timeout waiting for bitcoind to start"
+            echo "Timeout waiting for bitcoind RPC to become ready"
             $COMPOSE logs bitcoind
             exit 1
         fi
@@ -74,11 +74,13 @@ _start_services() {
             _die "port $port is already bound, services can't be started"
         fi
     done
-    $COMPOSE up -d
+    # start bitcoind first to avoid depending services failing due to RPC unavailability
+    $COMPOSE up -d bitcoind
     echo && echo "preparing bitcoind wallet"
     _wait_for_bitcoind
     $BITCOIN_CLI createwallet miner >/dev/null
     $BITCOIN_CLI -rpcwallet=miner -generate $INITIAL_BLOCKS >/dev/null
+    $COMPOSE up -d
     echo "waiting for electrs to have completed startup"
     _wait_for_electrs
 }
