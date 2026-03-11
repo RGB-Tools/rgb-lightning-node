@@ -37,6 +37,7 @@ async fn getchannelid_success() {
         Some(&asset_id),
         None,
         None,
+        None,
         Some(&temporary_channel_id),
         true,
     )

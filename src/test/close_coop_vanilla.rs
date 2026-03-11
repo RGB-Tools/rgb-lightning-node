@@ -138,6 +138,7 @@ async fn without_anchors() {
         None,
         None,
         None,
+        None,
         false,
     )
     .await;

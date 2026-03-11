@@ -590,7 +590,7 @@ async fn handle_ldk_events(
                     &PathBuf::from(&static_state.ldk_data_dir),
                 );
 
-                let channel_rgb_amount: u64 = rgb_info.local_rgb_amount;
+                let channel_rgb_amount = rgb_info.local_rgb_amount + rgb_info.remote_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
                 let assignment = match rgb_info.schema {
                     AssetSchema::Nia | AssetSchema::Cfa => Assignment::Fungible(channel_rgb_amount),

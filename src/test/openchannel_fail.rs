@@ -29,6 +29,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -63,6 +64,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(s!("rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U")),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -90,6 +92,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(0),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -122,6 +125,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(s!("bad asset ID")),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -147,6 +151,67 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
+    // open with push_asset_amount but without RGB info
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
+        capacity_sat: 100_000,
+        push_msat: 0,
+        asset_amount: None,
+        asset_id: None,
+        push_asset_amount: Some(100),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/openchannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid amount: push_asset_amount can only be used with RGB channels (asset_id must be specified)",
+        "InvalidAmount",
+    )
+    .await;
+
+    // open with push_asset_amount higher than asset_amount
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
+        capacity_sat: 100_000,
+        push_msat: 0,
+        asset_amount: Some(500),
+        asset_id: Some(asset_id.clone()),
+        push_asset_amount: Some(600),
+        public: true,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/openchannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid amount: push_asset_amount cannot be higher than asset_amount",
+        "InvalidAmount",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
     // open with invalid BTC amount (too low)
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
@@ -154,6 +219,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: None,
         asset_id: None,
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -186,6 +252,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -220,6 +287,7 @@ async fn open_fail() {
         push_msat: 100_000_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -252,6 +320,7 @@ async fn open_fail() {
         push_msat: 100_000_001,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -284,6 +353,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: false,
         fee_base_msat: None,
@@ -318,6 +388,7 @@ async fn open_fail() {
         push_msat: 0,
         asset_amount: None,
         asset_id: None,
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -350,6 +421,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(2000),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -382,6 +454,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -414,6 +487,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id.clone()),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -434,6 +508,7 @@ async fn open_fail() {
         push_msat: 3_500_000,
         asset_amount: Some(100),
         asset_id: Some(asset_id),
+        push_asset_amount: None,
         public: true,
         with_anchors: true,
         fee_base_msat: None,
@@ -454,8 +529,20 @@ async fn open_fail() {
     )
     .await;
 
-    let channels_1 = list_channels(node1_addr).await;
-    let channels_2 = list_channels(node2_addr).await;
-    assert_eq!(channels_1.len(), 1);
-    assert_eq!(channels_2.len(), 1);
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let channels_1 = list_channels(node1_addr).await;
+        let channels_2 = list_channels(node2_addr).await;
+        if channels_1.len() == 1 && channels_2.len() == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!(
+                "expected one pending channel on both nodes, got {} and {}",
+                channels_1.len(),
+                channels_2.len()
+            );
+        }
+    }
 }
