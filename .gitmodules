@@ -1,5 +1,5 @@
 [submodule "rust-lightning"]
 	path = rust-lightning
-	url = https://github.com/RGB-Tools/rust-lightning.git
-	branch = rgb
+	url = git@github.com:bitwalt/rust-lightning.git
+	branch = feat/push-asset-amount-rln
 	shallow = true

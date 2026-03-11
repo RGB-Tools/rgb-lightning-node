@@ -67,6 +67,7 @@ async fn refuse_high_fees() {
         None,
         Some(300),
         Some(&asset_id),
+        None,
         Some(2_000_000),
         None,
         None,
