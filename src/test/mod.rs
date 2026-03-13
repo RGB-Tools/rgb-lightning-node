@@ -1084,6 +1084,7 @@ async fn open_channel(
         None,
         None,
         None,
+        None,
         true,
     )
     .await
@@ -1098,6 +1099,7 @@ async fn open_channel_with_retry(
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
     asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
     max_retries: u32,
 ) -> Channel {
     let mut attempt = 0;
@@ -1111,6 +1113,7 @@ async fn open_channel_with_retry(
             push_msat,
             asset_amount,
             asset_id,
+            push_asset_amount,
             None,
             None,
             None,
@@ -1146,6 +1149,7 @@ async fn open_channel_raw(
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
     asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
@@ -1180,6 +1184,7 @@ async fn open_channel_raw(
         push_msat: push_msat.unwrap_or(0),
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
+        push_asset_amount,
         public: true,
         with_anchors,
         fee_base_msat,
@@ -1207,10 +1212,18 @@ async fn open_channel_raw(
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let channels = list_channels(node_address).await;
         if let Some(channel) = channels.iter().find(|c| {
+            let asset_amounts_match = if asset_id.is_some() {
+                let local_amount = asset_amount.unwrap_or(0) - push_asset_amount.unwrap_or(0);
+                let remote_amount = push_asset_amount.unwrap_or(0);
+                c.asset_local_amount == Some(local_amount)
+                    && c.asset_remote_amount == Some(remote_amount)
+            } else {
+                c.asset_local_amount.is_none() && c.asset_remote_amount.is_none()
+            };
             !c.ready
                 && c.peer_pubkey == dest_peer_pubkey
                 && c.asset_id == asset_id.map(|id| id.to_string())
-                && c.asset_local_amount == asset_amount
+                && asset_amounts_match
         }) {
             if let Some(txid) = &channel.funding_txid {
                 let txout = _get_txout(txid);
@@ -1254,6 +1267,7 @@ async fn open_channel_with_custom_data(
     push_msat: Option<u64>,
     asset_amount: Option<u64>,
     asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
     fee_base_msat: Option<u32>,
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
@@ -1267,6 +1281,7 @@ async fn open_channel_with_custom_data(
         push_msat,
         asset_amount,
         asset_id,
+        push_asset_amount,
         fee_base_msat,
         fee_proportional_millionths,
         temporary_channel_id,
@@ -1870,6 +1885,7 @@ mod multi_open_close;
 mod open_after_double_send;
 mod openchannel_fail;
 mod openchannel_optional_addr;
+mod openchannel_push_asset_amount;
 mod payment;
 mod refuse_high_fees;
 mod restart;
