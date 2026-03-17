@@ -59,6 +59,7 @@ async fn concurrent_openchannel() {
             Some(PUSH_MSAT),
             Some(ASSET_AMOUNT),
             Some(&asset_id),
+            None,
             20,
         ),
         open_channel_with_retry(
@@ -69,6 +70,7 @@ async fn concurrent_openchannel() {
             Some(PUSH_MSAT),
             Some(ASSET_AMOUNT),
             Some(&asset_id),
+            None,
             20,
         ),
         open_channel_with_retry(
@@ -79,6 +81,7 @@ async fn concurrent_openchannel() {
             Some(PUSH_MSAT),
             Some(ASSET_AMOUNT),
             Some(&asset_id),
+            None,
             20,
         ),
         open_channel_with_retry(
@@ -89,6 +92,7 @@ async fn concurrent_openchannel() {
             Some(PUSH_MSAT),
             Some(ASSET_AMOUNT),
             Some(&asset_id),
+            None,
             20,
         ),
         open_channel_with_retry(
@@ -99,6 +103,7 @@ async fn concurrent_openchannel() {
             Some(PUSH_MSAT),
             Some(ASSET_AMOUNT),
             Some(&asset_id),
+            None,
             20,
         )
     );

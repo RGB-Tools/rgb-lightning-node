@@ -2272,6 +2272,9 @@ components:
             - string
             - 'null'
           example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        push_asset_amount:
+          type: integer
+          example: 100
         public:
           type: boolean
           example: true
