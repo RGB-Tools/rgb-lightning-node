@@ -2346,6 +2346,9 @@ components:
         payee_pubkey:
           type: string
           example: 03b79a4bc1ec365524b4fab9a39eb133753646babb5a1da5c4bc94c53110b7795d
+        preimage:
+          type: string
+          example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
     Peer:
       type: object
       required:

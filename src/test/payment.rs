@@ -64,10 +64,24 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
+    let payment = list_payments(node1_addr)
+        .await
+        .into_iter()
+        .find(|payment| payment.payment_hash == decoded.payment_hash)
+        .unwrap();
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
+    let payment = list_payments(node2_addr)
+        .await
+        .into_iter()
+        .find(|payment| payment.payment_hash == decoded.payment_hash)
+        .unwrap();
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
 
     let asset_amount = Some(50);
     let LNInvoiceResponse { invoice } =
@@ -86,10 +100,12 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node2_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -100,10 +116,12 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node1_addr, None, Some(&asset_id), asset_amount, 900).await;
@@ -114,10 +132,12 @@ async fn success() {
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
     let payment = get_payment(node2_addr, &decoded.payment_hash).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
+    check_preimage_matches_hash(&payment, &decoded.payment_hash);
 
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;

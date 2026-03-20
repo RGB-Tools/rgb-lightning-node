@@ -1,5 +1,7 @@
 use amplify::s;
 use biscuit_auth::{builder::date, macros::*, KeyPair};
+use bitcoin::hashes::sha256::Hash as Sha256;
+use bitcoin::hashes::Hash;
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
 use lazy_static::lazy_static;
@@ -41,7 +43,7 @@ use crate::routes::{
     SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, SwapStatus, TakerRequest,
     Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
-use crate::utils::{hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
+use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
 
 use super::*;
 
@@ -81,6 +83,13 @@ fn _bitcoin_cli() -> [String; 7] {
         s!("bitcoin-cli"),
         s!("-regtest"),
     ]
+}
+
+fn check_preimage_matches_hash(payment: &Payment, expected_payment_hash: &str) {
+    let payment_preimage = payment.preimage.as_ref().unwrap();
+    let payment_preimage_hash =
+        hex_str(&Sha256::hash(&hex_str_to_vec(payment_preimage).unwrap()).to_byte_array());
+    assert_eq!(payment_preimage_hash, expected_payment_hash);
 }
 
 async fn _check_response_is_ok(res: Response) -> Response {
