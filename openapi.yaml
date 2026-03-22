@@ -386,6 +386,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetSwapResponse'
+  /inflate:
+    post:
+      tags:
+        - RGB
+      summary: Inflate RGB assets
+      description: Inflate RGB assets on-chain
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InflateRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InflateResponse'
   /init:
     post:
       tags:
@@ -442,6 +460,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IssueAssetCFAResponse'
+  /issueassetifa:
+    post:
+      tags:
+        - RGB
+      summary: Issue an RGB IFA asset
+      description: Issue an RGB IFA asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueAssetIFARequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueAssetIFAResponse'
   /issueassetnia:
     post:
       tags:
@@ -1056,6 +1092,63 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Media'
             - type: 'null'
+    AssetIFA:
+      type: object
+      required:
+        - asset_id
+        - ticker
+        - name
+        - precision
+        - initial_supply
+        - max_supply
+        - known_circulating_supply
+        - timestamp
+        - added_at
+        - balance
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        details:
+          type:
+            - string
+            - 'null'
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        initial_supply:
+          type: integer
+          example: 777
+        max_supply:
+          type: integer
+          example: 999
+        known_circulating_supply:
+          type: integer
+          example: 888
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/AssetBalanceResponse'
+        media:
+          oneOf:
+            - $ref: '#/components/schemas/Media'
+            - type: 'null'
+        reject_list_url:
+          type:
+            - string
+            - 'null'
+          example: https://some.domain/someasset/rejectlist
     AssetMetadataRequest:
       type: object
       required:
@@ -1159,6 +1252,7 @@ components:
         - Nia
         - Uda
         - Cfa
+        - Ifa
     AssetUDA:
       type: object
       required:
@@ -1742,6 +1836,37 @@ components:
       enum:
         - Electrum
         - Esplora
+    InflateRequest:
+      type: object
+      required:
+        - asset_id
+        - inflation_amounts
+        - fee_rate
+        - min_confirmations
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        inflation_amounts:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+          example: [ 100, 50 ]
+        fee_rate:
+          type: integer
+          example: 5
+        min_confirmations:
+          type: integer
+          example: 1
+    InflateResponse:
+      type: object
+      required:
+        - txid
+      properties:
+        txid:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
     InitRequest:
       type: object
       required:
@@ -1820,6 +1945,51 @@ components:
       properties:
         asset:
           $ref: '#/components/schemas/AssetCFA'
+    IssueAssetIFARequest:
+      type: object
+      required:
+        - amounts
+        - inflation_amounts
+        - ticker
+        - name
+        - precision
+        - replace_rights_num
+      properties:
+        amounts:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+          example: [ 1000, 600 ]
+        inflation_amounts:
+          type: array
+          items:
+            type: integer
+          example: [ 100, 50 ]
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        precision:
+          type: integer
+          example: 0
+        replace_rights_num:
+          type: integer
+          example: 0
+        reject_list_url:
+          type:
+            - string
+            - 'null'
+          example: https://some.domain/someasset/rejectlist
+    IssueAssetIFAResponse:
+      type: object
+      required:
+        - asset
+      properties:
+        asset:
+          $ref: '#/components/schemas/AssetIFA'
     IssueAssetNIARequest:
       type: object
       required:
@@ -1934,13 +2104,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssetSchema'
-          example: [ Nia, Uda, Cfa ]
+          example: [ Nia, Uda, Cfa, Ifa ]
     ListAssetsResponse:
       type: object
       required:
         - nia
         - uda
         - cfa
+        - ifa
       properties:
         nia:
           type:
@@ -1960,6 +2131,12 @@ components:
             - 'null'
           items:
             $ref: '#/components/schemas/AssetCFA'
+        ifa:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/AssetIFA'
     ListChannelsResponse:
       type: object
       required:
