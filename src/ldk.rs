@@ -593,9 +593,10 @@ async fn handle_ldk_events(
                 let channel_rgb_amount = rgb_info.local_rgb_amount + rgb_info.remote_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
                 let assignment = match rgb_info.schema {
-                    AssetSchema::Nia | AssetSchema::Cfa => Assignment::Fungible(channel_rgb_amount),
+                    AssetSchema::Nia | AssetSchema::Cfa | AssetSchema::Ifa => {
+                        Assignment::Fungible(channel_rgb_amount)
+                    }
                     AssetSchema::Uda => Assignment::NonFungible,
-                    AssetSchema::Ifa => todo!(),
                 };
 
                 let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
@@ -1788,7 +1789,12 @@ pub(crate) async fn start_ldk(
             master_fingerprint: master_fingerprint.to_string(),
             mnemonic: Some(mnemonic.to_string()),
             vanilla_keychain: None,
-            supported_schemas: vec![AssetSchema::Nia, AssetSchema::Cfa, AssetSchema::Uda],
+            supported_schemas: vec![
+                AssetSchema::Nia,
+                AssetSchema::Cfa,
+                AssetSchema::Uda,
+                AssetSchema::Ifa,
+            ],
         })
         .expect("valid rgb-lib wallet")
     })

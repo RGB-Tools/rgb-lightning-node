@@ -51,9 +51,9 @@ use rgb_lib::{
             check_indexer_url as rgb_lib_check_indexer_url,
             IndexerProtocol as RgbLibIndexerProtocol,
         },
-        AssetCFA as RgbLibAssetCFA, AssetNIA as RgbLibAssetNIA, AssetUDA as RgbLibAssetUDA,
-        Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia, Invoice as RgbLibInvoice,
-        Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
+        AssetCFA as RgbLibAssetCFA, AssetIFA as RgbLibAssetIFA, AssetNIA as RgbLibAssetNIA,
+        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
+        Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
         Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
         Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
     },
@@ -172,6 +172,43 @@ impl From<RgbLibAssetCFA> for AssetCFA {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct AssetIFA {
+    pub(crate) asset_id: String,
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) details: Option<String>,
+    pub(crate) precision: u8,
+    pub(crate) initial_supply: u64,
+    pub(crate) max_supply: u64,
+    pub(crate) known_circulating_supply: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) added_at: i64,
+    pub(crate) balance: AssetBalanceResponse,
+    pub(crate) media: Option<Media>,
+    pub(crate) reject_list_url: Option<String>,
+}
+
+impl From<RgbLibAssetIFA> for AssetIFA {
+    fn from(value: RgbLibAssetIFA) -> Self {
+        Self {
+            asset_id: value.asset_id,
+            ticker: value.ticker,
+            name: value.name,
+            details: value.details,
+            precision: value.precision,
+            initial_supply: value.initial_supply,
+            max_supply: value.max_supply,
+            known_circulating_supply: value.known_circulating_supply,
+            timestamp: value.timestamp,
+            added_at: value.added_at,
+            balance: value.balance.into(),
+            media: value.media.map(|m| m.into()),
+            reject_list_url: value.reject_list_url,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct AssetMetadataRequest {
     pub(crate) asset_id: String,
 }
@@ -226,6 +263,7 @@ pub(crate) enum AssetSchema {
     Nia,
     Uda,
     Cfa,
+    Ifa,
 }
 
 impl From<AssetSchema> for RgbLibAssetSchema {
@@ -234,6 +272,7 @@ impl From<AssetSchema> for RgbLibAssetSchema {
             AssetSchema::Nia => Self::Nia,
             AssetSchema::Uda => Self::Uda,
             AssetSchema::Cfa => Self::Cfa,
+            AssetSchema::Ifa => Self::Ifa,
         }
     }
 }
@@ -244,7 +283,7 @@ impl From<RgbLibAssetSchema> for AssetSchema {
             RgbLibAssetSchema::Nia => Self::Nia,
             RgbLibAssetSchema::Uda => Self::Uda,
             RgbLibAssetSchema::Cfa => Self::Cfa,
-            RgbLibAssetSchema::Ifa => todo!(),
+            RgbLibAssetSchema::Ifa => Self::Ifa,
         }
     }
 }
@@ -599,6 +638,19 @@ impl From<RgbLibIndexerProtocol> for IndexerProtocol {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct InflateRequest {
+    pub(crate) asset_id: String,
+    pub(crate) inflation_amounts: Vec<u64>,
+    pub(crate) fee_rate: u64,
+    pub(crate) min_confirmations: u8,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct InflateResponse {
+    pub(crate) txid: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct InitRequest {
     pub(crate) password: String,
     pub(crate) mnemonic: Option<String>,
@@ -639,6 +691,22 @@ pub(crate) struct IssueAssetCFARequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct IssueAssetCFAResponse {
     pub(crate) asset: AssetCFA,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetIFARequest {
+    pub(crate) amounts: Vec<u64>,
+    pub(crate) inflation_amounts: Vec<u64>,
+    pub(crate) ticker: String,
+    pub(crate) name: String,
+    pub(crate) precision: u8,
+    pub(crate) replace_rights_num: u8,
+    pub(crate) reject_list_url: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct IssueAssetIFAResponse {
+    pub(crate) asset: AssetIFA,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -694,6 +762,7 @@ pub(crate) struct ListAssetsResponse {
     pub(crate) nia: Option<Vec<AssetNIA>>,
     pub(crate) uda: Option<Vec<AssetUDA>>,
     pub(crate) cfa: Option<Vec<AssetCFA>>,
+    pub(crate) ifa: Option<Vec<AssetIFA>>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1876,6 +1945,37 @@ pub(crate) async fn get_swap(
     Err(APIError::SwapNotFound(payload.payment_hash))
 }
 
+pub(crate) async fn inflate(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<InflateRequest>, APIError>,
+) -> Result<Json<InflateResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
+        let unlocked_state_copy = unlocked_state.clone();
+        let inflate_result = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_inflate(
+                payload.asset_id,
+                payload.inflation_amounts,
+                payload.fee_rate,
+                payload.min_confirmations,
+            )
+        })
+        .await
+        .unwrap()?;
+
+        Ok(Json(InflateResponse {
+            txid: inflate_result.txid,
+        }))
+    })
+    .await
+}
+
 pub(crate) async fn init(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<InitRequest>, APIError>,
@@ -1957,6 +2057,35 @@ pub(crate) async fn issue_asset_cfa(
         )?;
 
         Ok(Json(IssueAssetCFAResponse {
+            asset: asset.into(),
+        }))
+    })
+    .await
+}
+
+pub(crate) async fn issue_asset_ifa(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<IssueAssetIFARequest>, APIError>,
+) -> Result<Json<IssueAssetIFAResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        if *unlocked_state.rgb_send_lock.lock().unwrap() {
+            return Err(APIError::OpenChannelInProgress);
+        }
+
+        let asset = unlocked_state.rgb_issue_asset_ifa(
+            payload.ticker,
+            payload.name,
+            payload.precision,
+            payload.amounts,
+            payload.inflation_amounts,
+            payload.replace_rights_num,
+            payload.reject_list_url,
+        )?;
+
+        Ok(Json(IssueAssetIFAResponse {
             asset: asset.into(),
         }))
     })
@@ -2204,8 +2333,21 @@ pub(crate) async fn list_assets(
             })
             .collect()
     });
+    let ifa = rgb_assets.ifa.map(|assets| {
+        assets
+            .into_iter()
+            .map(|a| {
+                let mut asset: AssetIFA = a.into();
+                (
+                    asset.balance.offchain_outbound,
+                    asset.balance.offchain_inbound,
+                ) = *offchain_balances.get(&asset.asset_id).unwrap_or(&(0, 0));
+                asset
+            })
+            .collect()
+    });
 
-    Ok(Json(ListAssetsResponse { nia, uda, cfa }))
+    Ok(Json(ListAssetsResponse { nia, uda, cfa, ifa }))
 }
 
 pub(crate) async fn list_channels(
@@ -3149,11 +3291,10 @@ pub(crate) async fn open_channel(
                 .rgb_get_asset_metadata(*contract_id)?
                 .asset_schema;
             let assignment = match schema {
-                RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa => {
+                RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa | RgbLibAssetSchema::Ifa => {
                     Assignment::Fungible(*asset_amount)
                 }
                 RgbLibAssetSchema::Uda => Assignment::NonFungible,
-                RgbLibAssetSchema::Ifa => todo!(),
             };
 
             let recipient_map = map! {

@@ -45,12 +45,13 @@ use crate::routes::{
     address, asset_balance, asset_metadata, backup, btc_balance, change_password,
     check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
     decode_ln_invoice, decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers,
-    get_asset_media, get_channel_id, get_payment, get_swap, init, invoice_status, issue_asset_cfa,
-    issue_asset_nia, issue_asset_uda, keysend, list_assets, list_channels, list_payments,
-    list_peers, list_swaps, list_transactions, list_transfers, list_unspents, ln_invoice, lock,
-    maker_execute, maker_init, network_info, node_info, open_channel, post_asset_media,
-    refresh_transfers, restore, revoke_token, rgb_invoice, send_btc, send_onion_message,
-    send_payment, send_rgb, shutdown, sign_message, sync, taker, unlock,
+    get_asset_media, get_channel_id, get_payment, get_swap, inflate, init, invoice_status,
+    issue_asset_cfa, issue_asset_ifa, issue_asset_nia, issue_asset_uda, keysend, list_assets,
+    list_channels, list_payments, list_peers, list_swaps, list_transactions, list_transfers,
+    list_unspents, ln_invoice, lock, maker_execute, maker_init, network_info, node_info,
+    open_channel, post_asset_media, refresh_transfers, restore, revoke_token, rgb_invoice,
+    send_btc, send_onion_message, send_payment, send_rgb, shutdown, sign_message, sync, taker,
+    unlock,
 };
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
@@ -124,9 +125,11 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/getchannelid", post(get_channel_id))
         .route("/getpayment", post(get_payment))
         .route("/getswap", post(get_swap))
+        .route("/inflate", post(inflate))
         .route("/init", post(init))
         .route("/invoicestatus", post(invoice_status))
         .route("/issueassetcfa", post(issue_asset_cfa))
+        .route("/issueassetifa", post(issue_asset_ifa))
         .route("/issueassetnia", post(issue_asset_nia))
         .route("/issueassetuda", post(issue_asset_uda))
         .route("/keysend", post(keysend))
