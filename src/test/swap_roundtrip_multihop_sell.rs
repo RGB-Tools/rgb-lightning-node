@@ -1,4 +1,4 @@
-use self::routes::HTLC_MIN_MSAT;
+use crate::core_types::HTLC_MIN_MSAT;
 
 use super::*;
 

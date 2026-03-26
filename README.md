@@ -43,6 +43,11 @@ The docker image can be built with:
 docker build -t rgb-lightning-node .
 ```
 
+## UniFFI Bindings
+
+See [UniFFI SDK documentation](src/uniffi_api/README.md) for setup, runtime
+model, binding generation, test commands, and artifact packaging details.
+
 ## Run
 
 In order to operate, the node will need:

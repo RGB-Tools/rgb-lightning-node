@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use crate::disk::FilesystemLogger;
 #[cfg(test)]
-use crate::test::mock_fee;
+use crate::fee_mock::mock_fee;
 
 pub struct BitcoindClient {
     pub(crate) bitcoind_rpc_client: Arc<RpcClient>,

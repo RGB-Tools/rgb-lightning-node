@@ -1,4 +1,4 @@
-use amplify::{map, s, Display};
+use amplify::{map, s};
 use axum::{
     extract::{Multipart, State},
     Json,
@@ -21,7 +21,7 @@ use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
-use lightning::{chain::channelmonitor::Balance, impl_writeable_tlv_based_enum};
+use lightning::chain::channelmonitor::Balance;
 use lightning::{
     ln::channel_state::ChannelShutdownState, onion_message::messenger::MessageSendInstructions,
 };
@@ -75,7 +75,7 @@ use tokio::{
     sync::MutexGuard as TokioMutexGuard,
 };
 
-use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
+use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
@@ -84,12 +84,17 @@ use crate::utils::{
 };
 use crate::{
     backup::{do_backup, restore_backup},
+    core_types::{
+        HTLCStatus, HTLC_MIN_MSAT, SwapStatus, UnlockRequest as CoreUnlockRequest,
+        DEFAULT_FINAL_CLTV_EXPIRY_DELTA, DUST_LIMIT_MSAT, FEE_RATE, MAX_SWAP_FEE_MSAT,
+        MIN_CHANNEL_CONFIRMATIONS, UTXO_SIZE_SAT,
+    },
     rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional},
 };
 use crate::{
     disk::{self, CHANNEL_PEER_DATA},
     error::APIError,
-    ldk::{PaymentInfo, FEE_RATE, UTXO_SIZE_SAT},
+    ldk::PaymentInfo,
     utils::{
         connect_peer_if_necessary, get_current_timestamp, no_cancel, parse_peer_info, AppState,
     },
@@ -97,19 +102,12 @@ use crate::{
 
 const UTXO_NUM: u8 = 4;
 
-pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
-pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
-
 const OPENRGBCHANNEL_MIN_SAT: u64 = HTLC_MIN_MSAT / 1000 * 10 + 10;
 const OPENCHANNEL_MIN_SAT: u64 = 5506;
 const OPENCHANNEL_MAX_SAT: u64 = 16777215;
 const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
 
-pub const DUST_LIMIT_MSAT: u64 = 546000;
-
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
-
-pub(crate) const DEFAULT_FINAL_CLTV_EXPIRY_DELTA: u32 = 14;
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct AddressResponse {
@@ -569,20 +567,6 @@ pub(crate) struct GetSwapResponse {
     pub(crate) swap: Swap,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display)]
-#[display(inner)]
-pub(crate) enum HTLCStatus {
-    Pending,
-    Succeeded,
-    Failed,
-}
-
-impl_writeable_tlv_based_enum!(HTLCStatus,
-    (0, Pending) => {},
-    (1, Succeeded) => {},
-    (2, Failed) => {},
-);
-
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum IndexerProtocol {
     Electrum,
@@ -1039,23 +1023,6 @@ pub(crate) struct Swap {
     pub(crate) completed_at: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub(crate) enum SwapStatus {
-    Waiting,
-    Pending,
-    Succeeded,
-    Expired,
-    Failed,
-}
-
-impl_writeable_tlv_based_enum!(SwapStatus,
-    (0, Waiting) => {},
-    (1, Pending) => {},
-    (2, Succeeded) => {},
-    (3, Expired) => {},
-    (4, Failed) => {},
-);
-
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TakerRequest {
     pub(crate) swapstring: String,
@@ -1198,6 +1165,21 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+}
+
+impl From<UnlockRequest> for CoreUnlockRequest {
+    fn from(value: UnlockRequest) -> Self {
+        Self {
+            bitcoind_rpc_username: value.bitcoind_rpc_username,
+            bitcoind_rpc_password: value.bitcoind_rpc_password,
+            bitcoind_rpc_host: value.bitcoind_rpc_host,
+            bitcoind_rpc_port: value.bitcoind_rpc_port,
+            indexer_url: value.indexer_url,
+            proxy_endpoint: value.proxy_endpoint,
+            announce_addresses: value.announce_addresses,
+            announce_alias: value.announce_alias,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3824,7 +3806,7 @@ pub(crate) async fn unlock(
 
         tracing::debug!("Starting LDK...");
         let (new_ldk_background_services, new_unlocked_app_state) =
-            match start_ldk(state.clone(), mnemonic, payload).await {
+            match start_ldk(state.clone(), mnemonic, payload.into()).await {
                 Ok((nlbs, nuap)) => (nlbs, nuap),
                 Err(e) => {
                     state.update_changing_state(false);

@@ -1,4 +1,4 @@
-use self::routes::HTLC_MIN_MSAT;
+use crate::core_types::HTLC_MIN_MSAT;
 
 use super::*;
 
@@ -62,7 +62,7 @@ async fn multi_hop() {
     let push_msat = 3500000;
 
     println!("setting MOCK_FEE");
-    *MOCK_FEE.lock().unwrap() = Some(3000);
+    set_mock_fee(3000);
     let channel_12 = open_channel(
         node1_addr,
         &node2_pubkey,
@@ -77,7 +77,7 @@ async fn multi_hop() {
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 400);
 
     println!("setting MOCK_FEE");
-    *MOCK_FEE.lock().unwrap() = Some(3000);
+    set_mock_fee(3000);
     let channel_23 = open_channel(
         node2_addr,
         &node3_pubkey,

@@ -1,0 +1,212 @@
+use super::*;
+
+#[cfg(test)]
+mod uniffi_smoke_tests {
+    use super::*;
+    use crate::disk::FilesystemLogger;
+    use crate::utils::{AppState, StaticState};
+    use bitcoin::hex::DisplayHex;
+    use rgb_lib::BitcoinNetwork;
+    use std::collections::HashSet;
+    use std::str::FromStr;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::Mutex as TokioMutex;
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn uniffi_entrypoints_require_initialized_state() {
+        clear_uniffi_app_state();
+        assert!(!uniffi_is_initialized());
+
+        let node_info = sdk_node_info();
+        assert!(matches!(node_info, Err(RlnError::NotInitialized)));
+        let channel_id = sdk_get_channel_id(lightning::ln::types::ChannelId([0u8; 32]));
+        assert!(matches!(channel_id, Err(RlnError::NotInitialized)));
+        let payment_hash = lightning::types::payment::PaymentHash([0u8; 32]);
+        let payment = sdk_get_payment(payment_hash);
+        assert!(matches!(payment, Err(RlnError::NotInitialized)));
+        let swap = sdk_get_swap(lightning::types::payment::PaymentHash([0u8; 32]), true);
+        assert!(matches!(swap, Err(RlnError::NotInitialized)));
+
+        let invoice = sdk_ln_invoice(LnInvoiceRequest {
+            amt_msat: Some(1000),
+            expiry_sec: 3600,
+            asset_id: None,
+            asset_amount: None,
+        });
+        assert!(matches!(invoice, Err(RlnError::NotInitialized)));
+
+        let send_rgb = sdk_send_rgb(SendRgbRequest {
+            donation: false,
+            fee_rate: 1,
+            min_confirmations: 1,
+            skip_sync: true,
+            recipient_groups: vec![],
+        });
+        assert!(matches!(send_rgb, Err(RlnError::NotInitialized)));
+
+        let invalid_recipient =
+            <RecipientId as UniffiCustomTypeConverter>::into_custom("not-recipient-id".to_string());
+        assert!(invalid_recipient.is_err());
+    }
+
+    fn mock_locked_state() -> Arc<AppState> {
+        let tmp = tempfile::tempdir().unwrap();
+        Arc::new(AppState {
+            static_state: Arc::new(StaticState {
+                ldk_peer_listening_port: 9735,
+                network: BitcoinNetwork::Regtest,
+                storage_dir_path: tmp.path().to_path_buf(),
+                ldk_data_dir: tmp.path().join(".ldk"),
+                logger: Arc::new(FilesystemLogger::new(tmp.path().to_path_buf())),
+                max_media_upload_size_mb: 1,
+            }),
+            cancel_token: CancellationToken::new(),
+            unlocked_app_state: Arc::new(TokioMutex::new(None)),
+            ldk_background_services: Arc::new(Mutex::new(None)),
+            changing_state: Mutex::new(false),
+            root_public_key: None,
+            revoked_tokens: Arc::new(Mutex::new(HashSet::new())),
+        })
+    }
+
+    #[test]
+    fn uniffi_entrypoints_use_registered_state() {
+        set_uniffi_app_state(mock_locked_state());
+        assert!(uniffi_is_initialized());
+        let node_info = sdk_node_info();
+        assert!(matches!(node_info, Err(RlnError::NotInitialized)));
+        let channel_id = sdk_get_channel_id(lightning::ln::types::ChannelId([0u8; 32]));
+        assert!(matches!(channel_id, Err(RlnError::NotInitialized)));
+
+        let send_rgb = sdk_send_rgb(SendRgbRequest {
+            donation: false,
+            fee_rate: 1,
+            min_confirmations: 1,
+            skip_sync: true,
+            recipient_groups: vec![],
+        });
+        assert!(matches!(send_rgb, Err(RlnError::InvalidRequest)));
+        clear_uniffi_app_state();
+        assert!(!uniffi_is_initialized());
+    }
+
+    #[test]
+    fn uniffi_instance_entrypoints_work_without_global_registration() {
+        clear_uniffi_app_state();
+        assert!(!uniffi_is_initialized());
+
+        let node = SdkNode {
+            handle: crate::NodeHandle::from_app_state(mock_locked_state()),
+        };
+        let node_info = node.node_info();
+        assert!(matches!(node_info, Err(RlnError::NotInitialized)));
+
+        let send_rgb = node.send_rgb(SendRgbRequest {
+            donation: false,
+            fee_rate: 1,
+            min_confirmations: 1,
+            skip_sync: true,
+            recipient_groups: vec![],
+        });
+        assert!(matches!(send_rgb, Err(RlnError::InvalidRequest)));
+
+        // Keep global slot untouched for compatibility wrappers.
+        assert!(!uniffi_is_initialized());
+    }
+
+    #[test]
+    fn uniffi_custom_types_roundtrip_and_reject_invalid_values() {
+        let public_key = bitcoin::secp256k1::PublicKey::from_str(
+            "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        )
+        .unwrap();
+        let public_key_builtin = <PublicKey as UniffiCustomTypeConverter>::from_custom(public_key);
+        let public_key_roundtrip =
+            <PublicKey as UniffiCustomTypeConverter>::into_custom(public_key_builtin).unwrap();
+        assert_eq!(public_key_roundtrip, public_key);
+
+        let txid =
+            Txid::from_str("4d3f1f0f87f63a01d4fce1ab4cf8fe0cf5e8f7ff7f6ba6748b6ff1571318dd43")
+                .unwrap();
+        let txid_builtin = <Txid as UniffiCustomTypeConverter>::from_custom(txid);
+        let txid_roundtrip =
+            <Txid as UniffiCustomTypeConverter>::into_custom(txid_builtin).unwrap();
+        assert_eq!(txid_roundtrip, txid);
+
+        let payment_hash = lightning::types::payment::PaymentHash([2u8; 32]);
+        let payment_hash_builtin =
+            <PaymentHash as UniffiCustomTypeConverter>::from_custom(payment_hash);
+        assert_eq!(payment_hash_builtin, [2u8; 32].as_hex().to_string());
+        let payment_hash_roundtrip =
+            <PaymentHash as UniffiCustomTypeConverter>::into_custom(payment_hash_builtin).unwrap();
+        assert_eq!(payment_hash_roundtrip.0, [2u8; 32]);
+
+        let channel_id = lightning::ln::types::ChannelId([1u8; 32]);
+        let channel_id_builtin = <ChannelId as UniffiCustomTypeConverter>::from_custom(channel_id);
+        assert_eq!(channel_id_builtin, [1u8; 32].as_hex().to_string());
+        let channel_id_roundtrip =
+            <ChannelId as UniffiCustomTypeConverter>::into_custom(channel_id_builtin).unwrap();
+        assert_eq!(channel_id_roundtrip.0, [1u8; 32]);
+
+        assert!(
+            <ChannelId as UniffiCustomTypeConverter>::into_custom("deadbeef".to_string()).is_err()
+        );
+        assert!(
+            <PaymentHash as UniffiCustomTypeConverter>::into_custom("deadbeef".to_string())
+                .is_err()
+        );
+        assert!(<ContractId as UniffiCustomTypeConverter>::into_custom(
+            "not-a-contract-id".to_string()
+        )
+        .is_err());
+        assert!(<Bolt11Invoice as UniffiCustomTypeConverter>::into_custom(
+            "not-an-invoice".to_string()
+        )
+        .is_err());
+        assert!(
+            <TransportEndpoint as UniffiCustomTypeConverter>::into_custom(
+                "not-a-transport-endpoint".to_string()
+            )
+            .is_err()
+        );
+        let endpoint = <TransportEndpoint as UniffiCustomTypeConverter>::into_custom(
+            "rpc://127.0.0.1:3000/json-rpc".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            <TransportEndpoint as UniffiCustomTypeConverter>::from_custom(endpoint),
+            "rpc://127.0.0.1:3000/json-rpc".to_string()
+        );
+    }
+
+    #[test]
+    fn uniffi_error_mapping_is_stable_for_core_api_errors() {
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::LockedNode),
+            RlnError::NotInitialized
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::PaymentNotFound(
+                "x".to_string()
+            )),
+            RlnError::NotFound
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::SwapNotFound(
+                "x".to_string()
+            )),
+            RlnError::NotFound
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::OpenChannelInProgress),
+            RlnError::Conflict
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::IO(std::io::Error::other(
+                "boom"
+            ))),
+            RlnError::Internal
+        ));
+    }
+}

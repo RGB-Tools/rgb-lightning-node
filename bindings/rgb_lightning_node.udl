@@ -1,0 +1,705 @@
+namespace rgb_lightning_node {
+    string uniffi_healthcheck();
+};
+
+interface SdkNode {
+    [Throws=RlnError, Name=create]
+    constructor(SdkInitRequest request);
+    void shutdown();
+    [Throws=RlnError]
+    NodeInfo node_info();
+    [Throws=RlnError]
+    ChannelId get_channel_id(ChannelId temporary_channel_id);
+    [Throws=RlnError]
+    Payment get_payment(PaymentHash payment_hash);
+    [Throws=RlnError]
+    sequence<Payment> list_payments();
+    [Throws=RlnError]
+    Swap get_swap(PaymentHash payment_hash, boolean taker);
+    [Throws=RlnError]
+    SwapList list_swaps();
+    [Throws=RlnError]
+    sequence<Channel> list_channels();
+    [Throws=RlnError]
+    sequence<Peer> list_peers();
+    [Throws=RlnError]
+    sequence<Transaction> list_transactions(boolean skip_sync);
+    [Throws=RlnError]
+    NetworkInfo network_info();
+    [Throws=RlnError]
+    AddressInfo address();
+    [Throws=RlnError]
+    BtcBalanceInfo btc_balance(boolean skip_sync);
+    [Throws=RlnError]
+    SignMessageResponse sign_message(string message);
+    [Throws=RlnError]
+    string init(string password, string? mnemonic);
+    [Throws=RlnError]
+    void unlock(SdkUnlockRequest request);
+    [Throws=RlnError]
+    void connectpeer(string peer_pubkey_and_addr);
+    [Throws=RlnError]
+    void disconnectpeer(SdkDisconnectPeerRequest request);
+    [Throws=RlnError]
+    void closechannel(SdkCloseChannelRequest request);
+    [Throws=RlnError]
+    void createutxos(SdkCreateUtxosRequest request);
+    [Throws=RlnError]
+    AssetNia issueassetnia(SdkIssueAssetNiaRequest request);
+    [Throws=RlnError]
+    AssetCfa issueassetcfa(SdkIssueAssetCfaRequest request);
+    [Throws=RlnError]
+    AssetUda issueassetuda(SdkIssueAssetUdaRequest request);
+    [Throws=RlnError]
+    SdkPostAssetMediaResponse postassetmedia(SdkPostAssetMediaRequest request);
+    [Throws=RlnError]
+    SdkRgbInvoiceResponse rgbinvoice(SdkRgbInvoiceRequest request);
+    [Throws=RlnError]
+    SdkKeysendResponse keysend(SdkKeysendRequest request);
+    [Throws=RlnError]
+    SdkSendBtcResponse sendbtc(SdkSendBtcRequest request);
+    [Throws=RlnError]
+    SdkMakerInitResponse makerinit(SdkMakerInitRequest request);
+    [Throws=RlnError]
+    void makerexecute(SdkMakerExecuteRequest request);
+    [Throws=RlnError]
+    void taker(SdkTakerRequest request);
+    [Throws=RlnError]
+    void sendonionmessage(SdkSendOnionMessageRequest request);
+    [Throws=RlnError]
+    SdkOpenChannelResponse openchannel(SdkOpenChannelRequest request);
+    [Throws=RlnError]
+    SdkSendPaymentResponse sendpayment(SdkSendPaymentRequest request);
+    [Throws=RlnError]
+    void refreshtransfers(SdkRefreshTransfersRequest request);
+    [Throws=RlnError]
+    SdkFailTransfersResponse failtransfers(SdkFailTransfersRequest request);
+    [Throws=RlnError]
+    void sync();
+    [Throws=RlnError]
+    EstimateFeeResponse estimate_fee(u16 blocks);
+    [Throws=RlnError]
+    CheckIndexerUrlResponse check_indexer_url(string indexer_url);
+    [Throws=RlnError]
+    void check_proxy_endpoint(string proxy_endpoint);
+    [Throws=RlnError]
+    AssetBalanceInfo asset_balance(ContractId asset_id);
+    [Throws=RlnError]
+    AssetMetadataInfo asset_metadata(ContractId asset_id);
+    [Throws=RlnError]
+    AssetMediaResponse get_asset_media(string digest);
+    [Throws=RlnError]
+    ListAssetsResponse list_assets(sequence<string> filter_asset_schemas);
+    [Throws=RlnError]
+    DecodeLnInvoiceResponse decode_ln_invoice(Bolt11Invoice invoice);
+    [Throws=RlnError]
+    DecodeRgbInvoiceResponse decode_rgb_invoice(string invoice);
+    [Throws=RlnError]
+    InvoiceStatus invoice_status(Bolt11Invoice invoice);
+    [Throws=RlnError]
+    sequence<Transfer> list_transfers(ContractId asset_id);
+    [Throws=RlnError]
+    sequence<Unspent> list_unspents(boolean skip_sync);
+    [Throws=RlnError]
+    LnInvoiceResponse ln_invoice(LnInvoiceRequest request);
+    [Throws=RlnError]
+    SendRgbResponse send_rgb(SendRgbRequest request);
+};
+
+[Error]
+enum RlnError {
+    "NotInitialized",
+    "InvalidRequest",
+    "NotFound",
+    "Conflict",
+    "Internal",
+};
+
+dictionary NodeInfo {
+    PublicKey pubkey;
+    u64 num_channels;
+    u64 num_usable_channels;
+    u64 local_balance_sat;
+    u64 eventual_close_fees_sat;
+    u64 pending_outbound_payments_sat;
+    u64 num_peers;
+    string account_xpub_vanilla;
+    string account_xpub_colored;
+    u16 max_media_upload_size_mb;
+    u64 rgb_htlc_min_msat;
+    u64 rgb_channel_capacity_min_sat;
+    u64 channel_capacity_min_sat;
+    u64 channel_capacity_max_sat;
+    u64 channel_asset_min_amount;
+    u64 channel_asset_max_amount;
+    u64 network_nodes;
+    u64 network_channels;
+};
+
+dictionary NetworkInfo {
+    string network;
+    u32 height;
+};
+
+dictionary AddressInfo {
+    string address;
+};
+
+dictionary BtcBalance {
+    u64 settled;
+    u64 future;
+    u64 spendable;
+};
+
+dictionary BtcBalanceInfo {
+    BtcBalance vanilla;
+    BtcBalance colored;
+};
+
+dictionary SignMessageResponse {
+    string signed_message;
+};
+
+dictionary EstimateFeeResponse {
+    f64 fee_rate;
+};
+
+dictionary CheckIndexerUrlResponse {
+    string indexer_protocol;
+};
+
+dictionary Payment {
+    u64? amt_msat;
+    u64? asset_amount;
+    ContractId? asset_id;
+    PaymentHash payment_hash;
+    boolean inbound;
+    HtlcStatus status;
+    u64 created_at;
+    u64 updated_at;
+    PublicKey payee_pubkey;
+};
+
+enum HtlcStatus {
+    "Pending",
+    "Succeeded",
+    "Failed",
+};
+
+dictionary Channel {
+    ChannelId channel_id;
+    PublicKey peer_pubkey;
+    ChannelStatus status;
+    boolean ready;
+    u64 capacity_sat;
+    u64 local_balance_sat;
+    u64 outbound_balance_msat;
+    u64 inbound_balance_msat;
+    u64 next_outbound_htlc_limit_msat;
+    u64 next_outbound_htlc_minimum_msat;
+    boolean is_usable;
+    boolean public;
+    Txid? funding_txid;
+    string? peer_alias;
+    u64? short_channel_id;
+    ContractId? asset_id;
+    u64? asset_local_amount;
+    u64? asset_remote_amount;
+};
+
+enum ChannelStatus {
+    "Opening",
+    "Opened",
+    "Closing",
+};
+
+dictionary Peer {
+    PublicKey pubkey;
+};
+
+dictionary Swap {
+    u64 qty_from;
+    u64 qty_to;
+    ContractId? from_asset;
+    ContractId? to_asset;
+    PaymentHash payment_hash;
+    SwapStatus status;
+    u64 requested_at;
+    u64? initiated_at;
+    u64 expires_at;
+    u64? completed_at;
+};
+
+dictionary SwapList {
+    sequence<Swap> taker;
+    sequence<Swap> maker;
+};
+
+enum SwapStatus {
+    "Waiting",
+    "Pending",
+    "Succeeded",
+    "Expired",
+    "Failed",
+};
+
+dictionary BlockTime {
+    u32 height;
+    u64 timestamp;
+};
+
+enum TransactionType {
+    "RgbSend",
+    "Drain",
+    "CreateUtxos",
+    "User",
+};
+
+dictionary Transaction {
+    TransactionType transaction_type;
+    Txid txid;
+    u64 received;
+    u64 sent;
+    u64 fee;
+    BlockTime? confirmation_time;
+};
+
+dictionary AssetBalanceInfo {
+    u64 settled;
+    u64 future;
+    u64 spendable;
+    u64 offchain_outbound;
+    u64 offchain_inbound;
+};
+
+dictionary AssetMetadataInfo {
+    string asset_schema;
+    u64 initial_supply;
+    u64 max_supply;
+    u64 known_circulating_supply;
+    i64 timestamp;
+    string name;
+    u8 precision;
+    string? ticker;
+    string? details;
+    Token? token;
+};
+
+dictionary AssetMediaResponse {
+    string bytes_hex;
+};
+
+dictionary EmbeddedMedia {
+    string mime;
+    sequence<u8> data;
+};
+
+dictionary Media {
+    string file_path;
+    string digest;
+    string mime;
+};
+
+dictionary ProofOfReserves {
+    string utxo;
+    sequence<u8> proof;
+};
+
+dictionary MediaAttachment {
+    u8 key;
+    Media media;
+};
+
+dictionary Token {
+    u32 index;
+    string? ticker;
+    string? name;
+    string? details;
+    EmbeddedMedia? embedded_media;
+    Media? media;
+    sequence<MediaAttachment> attachments;
+    ProofOfReserves? reserves;
+};
+
+dictionary TokenLight {
+    u32 index;
+    string? ticker;
+    string? name;
+    string? details;
+    boolean embedded_media;
+    Media? media;
+    sequence<MediaAttachment> attachments;
+    boolean reserves;
+};
+
+dictionary AssetNia {
+    ContractId asset_id;
+    string ticker;
+    string name;
+    string? details;
+    u8 precision;
+    u64 issued_supply;
+    i64 timestamp;
+    i64 added_at;
+    AssetBalanceInfo balance;
+    Media? media;
+};
+
+dictionary AssetUda {
+    ContractId asset_id;
+    string ticker;
+    string name;
+    string? details;
+    u8 precision;
+    i64 timestamp;
+    i64 added_at;
+    AssetBalanceInfo balance;
+    TokenLight? token;
+};
+
+dictionary AssetCfa {
+    ContractId asset_id;
+    string name;
+    string? details;
+    u8 precision;
+    u64 issued_supply;
+    i64 timestamp;
+    i64 added_at;
+    AssetBalanceInfo balance;
+    Media? media;
+};
+
+dictionary ListAssetsResponse {
+    sequence<AssetNia>? nia;
+    sequence<AssetUda>? uda;
+    sequence<AssetCfa>? cfa;
+};
+
+dictionary DecodeLnInvoiceResponse {
+    u64? amt_msat;
+    u64 expiry_sec;
+    u64 timestamp;
+    ContractId? asset_id;
+    u64? asset_amount;
+    PaymentHash payment_hash;
+    string payment_secret;
+    PublicKey? payee_pubkey;
+    string network;
+};
+
+dictionary DecodeRgbInvoiceResponse {
+    string recipient_id;
+    string recipient_type;
+    string? asset_schema;
+    ContractId? asset_id;
+    string assignment;
+    string network;
+    i64? expiration_timestamp;
+    sequence<string> transport_endpoints;
+};
+
+enum InvoiceStatus {
+    "Pending",
+    "Succeeded",
+    "Failed",
+    "Expired",
+};
+
+dictionary TransferTransportEndpoint {
+    string endpoint;
+    string transport_type;
+    boolean used;
+};
+
+dictionary Transfer {
+    i32 idx;
+    i64 created_at;
+    i64 updated_at;
+    string status;
+    string? requested_assignment;
+    sequence<string> assignments;
+    string kind;
+    Txid? txid;
+    string? recipient_id;
+    string? receive_utxo;
+    string? change_utxo;
+    i64? expiration;
+    sequence<TransferTransportEndpoint> transport_endpoints;
+};
+
+dictionary RgbAllocation {
+    ContractId? asset_id;
+    string assignment;
+    boolean settled;
+};
+
+dictionary Utxo {
+    string outpoint;
+    u64 btc_amount;
+    boolean colorable;
+};
+
+dictionary Unspent {
+    Utxo utxo;
+    sequence<RgbAllocation> rgb_allocations;
+};
+
+dictionary LnInvoiceRequest {
+    u64? amt_msat;
+    u32 expiry_sec;
+    ContractId? asset_id;
+    u64? asset_amount;
+};
+
+dictionary LnInvoiceResponse {
+    Bolt11Invoice invoice;
+};
+
+dictionary SdkInitRequest {
+    string storage_dir_path;
+    u16 daemon_listening_port;
+    u16 ldk_peer_listening_port;
+    string network;
+    u16 max_media_upload_size_mb;
+};
+
+dictionary SdkUnlockRequest {
+    string password;
+    string bitcoind_rpc_username;
+    string bitcoind_rpc_password;
+    string bitcoind_rpc_host;
+    u16 bitcoind_rpc_port;
+    string? indexer_url;
+    string? proxy_endpoint;
+    sequence<string> announce_addresses;
+    string? announce_alias;
+};
+
+dictionary SdkOpenChannelRequest {
+    string peer_pubkey_and_opt_addr;
+    u64 capacity_sat;
+    u64 push_msat;
+    boolean public;
+    boolean with_anchors;
+    u32? fee_base_msat;
+    u32? fee_proportional_millionths;
+    ChannelId? temporary_channel_id;
+    ContractId? asset_id;
+    u64? asset_amount;
+    u64? push_asset_amount;
+};
+
+dictionary SdkOpenChannelResponse {
+    ChannelId temporary_channel_id;
+};
+
+dictionary SdkDisconnectPeerRequest {
+    PublicKey peer_pubkey;
+};
+
+dictionary SdkCloseChannelRequest {
+    ChannelId channel_id;
+    PublicKey peer_pubkey;
+    boolean force;
+};
+
+dictionary SdkRefreshTransfersRequest {
+    boolean skip_sync;
+};
+
+dictionary SdkFailTransfersRequest {
+    i32? batch_transfer_idx;
+    boolean no_asset_only;
+    boolean skip_sync;
+};
+
+dictionary SdkFailTransfersResponse {
+    boolean transfers_changed;
+};
+
+dictionary SdkCreateUtxosRequest {
+    boolean up_to;
+    u8? num;
+    u32? size;
+    u64 fee_rate;
+    boolean skip_sync;
+};
+
+dictionary SdkIssueAssetNiaRequest {
+    sequence<u64> amounts;
+    string ticker;
+    string name;
+    u8 precision;
+};
+
+dictionary SdkIssueAssetCfaRequest {
+    sequence<u64> amounts;
+    string name;
+    string? details;
+    u8 precision;
+    string? file_digest;
+};
+
+dictionary SdkIssueAssetUdaRequest {
+    string ticker;
+    string name;
+    string? details;
+    u8 precision;
+    string? media_file_digest;
+    sequence<string> attachments_file_digests;
+};
+
+dictionary SdkKeysendRequest {
+    PublicKey dest_pubkey;
+    u64 amt_msat;
+    ContractId? asset_id;
+    u64? asset_amount;
+};
+
+dictionary SdkKeysendResponse {
+    PaymentHash payment_hash;
+    string payment_preimage;
+    HtlcStatus status;
+};
+
+dictionary SdkSendBtcRequest {
+    u64 amount;
+    string address;
+    u64 fee_rate;
+    boolean skip_sync;
+};
+
+dictionary SdkSendBtcResponse {
+    Txid txid;
+};
+
+dictionary SdkMakerInitRequest {
+    u64 qty_from;
+    u64 qty_to;
+    ContractId? from_asset;
+    ContractId? to_asset;
+    u32 timeout_sec;
+};
+
+dictionary SdkMakerInitResponse {
+    PaymentHash payment_hash;
+    string payment_secret;
+    string swapstring;
+};
+
+dictionary SdkMakerExecuteRequest {
+    string swapstring;
+    string payment_secret;
+    PublicKey taker_pubkey;
+};
+
+dictionary SdkTakerRequest {
+    string swapstring;
+};
+
+dictionary SdkSendOnionMessageRequest {
+    sequence<PublicKey> node_ids;
+    u64 tlv_type;
+    string data;
+};
+
+dictionary SdkPostAssetMediaRequest {
+    sequence<u8> file_bytes;
+};
+
+dictionary SdkPostAssetMediaResponse {
+    string digest;
+};
+
+dictionary SdkRgbInvoiceRequest {
+    ContractId? asset_id;
+    AssignmentKind? assignment_kind;
+    u64? assignment_amount;
+    u32? duration_seconds;
+    u8 min_confirmations;
+    boolean witness;
+};
+
+dictionary SdkRgbInvoiceResponse {
+    RecipientId recipient_id;
+    string invoice;
+    i64? expiration_timestamp;
+    i32 batch_transfer_idx;
+};
+
+dictionary SdkSendPaymentRequest {
+    string invoice;
+    u64? amt_msat;
+    ContractId? asset_id;
+    u64? asset_amount;
+};
+
+dictionary SdkSendPaymentResponse {
+    string payment_id;
+    PaymentHash? payment_hash;
+    string? payment_secret;
+    HtlcStatus status;
+};
+
+dictionary SendRgbRequest {
+    boolean donation;
+    u64 fee_rate;
+    u8 min_confirmations;
+    boolean skip_sync;
+    sequence<AssetRecipients> recipient_groups;
+};
+
+dictionary SendRgbResponse {
+    Txid txid;
+    i32 batch_transfer_idx;
+};
+
+dictionary AssetRecipients {
+    ContractId asset_id;
+    sequence<RgbRecipient> recipients;
+};
+
+dictionary RgbRecipient {
+    RecipientId recipient_id;
+    WitnessData? witness_data;
+    AssignmentKind assignment_kind;
+    u64? assignment_amount;
+    sequence<TransportEndpoint> transport_endpoints;
+};
+
+dictionary WitnessData {
+    u64 amount_sat;
+    u64? blinding;
+};
+
+enum AssignmentKind {
+    "Fungible",
+    "NonFungible",
+    "InflationRight",
+    "ReplaceRight",
+    "Any",
+};
+
+[Custom]
+typedef string PublicKey;
+
+[Custom]
+typedef string Txid;
+
+[Custom]
+typedef string ContractId;
+
+[Custom]
+typedef string ChannelId;
+
+[Custom]
+typedef string PaymentHash;
+
+[Custom]
+typedef string RecipientId;
+
+[Custom]
+typedef string Bolt11Invoice;
+
+[Custom]
+typedef string TransportEndpoint;

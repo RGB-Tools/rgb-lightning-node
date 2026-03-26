@@ -19,3 +19,14 @@
 # MacOS files
 .DS_Store
 *.swp
+
+/bindings/uniffi-bindgen/target
+/target/uniffi
+/bindings/swift
+/bindings/kotlin
+/bindings/kotlin-android/org
+/bindings/kotlin-android/jniLibs
+/bindings/python/dist
+/bindings/python/rgb_lightning_node.py
+/artifacts
+/bindings/python/build

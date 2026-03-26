@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 const TEST_DIR_BASE: &str = "tmp/swap_roundtrip_fail_timeout/";
 

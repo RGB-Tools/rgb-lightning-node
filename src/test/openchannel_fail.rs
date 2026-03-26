@@ -280,7 +280,7 @@ async fn open_fail() {
 
     // open with invalid push BTC amount (too high)
     println!("setting MOCK_FEE");
-    *MOCK_FEE.lock().unwrap() = Some(1000);
+    set_mock_fee(1000);
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 100_000,
@@ -381,7 +381,7 @@ async fn open_fail() {
 
     // open with insufficient capacity
     println!("setting MOCK_FEE");
-    *MOCK_FEE.lock().unwrap() = Some(5000);
+    set_mock_fee(5000);
     let payload = OpenChannelRequest {
         peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
         capacity_sat: 5506,

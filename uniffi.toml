@@ -1,0 +1,12 @@
+[bindings.kotlin]
+package_name = "org.utexo.rgblightningnode"
+cdylib_name = "rgb_lightning_node"
+
+[bindings.python]
+cdylib_name = "rgb_lightning_node"
+
+[bindings.swift]
+module_name = "RGBLightningNode"
+ffi_module_name = "RGBLightningNodeFFI"
+ffi_module_filename = "RGBLightningNodeFFI"
+cdylib_name = "rgb_lightning_node"

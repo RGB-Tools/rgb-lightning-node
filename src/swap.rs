@@ -5,7 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::{
-    routes::SwapStatus,
+    core_types::SwapStatus,
     utils::{get_current_timestamp, hex_str_to_vec},
 };
 

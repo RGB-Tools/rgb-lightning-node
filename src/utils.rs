@@ -30,9 +30,9 @@ use std::{
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use crate::core_types::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
-use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::UserArgs,
     disk::FilesystemLogger,

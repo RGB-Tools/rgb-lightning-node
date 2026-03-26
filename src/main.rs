@@ -2,8 +2,12 @@ mod args;
 mod auth;
 mod backup;
 mod bitcoind;
+mod core_types;
 mod disk;
 mod error;
+#[cfg(test)]
+#[path = "test/fee_mock.rs"]
+mod fee_mock;
 mod ldk;
 mod rgb;
 mod routes;

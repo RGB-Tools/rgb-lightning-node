@@ -4,7 +4,6 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
-use lazy_static::lazy_static;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use reqwest::Response;
@@ -14,14 +13,14 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::sync::{Mutex, Once, RwLock};
+use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tracing_test::traced_test;
 
 use crate::error::APIErrorResponse;
-use crate::ldk::FEE_RATE;
+use crate::core_types::{FEE_RATE, HTLCStatus, SwapStatus};
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
     Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse, ChangePasswordRequest,
@@ -29,7 +28,7 @@ use crate::routes::{
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
     DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
     GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, HTLCStatus,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
     InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse,
     IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
     IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
@@ -40,10 +39,10 @@ use crate::routes::{
     NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
     PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
     RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, SwapStatus, TakerRequest,
+    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest,
     Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
-use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
+use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LOGS_DIR, PROXY_ENDPOINT_LOCAL};
 
 use super::*;
 
@@ -1856,18 +1855,8 @@ pub(crate) fn initialize() {
     });
 }
 
-lazy_static! {
-    static ref MOCK_FEE: Mutex<Option<u32>> = Mutex::new(None);
-}
-
-pub fn mock_fee(fee: u32) -> u32 {
-    let mock = MOCK_FEE.lock().unwrap().take();
-    if let Some(fee) = mock {
-        println!("mocking fee");
-        fee
-    } else {
-        fee
-    }
+pub fn set_mock_fee(fee: u32) {
+    crate::fee_mock::set_mock_fee_for_tests(Some(fee));
 }
 
 mod authentication;

@@ -92,13 +92,16 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
+use crate::core_types::{
+    HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE,
+    MIN_CHANNEL_CONFIRMATIONS,
+};
 use crate::disk::{
     self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLibWalletWrapper};
-use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
@@ -106,10 +109,6 @@ use crate::utils::{
     ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL,
     PROXY_ENDPOINT_PUBLIC,
 };
-
-pub(crate) const FEE_RATE: u64 = 7;
-pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
-pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
