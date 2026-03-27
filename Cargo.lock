@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "bech32 0.11.0",
  "bitcoin",
@@ -2876,7 +2876,7 @@ dependencies = [
  "hashbrown 0.13.2",
  "libm",
  "lightning-invoice",
- "lightning-macros 0.2.0",
+ "lightning-macros 0.2.1",
  "lightning-types",
  "musig2",
  "possiblyrandom",
@@ -2941,7 +2941,7 @@ dependencies = [
  "chrono",
  "lightning",
  "lightning-invoice",
- "lightning-macros 0.2.0",
+ "lightning-macros 0.2.1",
  "lightning-types",
  "serde",
  "serde_json",
@@ -2950,6 +2950,8 @@ dependencies = [
 [[package]]
 name = "lightning-macros"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80bd6063f4d0c34320f1db9193138c878e64142e6d1c42bd5f0124936e8764ec"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2958,9 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "lightning-macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80bd6063f4d0c34320f1db9193138c878e64142e6d1c42bd5f0124936e8764ec"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3000,7 +3000,7 @@ dependencies = [
 
 [[package]]
 name = "lightning-types"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "bitcoin",
 ]
@@ -4172,7 +4172,7 @@ dependencies = [
  "lightning-block-sync",
  "lightning-dns-resolver",
  "lightning-invoice",
- "lightning-macros 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightning-macros 0.2.0",
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
