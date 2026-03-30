@@ -1,11 +1,11 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/open_fail/";
+const TEST_DIR_BASE: &str = "tmp/openchannel_fail/";
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-async fn open_fail() {
+async fn openchannel_fail() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
@@ -13,40 +13,35 @@ async fn open_fail() {
     let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
 
-    fund_and_create_utxos(node1_addr, Some(1)).await;
+    fund_with_and_create_utxos(node1_addr, Some(1), 300_000).await;
     fund_and_create_utxos(node2_addr, None).await;
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let node2_info = node_info(node2_addr).await;
-
     let node2_pubkey = node2_info.pubkey;
 
-    // open with insufficient allocation slots
-    let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
-        capacity_sat: 100_000,
-        push_msat: 3_500_000,
-        asset_amount: Some(100),
-        asset_id: Some(asset_id.clone()),
-        push_asset_amount: None,
-        public: true,
-        with_anchors: true,
-        fee_base_msat: None,
-        fee_proportional_millionths: None,
-        temporary_channel_id: None,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node1_addr}/openchannel"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
+    // insufficient BTC funds
+    let res = open_channel_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(300_000),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .await;
     check_response_is_nok(
-        res,
+        res.unwrap_err(),
         reqwest::StatusCode::FORBIDDEN,
-        "No uncolored UTXOs are available (hint: call createutxos)",
-        "NoAvailableUtxos",
+        "Not enough funds",
+        "InsufficientFunds",
     )
     .await;
 
@@ -55,7 +50,65 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
+    // insufficient colored bitcoin funds
+    fund_wallet(address(node2_addr).await, 1000000);
+    let res = open_channel_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        None,
+        Some(200),
+        Some(&asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .await;
+    check_response_is_nok(
+        res.unwrap_err(),
+        reqwest::StatusCode::FORBIDDEN,
+        "Not enough funds",
+        "InsufficientFunds",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
+    // insufficient RGB assets
     fund_and_create_utxos(node1_addr, Some(9)).await;
+    let res = open_channel_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        None,
+        Some(ISSUE_AMT + 1),
+        Some(&asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .await;
+    check_response_is_nok(
+        res.unwrap_err(),
+        reqwest::StatusCode::FORBIDDEN,
+        "Not enough assets",
+        "InsufficientAssets",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
 
     // open with unknown asset
     let payload = OpenChannelRequest {
@@ -84,6 +137,11 @@ async fn open_fail() {
         "UnknownContractId",
     )
     .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
 
     // open with bad asset amount
     let payload = OpenChannelRequest {
@@ -479,70 +537,4 @@ async fn open_fail() {
     let channels_2 = list_channels(node2_addr).await;
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
-
-    // open a 1st channel (success)
-    let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
-        capacity_sat: 100_000,
-        push_msat: 3_500_000,
-        asset_amount: Some(100),
-        asset_id: Some(asset_id.clone()),
-        push_asset_amount: None,
-        public: true,
-        with_anchors: true,
-        fee_base_msat: None,
-        fee_proportional_millionths: None,
-        temporary_channel_id: None,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node1_addr}/openchannel"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    assert!(res.status() == reqwest::StatusCode::OK);
-    // open a 2nd channel while the previous open is still in progess (fail)
-    let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr: format!("{node2_pubkey}@127.0.0.1:{NODE2_PEER_PORT}"),
-        capacity_sat: 100_000,
-        push_msat: 3_500_000,
-        asset_amount: Some(100),
-        asset_id: Some(asset_id),
-        push_asset_amount: None,
-        public: true,
-        with_anchors: true,
-        fee_base_msat: None,
-        fee_proportional_millionths: None,
-        temporary_channel_id: None,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node1_addr}/openchannel"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    check_response_is_nok(
-        res,
-        reqwest::StatusCode::FORBIDDEN,
-        "Cannot perform this operation while an open channel operation is in progress",
-        "OpenChannelInProgress",
-    )
-    .await;
-
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        let channels_1 = list_channels(node1_addr).await;
-        let channels_2 = list_channels(node2_addr).await;
-        if channels_1.len() == 1 && channels_2.len() == 1 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!(
-                "expected one pending channel on both nodes, got {} and {}",
-                channels_1.len(),
-                channels_2.len()
-            );
-        }
-    }
 }

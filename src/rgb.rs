@@ -33,6 +33,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::{error::APIError, utils::UnlockedAppState};
 
 impl UnlockedAppState {
+    pub(crate) fn rgb_abort_pending_vanilla_tx(&self, txid: String) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.abort_pending_vanilla_tx(txid)
+    }
+
     pub(crate) fn rgb_blind_receive(
         &self,
         asset_id: Option<String>,
@@ -309,9 +313,10 @@ impl UnlockedAppState {
         address: String,
         amount: u64,
         fee_rate: u64,
+        dry_run: bool,
     ) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper
-            .send_btc_begin(address, amount, fee_rate)
+            .send_btc_begin(address, amount, fee_rate, dry_run)
     }
 
     pub(crate) fn rgb_send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
@@ -369,6 +374,10 @@ impl RgbLibWalletWrapper {
 
     pub(crate) fn get_rgb_wallet(&self) -> MutexGuard<'_, RgbLibWallet> {
         self.wallet.lock().unwrap()
+    }
+
+    pub(crate) fn abort_pending_vanilla_tx(&self, txid: String) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().abort_pending_vanilla_tx(txid)
     }
 
     pub(crate) fn bitcoin_network(&self) -> BitcoinNetwork {
@@ -682,9 +691,10 @@ impl RgbLibWalletWrapper {
         address: String,
         amount: u64,
         fee_rate: u64,
+        dry_run: bool,
     ) -> Result<String, RgbLibError> {
         self.get_rgb_wallet()
-            .send_btc_begin(self.online, address, amount, fee_rate, false)
+            .send_btc_begin(self.online, address, amount, fee_rate, false, dry_run)
     }
 
     pub(crate) fn send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {

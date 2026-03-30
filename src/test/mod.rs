@@ -3,9 +3,12 @@ use biscuit_auth::{builder::date, macros::*, KeyPair};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::{Amount, Denomination};
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
+use http::response::Builder;
 use lazy_static::lazy_static;
+use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
 use reqwest::Response;
@@ -59,6 +62,8 @@ const NODE3_PEER_PORT: u16 = 9803;
 const NODE4_PEER_PORT: u16 = 9804;
 const NODE5_PEER_PORT: u16 = 9805;
 const NODE6_PEER_PORT: u16 = 9806;
+
+const ISSUE_AMT: u64 = 1000;
 
 const DURATION_SECONDS: u64 = 999;
 
@@ -151,7 +156,9 @@ async fn check_response_is_nok(
     assert_eq!(api_error_response.name, expected_name);
 }
 
-fn fund_wallet(address: String) {
+fn fund_wallet(address: String, sats: u64) {
+    let amt = Amount::from_sat(sats);
+    let btc_str = amt.to_string_in(Denomination::Bitcoin);
     let status = Command::new("docker")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -161,7 +168,7 @@ fn fund_wallet(address: String) {
         .arg("-rpcwallet=miner")
         .arg("sendtoaddress")
         .arg(address)
-        .arg("1")
+        .arg(btc_str)
         .status()
         .expect("failed to fund wallet");
     assert!(status.success());
@@ -564,15 +571,19 @@ async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32
         .transfers_changed
 }
 
-async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
+async fn fund_with_and_create_utxos(node_address: SocketAddr, num: Option<u8>, sats: u64) {
     println!("funding wallet for node {node_address}");
     let addr = address(node_address).await;
 
-    fund_wallet(addr);
+    fund_wallet(addr, sats);
     mine(false);
 
     create_utxos(node_address, false, Some(num.unwrap_or(10)), None).await;
     mine(false);
+}
+
+async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
+    fund_with_and_create_utxos(node_address, num, 100_000_000).await;
 }
 
 async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
@@ -683,7 +694,7 @@ async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> A
 async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
     println!("issuing IFA asset on node {node_address}");
     let payload = IssueAssetIFARequest {
-        amounts: vec![1000],
+        amounts: vec![ISSUE_AMT],
         inflation_amounts: vec![2000],
         ticker: s!("USDT"),
         name: s!("Tether"),
@@ -707,7 +718,7 @@ async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
 async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
     println!("issuing NIA asset on node {node_address}");
     let payload = IssueAssetNIARequest {
-        amounts: vec![1000],
+        amounts: vec![ISSUE_AMT],
         ticker: s!("USDT"),
         name: s!("Tether"),
         precision: 0,
@@ -1216,17 +1227,18 @@ async fn open_channel_with_retry(
 
         match result {
             Ok(channel) => return channel,
-            Err(status) if status == reqwest::StatusCode::FORBIDDEN && attempt < max_retries => {
+            Err(res) if res.status() == reqwest::StatusCode::FORBIDDEN && attempt < max_retries => {
                 println!(
                     "Channel opening in progress (attempt {}/{}), retrying in 5s...",
                     attempt, max_retries
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
-            Err(status) => {
+            Err(res) => {
                 panic!(
                     "Failed to open channel after {} attempts with status: {}",
-                    attempt, status
+                    attempt,
+                    res.status()
                 );
             }
         }
@@ -1247,7 +1259,7 @@ async fn open_channel_funded_raw(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
-) -> Result<Channel, reqwest::StatusCode> {
+) -> Result<Channel, Response> {
     open_channel_raw(
         node_address,
         dest_peer_pubkey,
@@ -1295,7 +1307,16 @@ async fn open_channel_funded_raw(
             }
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 50.0 {
-            panic!("cannot find funding TX")
+            // channel may have been force-closed before reaching ChannelPending
+            // (e.g. InsufficientAssignments in FundingGenerationReady).
+            // return an error so the retry logic can try again.
+            println!("cannot find funding TX for channel to {dest_peer_pubkey}");
+            return Err(Response::from(
+                Builder::new()
+                    .status(reqwest::StatusCode::FORBIDDEN)
+                    .body("")
+                    .unwrap(),
+            ));
         }
     }
     let channel_id = channel_id.unwrap();
@@ -1331,7 +1352,7 @@ async fn open_channel_raw(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
-) -> Result<OpenChannelResponse, reqwest::StatusCode> {
+) -> Result<OpenChannelResponse, Response> {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
               to {dest_peer_pubkey}"
@@ -1377,7 +1398,7 @@ async fn open_channel_raw(
 
     let status = res.status();
     if !status.is_success() {
-        return Err(status);
+        return Err(res);
     }
 
     Ok(res.json::<OpenChannelResponse>().await.unwrap())
@@ -2003,6 +2024,7 @@ mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
+mod drop_funding_signed;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;

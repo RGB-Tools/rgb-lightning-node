@@ -29,7 +29,7 @@ async fn missing_acceptor() {
         Some(PublicKey::from_str(&node2_pubkey).unwrap());
 
     // opening a channel where the acceptor is missing should not lock the funds
-    open_channel_raw(
+    let stuck_channel = open_channel_raw(
         node1_addr,
         &node2_pubkey,
         Some(NODE2_PEER_PORT),
@@ -45,6 +45,13 @@ async fn missing_acceptor() {
     )
     .await
     .unwrap();
+    let stuck_temp_id = stuck_channel.temporary_channel_id;
+
+    // the stuck channel should be visible on node1
+    let channels_before = list_channels(node1_addr).await;
+    assert!(channels_before
+        .iter()
+        .any(|c| c.channel_id == stuck_temp_id));
 
     // make sure a new channel can be opened
     open_channel_with_retry(
@@ -61,4 +68,16 @@ async fn missing_acceptor() {
     .await;
 
     *IGNORE_INBOUND_CHANNELS_ON_NODE.lock().unwrap() = None;
+
+    assert_eq!(list_channels(node1_addr).await.len(), 2);
+
+    // the stuck channel can be force-closed via the /closechannel API,
+    // this ensures the UTXOs can be unlocked in case of a missing acceptor
+    close_channel(node1_addr, &stuck_temp_id, &node2_pubkey, true).await;
+
+    // after closing, only the channel to node3 should remain on node1
+    let channels_after = list_channels(node1_addr).await;
+    assert!(!channels_after.iter().any(|c| c.channel_id == stuck_temp_id));
+    assert_eq!(channels_after.len(), 1);
+    assert_eq!(channels_after[0].peer_pubkey, node3_pubkey);
 }

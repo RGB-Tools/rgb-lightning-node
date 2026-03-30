@@ -98,7 +98,7 @@ pub enum APIError {
     #[error("Insufficient capacity to cover the commitment transaction fees ({0} sat)")]
     InsufficientCapacity(u64),
 
-    #[error("Not enough funds, get an address and send {0} sats there")]
+    #[error("Not enough funds, missing {0} sats")]
     InsufficientFunds(u64),
 
     #[error("Invalid address: {0}")]
@@ -259,9 +259,6 @@ pub enum APIError {
 
     #[error("No valid transport endpoint found")]
     NoValidTransportEndpoint,
-
-    #[error("Cannot perform this operation while an open channel operation is in progress")]
-    OpenChannelInProgress,
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
@@ -517,7 +514,6 @@ impl IntoResponse for APIError {
             | APIError::NoAvailableUtxos
             | APIError::NoRoute
             | APIError::NotInitialized
-            | APIError::OpenChannelInProgress
             | APIError::PaymentNotFound(_)
             | APIError::RecipientIDAlreadyUsed
             | APIError::SwapNotFound(_)

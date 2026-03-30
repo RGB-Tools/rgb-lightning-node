@@ -1,5 +1,6 @@
 use amplify::{map, s};
 use bitcoin::blockdata::locktime::absolute::LockTime;
+use bitcoin::hex::DisplayHex;
 use bitcoin::psbt::{ExtractTxError, Psbt};
 use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
 use bitcoin::{io, Amount, Network};
@@ -23,9 +24,9 @@ use lightning::onion_message::messenger::{
 };
 use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME, STATIC_BLINDING,
-    WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME,
-    WALLET_MASTER_FINGERPRINT_FNAME,
+    update_rgb_channel_amount, write_rgb_channel_info, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME,
+    STATIC_BLINDING, WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME,
+    WALLET_FINGERPRINT_FNAME, WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -65,14 +66,15 @@ use rgb_lib::{
         secp256k1::Secp256k1 as Secp256k1_30,
         ScriptBuf,
     },
+    keys::WitnessVersion,
     utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
         DatabaseType, Recipient, SinglesigKeys, TransportEndpoint, Wallet as RgbLibWallet,
         WalletData, WitnessData,
     },
-    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Fascia, FileContent,
-    RgbTransfer, RgbTxid, WitnessOrd,
+    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Error as RgbLibError,
+    Fascia, FileContent, RgbTransfer, RgbTxid, WitnessOrd,
 };
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -556,6 +558,114 @@ fn find_and_update_rgb_chan_amt(ldk_data_dir: &Path, payment_hash: &PaymentHash,
     }
 }
 
+// Handle an rgb-lib error that happened while preparing a channel funding transaction in
+// FundingGenerationReady. Returns the value to propagate from the event handler: `Err(ReplayEvent)`
+// to retry the event (for transient network errors), or `Ok(())` after force-closing the channel
+// (for terminal errors).
+fn handle_funding_prepare_err(
+    e: RgbLibError,
+    channel_manager: &ChannelManager,
+    temporary_channel_id: &ChannelId,
+    counterparty_node_id: &PublicKey,
+) -> Result<(), ReplayEvent> {
+    match e {
+        RgbLibError::Indexer { details }
+        | RgbLibError::InvalidIndexer { details }
+        | RgbLibError::Network { details } => {
+            tracing::error!("Network error during channel opening: {details}");
+            Err(ReplayEvent())
+        }
+        e => {
+            tracing::error!("Cannot open channel: {e}");
+            if let Err(close_err) = channel_manager.force_close_broadcasting_latest_txn(
+                temporary_channel_id,
+                counterparty_node_id,
+                e.to_string(),
+            ) {
+                tracing::error!(
+                    "Failed to force-close channel {temporary_channel_id} after error: {close_err:?}"
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+async fn handle_open_chan_fail(
+    channel_id: &ChannelId,
+    static_state: &StaticState,
+    unlocked_state: Arc<UnlockedAppState>,
+) {
+    tracing::info!("Handling open channel failure for channel {channel_id}");
+    let pending_funding_path = static_state
+        .ldk_data_dir
+        .join(format!("pending_funding_{}", channel_id.0.as_hex()));
+    if let Some((rgb_info, _)) =
+        get_rgb_channel_info_optional(channel_id, &PathBuf::from(&static_state.ldk_data_dir), true)
+    {
+        if let Some(batch_transfer_idx) = rgb_info.batch_transfer_idx {
+            let unlocked_state_copy = unlocked_state.clone();
+            let failed = tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_fail_transfers(Some(batch_transfer_idx), false, true)
+            })
+            .await
+            .unwrap();
+            match failed {
+                Ok(changed) => {
+                    tracing::info!(
+                        "RGB transfer batch_transfer_idx={} for channel {}: {}",
+                        batch_transfer_idx,
+                        channel_id,
+                        if changed {
+                            "failed successfully"
+                        } else {
+                            "no change needed"
+                        }
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Error failing RGB transfer batch_transfer_idx={} for channel {}: {:?}",
+                        batch_transfer_idx,
+                        channel_id,
+                        e
+                    );
+                }
+            }
+        }
+    } else if pending_funding_path.exists() {
+        let funding_txid = fs::read_to_string(&pending_funding_path).unwrap();
+        let unlocked_state_copy = unlocked_state.clone();
+        let txid_copy = funding_txid.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_abort_pending_vanilla_tx(txid_copy)
+        })
+        .await
+        .unwrap();
+        match result {
+            Ok(()) => {
+                tracing::info!(
+                    "Aborted pending vanilla tx {} for channel {}",
+                    funding_txid,
+                    channel_id
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Error aborting pending vanilla tx {} for channel {}: {:?}",
+                    funding_txid,
+                    channel_id,
+                    e
+                );
+            }
+        }
+    }
+    if pending_funding_path.exists() {
+        fs::remove_file(&pending_funding_path).unwrap();
+    }
+    unlocked_state.delete_channel_id(*channel_id);
+}
+
 async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
@@ -604,7 +714,8 @@ async fn handle_ldk_events(
                     AssetSchema::Uda => Assignment::NonFungible,
                 };
 
-                let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
+                let recipient_id =
+                    recipient_id_from_script_buf(script_buf.clone(), static_state.network);
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
@@ -618,52 +729,103 @@ async fn handle_ldk_events(
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
-                let unsigned_psbt = tokio::task::spawn_blocking(move || {
-                    let res = unlocked_state_copy
-                        .rgb_send_begin(
-                            recipient_map,
-                            true,
-                            FEE_RATE,
-                            MIN_CHANNEL_CONFIRMATIONS,
-                            None,
-                            true,
-                        )
-                        .unwrap();
+                let res = tokio::task::spawn_blocking(move || {
+                    let res = unlocked_state_copy.rgb_send_begin(
+                        recipient_map,
+                        true,
+                        FEE_RATE,
+                        MIN_CHANNEL_CONFIRMATIONS,
+                        None,
+                        false,
+                    )?;
                     let fascia_str = fs::read_to_string(&res.details.fascia_path).unwrap();
                     let fascia: Fascia = serde_json::from_str(&fascia_str).unwrap();
-                    unlocked_state_copy
-                        .rgb_consume_fascia(fascia, None)
-                        .unwrap();
-                    unlocked_state_copy
-                        .rgb_create_consignments(res.psbt.clone())
-                        .unwrap();
-                    res.psbt
+                    unlocked_state_copy.rgb_consume_fascia(fascia, None)?;
+                    unlocked_state_copy.rgb_create_consignments(res.psbt.clone())?;
+                    Ok((res.psbt, res.batch_transfer_idx))
                 })
                 .await
                 .unwrap();
-                (unsigned_psbt, Some(asset_id))
+                match res {
+                    Err(e) => {
+                        return handle_funding_prepare_err(
+                            e,
+                            &unlocked_state.channel_manager,
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                        );
+                    }
+                    Ok((unsigned_psbt, batch_transfer_idx)) => {
+                        if let Some((mut rgb_info, info_path)) = get_rgb_channel_info_optional(
+                            &temporary_channel_id,
+                            &PathBuf::from(&static_state.ldk_data_dir),
+                            true,
+                        ) {
+                            rgb_info.batch_transfer_idx = batch_transfer_idx;
+                            write_rgb_channel_info(&info_path, &rgb_info);
+                        }
+                        (unsigned_psbt, Some(asset_id))
+                    }
+                }
             } else {
-                let unsigned_psbt = unlocked_state
-                    .rgb_send_btc_begin(addr.to_address(), channel_value_satoshis, FEE_RATE)
-                    .unwrap();
-                (unsigned_psbt, None)
+                let unlocked_state_copy = unlocked_state.clone();
+                let btc_address = addr.to_address();
+                let res = tokio::task::spawn_blocking(move || {
+                    unlocked_state_copy.rgb_send_btc_begin(
+                        btc_address,
+                        channel_value_satoshis,
+                        FEE_RATE,
+                        false,
+                    )
+                })
+                .await
+                .unwrap();
+                match res {
+                    Err(e) => {
+                        return handle_funding_prepare_err(
+                            e,
+                            &unlocked_state.channel_manager,
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                        );
+                    }
+                    Ok(unsigned_psbt) => (unsigned_psbt, None),
+                }
             };
 
             let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
             let psbt = Psbt::from_str(&signed_psbt).unwrap();
 
             let funding_tx = psbt.clone().extract_tx().unwrap();
-            let funding_txid = funding_tx.compute_txid().to_string();
-            tracing::info!("Funding TXID: {funding_txid}");
+            let funding_txid = funding_tx.compute_txid();
+            let funding_txid_str = funding_txid.to_string();
+            tracing::info!("Funding TXID: {funding_txid_str}");
+
+            // persist the funding TXID keyed by the final channel ID so handle_open_chan_fail can
+            // find it
+            let funding_output_index = funding_tx
+                .output
+                .iter()
+                .position(|o| o.script_pubkey == script_buf)
+                .expect("funding TX must contain the expected output script")
+                as u16;
+            let final_channel_id = ChannelId::v1_from_funding_txid(
+                bitcoin::hashes::Hash::as_byte_array(&funding_txid),
+                funding_output_index,
+            );
+            let pending_funding_path = static_state
+                .ldk_data_dir
+                .join(format!("pending_funding_{}", final_channel_id.0.as_hex()));
+            fs::write(&pending_funding_path, &funding_txid_str).unwrap();
 
             let psbt_path = static_state
                 .ldk_data_dir
-                .join(format!("psbt_{funding_txid}"));
+                .join(format!("psbt_{funding_txid_str}"));
             fs::write(psbt_path, psbt.to_string()).unwrap();
 
             if let Some(asset_id) = asset_id {
                 let unlocked_state_copy = unlocked_state.clone();
-                let witness_id = funding_txid.clone();
+                let witness_id = funding_txid_str.clone();
                 tokio::task::spawn_blocking(move || {
                     unlocked_state_copy
                         .rgb_upsert_witness(
@@ -676,7 +838,7 @@ async fn handle_ldk_events(
                 .unwrap();
 
                 let consignment_path =
-                    unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid);
+                    unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid_str);
                 let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
@@ -684,9 +846,9 @@ async fn handle_ldk_events(
                 let res = tokio::task::spawn_blocking(move || {
                     unlocked_state_copy.rgb_post_consignment(
                         &proxy_url,
-                        funding_txid.clone(),
+                        funding_txid_str.clone(),
                         &consignment_path,
-                        funding_txid,
+                        funding_txid_str,
                         None,
                     )
                 })
@@ -712,7 +874,8 @@ async fn handle_ldk_events(
             {
                 tracing::error!(
                         "ERROR: Channel went away before we could fund it. The peer disconnected or refused the channel.");
-                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                handle_open_chan_fail(&final_channel_id, &static_state, unlocked_state.clone())
+                    .await;
             }
         }
         Event::FundingTxBroadcastSafe { .. } => {
@@ -1105,7 +1268,10 @@ async fn handle_ldk_events(
                     ReplayEvent()
                 })?;
 
-                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                let pending_funding_path = static_state
+                    .ldk_data_dir
+                    .join(format!("pending_funding_{}", channel_id.0.as_hex()));
+                fs::remove_file(&pending_funding_path).unwrap();
             } else {
                 // acceptor
                 let consignment_path = static_state
@@ -1163,19 +1329,20 @@ async fn handle_ldk_events(
                 reason
             );
 
-            *unlocked_state.rgb_send_lock.lock().unwrap() = false;
-
-            unlocked_state.delete_channel_id(channel_id);
+            // the ChannelClosed event gets fired also after node crashes/restarts, so it's better
+            // to handle the failure here (regardless what the DiscardFunding event documents)
+            handle_open_chan_fail(&channel_id, &static_state, unlocked_state.clone()).await;
         }
         Event::DiscardFunding { channel_id, .. } => {
-            // A "real" node should probably "lock" the UTXOs spent in funding transactions until
-            // the funding transaction either confirms, or this event is generated.
             tracing::info!(
                 "EVENT: Discarded funding for channel with ID {}",
                 channel_id
             );
 
-            unlocked_state.delete_channel_id(channel_id);
+            // this will probably do nothing, since the ChannelClosed event will be triggered
+            // before, but in case of splicing this should be the correct place to handle the
+            // failure
+            handle_open_chan_fail(&channel_id, &static_state, unlocked_state.clone()).await;
         }
         Event::HTLCIntercepted {
             is_swap,
@@ -1809,11 +1976,12 @@ pub(crate) async fn start_ldk(
     };
 
     // Prepare the RGB wallet
+    let witness_version = WitnessVersion::Taproot;
     let mnemonic_str = mnemonic.to_string();
     let (_, account_xpub_vanilla, _) =
-        get_account_data(&bitcoin_network, &mnemonic_str, false).unwrap();
+        get_account_data(&bitcoin_network, &mnemonic_str, false, witness_version).unwrap();
     let (_, account_xpub_colored, master_fingerprint) =
-        get_account_data(&bitcoin_network, &mnemonic_str, true).unwrap();
+        get_account_data(&bitcoin_network, &mnemonic_str, true, witness_version).unwrap();
     let data_dir = static_state
         .storage_dir_path
         .clone()
@@ -1825,6 +1993,7 @@ pub(crate) async fn start_ldk(
         vanilla_keychain: None,
         master_fingerprint: master_fingerprint.to_string(),
         mnemonic: Some(mnemonic.to_string()),
+        witness_version,
     };
     let mut rgb_wallet = tokio::task::spawn_blocking(move || {
         RgbLibWallet::new(
@@ -2157,7 +2326,6 @@ pub(crate) async fn start_ldk(
         taker_swaps,
         router: Arc::clone(&router),
         output_sweeper: Arc::clone(&output_sweeper),
-        rgb_send_lock: Arc::new(Mutex::new(false)),
         channel_ids_map,
         proxy_endpoint: proxy_endpoint.to_string(),
     });

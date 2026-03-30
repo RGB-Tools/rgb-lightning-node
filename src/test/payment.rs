@@ -191,7 +191,7 @@ async fn success() {
         .unwrap();
     let tx_utxos = transactions.iter().find(|t| t.sent == 100000000).unwrap();
     let tx_send = transactions.iter().find(|t| t.sent == 128000).unwrap();
-    assert_eq!(tx_user.transaction_type, TransactionType::User);
+    assert_eq!(tx_user.transaction_type, TransactionType::Incoming);
     assert_eq!(tx_utxos.transaction_type, TransactionType::CreateUtxos);
     assert_eq!(tx_send.transaction_type, TransactionType::RgbSend);
     assert!(tx_utxos.confirmation_time.is_some());

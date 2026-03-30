@@ -3014,7 +3014,8 @@ components:
         - RgbSend
         - Drain
         - CreateUtxos
-        - User
+        - SendBtc
+        - Incoming
     Transfer:
       type: object
       required:
