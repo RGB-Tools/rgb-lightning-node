@@ -41,6 +41,8 @@ fn handle_from_request(request: SdkInitRequest) -> Result<NodeHandle, RlnError> 
         network,
         max_media_upload_size_mb: request.max_media_upload_size_mb,
         root_public_key: None,
+        enable_virtual_channels_v0: request.enable_virtual_channels_v0.unwrap_or(false),
+        virtual_peer_pubkeys: request.virtual_peer_pubkeys.unwrap_or_default(),
     };
     block_on_app(NodeHandle::new(config))
 }
@@ -476,7 +478,10 @@ impl SdkNode {
         Ok(SdkSendBtcResponse { txid })
     }
 
-    pub fn makerinit(&self, request: SdkMakerInitRequest) -> Result<SdkMakerInitResponse, RlnError> {
+    pub fn makerinit(
+        &self,
+        request: SdkMakerInitRequest,
+    ) -> Result<SdkMakerInitResponse, RlnError> {
         let state = self.handle.app_state();
         let response = block_on_sdk(sdk::maker_init(
             state,
@@ -527,7 +532,11 @@ impl SdkNode {
         block_on_sdk(sdk::send_onion_message(
             state,
             sdk::SendOnionMessageRequestData {
-                node_ids: request.node_ids.into_iter().map(|v| v.to_string()).collect(),
+                node_ids: request
+                    .node_ids
+                    .into_iter()
+                    .map(|v| v.to_string())
+                    .collect(),
                 tlv_type: request.tlv_type,
                 data: request.data,
             },
@@ -559,6 +568,7 @@ impl SdkNode {
                     .temporary_channel_id
                     .map(|id| id.0.as_hex().to_string()),
                 push_asset_amount: request.push_asset_amount,
+                virtual_open_mode: request.virtual_open_mode,
             },
         ))?;
         let hex = response.temporary_channel_id;
@@ -779,6 +789,7 @@ impl SdkNode {
                     asset_id,
                     asset_local_amount: c.asset_local_amount,
                     asset_remote_amount: c.asset_remote_amount,
+                    virtual_open_mode: c.virtual_open_mode,
                 })
             })
             .collect()

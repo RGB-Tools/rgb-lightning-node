@@ -9,11 +9,11 @@ mod bitcoind;
 mod core_types;
 mod disk;
 mod error;
-#[cfg(feature = "uniffi")]
-pub mod ffi;
 #[cfg(test)]
 #[path = "test/fee_mock.rs"]
 mod fee_mock;
+#[cfg(feature = "uniffi")]
+pub mod ffi;
 mod ldk;
 mod node;
 mod rgb;

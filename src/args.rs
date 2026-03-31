@@ -1,10 +1,11 @@
+use bitcoin::secp256k1::PublicKey;
 use clap::{value_parser, Parser};
 use rgb_lib::BitcoinNetwork;
 use std::path::PathBuf;
 
 use crate::auth::check_auth_args;
 use crate::error::AppError;
-use crate::utils::check_port_is_available;
+use crate::utils::{check_port_is_available, hex_str_to_compressed_pubkey};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -35,6 +36,12 @@ struct Args {
     /// Disable authentication
     #[arg(long, default_value_t = false)]
     disable_authentication: bool,
+
+    #[arg(long, default_value_t = false)]
+    enable_virtual_channels_v0: bool,
+
+    #[arg(long, value_delimiter = ',')]
+    virtual_peer_pubkeys: Vec<String>,
 }
 
 pub(crate) struct UserArgs {
@@ -44,6 +51,8 @@ pub(crate) struct UserArgs {
     pub(crate) network: BitcoinNetwork,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) root_public_key: Option<biscuit_auth::PublicKey>,
+    pub(crate) enable_virtual_channels_v0: bool,
+    pub(crate) virtual_peer_pubkeys: Vec<PublicKey>,
 }
 
 pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
@@ -58,6 +67,14 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
 
     let root_public_key = check_auth_args(args.disable_authentication, args.root_public_key)?;
 
+    let mut virtual_peer_pubkeys = Vec::new();
+    for pubkey in args.virtual_peer_pubkeys {
+        let Some(parsed_pubkey) = hex_str_to_compressed_pubkey(&pubkey) else {
+            return Err(AppError::InvalidVirtualPeerPubkey(pubkey));
+        };
+        virtual_peer_pubkeys.push(parsed_pubkey);
+    }
+
     Ok(UserArgs {
         storage_dir_path: args.storage_directory_path,
         daemon_listening_port,
@@ -65,5 +82,7 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
         network,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
         root_public_key,
+        enable_virtual_channels_v0: args.enable_virtual_channels_v0,
+        virtual_peer_pubkeys,
     })
 }

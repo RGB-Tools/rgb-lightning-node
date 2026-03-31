@@ -1,15 +1,18 @@
 use amplify::{map, s};
 use bitcoin::blockdata::locktime::absolute::LockTime;
+use bitcoin::hashes::{sha256, Hash as BitcoinHash};
 use bitcoin::psbt::{ExtractTxError, Psbt};
 use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
 use bitcoin::{io, Amount, Network};
 use bitcoin::{BlockHash, TxOut};
 use bitcoin_bech32::WitnessProgram;
-use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
+use hex::DisplayHex;
+use lightning::chain::{chainmonitor, transaction::OutPoint, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
-use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
+use lightning::ln::channel_state::ChannelDetails;
+use lightning::ln::channelmanager::{self, ChannelFundingType, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
 };
@@ -22,10 +25,11 @@ use lightning::onion_message::messenger::{
     DefaultMessageRouter, OnionMessenger as LdkOnionMessenger,
 };
 use lightning::rgb_utils::{
-    get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME, STATIC_BLINDING,
-    WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME,
-    WALLET_MASTER_FINGERPRINT_FNAME,
+    get_rgb_channel_info_path, get_rgb_channel_info_pending, get_rgb_payment_info_pending_path,
+    get_virtual_channel_marker_path, is_channel_rgb, parse_rgb_payment_info,
+    read_rgb_transfer_info, update_rgb_channel_amount, RgbInfo, BITCOIN_NETWORK_FNAME,
+    INDEXER_URL_FNAME, STATIC_BLINDING, WALLET_ACCOUNT_XPUB_COLORED_FNAME,
+    WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME, WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -45,7 +49,7 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::{ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
-use lightning::{chain, impl_writeable_tlv_based};
+use lightning::{chain, impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
 use lightning_block_sync::gossip::TokioSpawner;
 use lightning_block_sync::init;
@@ -93,12 +97,12 @@ use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
 use crate::core_types::{
-    HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE,
-    MIN_CHANNEL_CONFIRMATIONS,
+    HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS,
 };
 use crate::disk::{
     self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
+    VIRTUAL_CHANNEL_DRAFT_STORE_FNAME, VIRTUAL_CHANNEL_SESSION_STORE_FNAME,
 };
 use crate::error::APIError;
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLibWalletWrapper};
@@ -109,6 +113,37 @@ use crate::utils::{
     ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL,
     PROXY_ENDPOINT_PUBLIC,
 };
+
+const VIRTUAL_CHANNEL_DOMAIN_SEPARATOR: &[u8] = b"rln_virtual_channels_v0";
+
+pub(crate) fn virtual_channel_synthetic_outpoint(
+    network: BitcoinNetwork,
+    local_node_id: &PublicKey,
+    peer_node_id: &PublicKey,
+) -> OutPoint {
+    let mut ordered = [local_node_id.serialize(), peer_node_id.serialize()];
+    ordered.sort();
+    let network_tag = match network {
+        BitcoinNetwork::Mainnet => b"mainnet".as_slice(),
+        BitcoinNetwork::Testnet => b"testnet".as_slice(),
+        BitcoinNetwork::Testnet4 => b"testnet4".as_slice(),
+        BitcoinNetwork::Regtest => b"regtest".as_slice(),
+        BitcoinNetwork::Signet => b"signet".as_slice(),
+    };
+
+    let mut preimage = Vec::with_capacity(
+        VIRTUAL_CHANNEL_DOMAIN_SEPARATOR.len() + network_tag.len() + ordered[0].len() * 2,
+    );
+    preimage.extend_from_slice(VIRTUAL_CHANNEL_DOMAIN_SEPARATOR);
+    preimage.extend_from_slice(network_tag);
+    preimage.extend_from_slice(&ordered[0]);
+    preimage.extend_from_slice(&ordered[1]);
+
+    let txid = bitcoin::Txid::from_byte_array(
+        <sha256::Hash as BitcoinHash>::hash(&preimage).to_byte_array(),
+    );
+    OutPoint { txid, index: 0 }
+}
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -171,6 +206,77 @@ pub(crate) struct ChannelIdsMap {
 impl_writeable_tlv_based!(ChannelIdsMap, {
     (0, channel_ids, required),
 });
+
+#[derive(Clone, Debug)]
+pub(crate) struct VirtualChannelDraft {
+    pub(crate) created_at: u64,
+    pub(crate) peer_id: PublicKey,
+    pub(crate) temporary_channel_id: ChannelId,
+}
+
+impl_writeable_tlv_based!(VirtualChannelDraft, {
+    (0, created_at, required),
+    (2, peer_id, required),
+    (4, temporary_channel_id, required),
+});
+
+pub(crate) struct VirtualChannelDraftStore {
+    pub(crate) entries: LdkHashMap<ChannelId, VirtualChannelDraft>,
+}
+
+impl_writeable_tlv_based!(VirtualChannelDraftStore, {
+    (0, entries, required),
+});
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VirtualChannelSessionStatus {
+    Active,
+    AbandonPending,
+    Abandoned,
+}
+
+impl_writeable_tlv_based_enum!(VirtualChannelSessionStatus,
+    (0, Active) => {},
+    (2, AbandonPending) => {},
+    (4, Abandoned) => {},
+);
+
+#[derive(Clone, Debug)]
+pub(crate) struct VirtualChannelSession {
+    pub(crate) channel_id: ChannelId,
+    pub(crate) created_at: u64,
+    pub(crate) former_temporary_channel_id: ChannelId,
+    pub(crate) peer_id: PublicKey,
+    pub(crate) status: VirtualChannelSessionStatus,
+    pub(crate) virtual_funding_txo: OutPoint,
+    pub(crate) updated_at: u64,
+}
+
+impl_writeable_tlv_based!(VirtualChannelSession, {
+    (0, channel_id, required),
+    (2, created_at, required),
+    (4, former_temporary_channel_id, required),
+    (6, peer_id, required),
+    (8, status, (default_value, VirtualChannelSessionStatus::Active)),
+    (10, virtual_funding_txo, required),
+    (12, updated_at, (default_value, created_at)),
+});
+
+pub(crate) struct VirtualChannelSessionStore {
+    pub(crate) entries: LdkHashMap<ChannelId, VirtualChannelSession>,
+}
+
+impl_writeable_tlv_based!(VirtualChannelSessionStore, {
+    (0, entries, required),
+});
+
+impl VirtualChannelSessionStore {
+    pub(crate) fn contains_virtual_funding_txo(&self, virtual_funding_txo: &OutPoint) -> bool {
+        self.entries
+            .values()
+            .any(|session| session.virtual_funding_txo == *virtual_funding_txo)
+    }
+}
 
 impl UnlockedAppState {
     pub(crate) fn add_maker_swap(&self, payment_hash: PaymentHash, swap: SwapData) {
@@ -406,7 +512,7 @@ impl UnlockedAppState {
         self.save_channel_ids_map(channel_ids_map);
     }
 
-    pub(crate) fn delete_channel_id(&self, channel_id: ChannelId) {
+    pub(crate) fn delete_channel_id(&self, channel_id: ChannelId) -> Option<ChannelId> {
         let mut channel_ids_map = self.get_channel_ids_map();
         if let Some(temporary_channel_id) = channel_ids_map
             .channel_ids
@@ -422,12 +528,258 @@ impl UnlockedAppState {
         {
             channel_ids_map.channel_ids.remove(&temporary_channel_id);
             self.save_channel_ids_map(channel_ids_map);
+            Some(temporary_channel_id)
+        } else {
+            None
         }
     }
 
     fn save_channel_ids_map(&self, channel_ids: MutexGuard<ChannelIdsMap>) {
         self.fs_store
             .write("", "", CHANNEL_IDS_FNAME, channel_ids.encode())
+            .unwrap();
+    }
+
+    pub(crate) fn virtual_channel_add_intent(
+        &self,
+        peer_id: PublicKey,
+        temporary_channel_id: Option<ChannelId>,
+    ) -> Result<ChannelId, APIError> {
+        let mut drafts = self.get_virtual_channel_draft_store();
+        let duplicate_virtual_draft = drafts
+            .entries
+            .values()
+            .any(|draft| draft.peer_id == peer_id);
+        if duplicate_virtual_draft {
+            return Err(APIError::InvalidRequest(
+                "virtual channel draft already exists for this peer pair".to_string(),
+            ));
+        }
+
+        let duplicate_virtual_session = self
+            .get_virtual_channel_session_store()
+            .entries
+            .values()
+            .any(|session| session.peer_id == peer_id);
+        if duplicate_virtual_session {
+            return Err(APIError::InvalidRequest(
+                "virtual channel session already exists for this peer pair".to_string(),
+            ));
+        }
+
+        let channel_ids = self.channel_ids();
+        let temporary_channel_id = if let Some(temporary_channel_id) = temporary_channel_id {
+            if channel_ids.contains_key(&temporary_channel_id)
+                || drafts.entries.contains_key(&temporary_channel_id)
+            {
+                return Err(APIError::TemporaryChannelIdAlreadyUsed);
+            }
+            temporary_channel_id
+        } else {
+            loop {
+                let mut tmp_channel_id_bytes = [0u8; 32];
+                tmp_channel_id_bytes
+                    .copy_from_slice(&self.keys_manager.get_secure_random_bytes()[..32]);
+                let candidate = ChannelId::from_bytes(tmp_channel_id_bytes);
+                if !channel_ids.contains_key(&candidate) && !drafts.entries.contains_key(&candidate)
+                {
+                    break candidate;
+                }
+            }
+        };
+
+        drafts.entries.insert(
+            temporary_channel_id,
+            VirtualChannelDraft {
+                temporary_channel_id,
+                peer_id,
+                created_at: get_current_timestamp(),
+            },
+        );
+        self.virtual_channel_draft_store_save(drafts);
+
+        Ok(temporary_channel_id)
+    }
+
+    pub(crate) fn virtual_channel_draft_delete(&self, temporary_channel_id: &ChannelId) {
+        let mut drafts = self.get_virtual_channel_draft_store();
+        drafts.entries.remove(temporary_channel_id);
+        self.virtual_channel_draft_store_save(drafts);
+    }
+
+    pub(crate) fn virtual_channel_draft_get(
+        &self,
+        temporary_channel_id: &ChannelId,
+    ) -> Option<VirtualChannelDraft> {
+        self.get_virtual_channel_draft_store()
+            .entries
+            .get(temporary_channel_id)
+            .cloned()
+    }
+
+    pub(crate) fn virtual_channel_draft_store(&self) -> LdkHashMap<ChannelId, VirtualChannelDraft> {
+        self.get_virtual_channel_draft_store().entries.clone()
+    }
+
+    fn virtual_channel_draft_store_save(&self, drafts: MutexGuard<VirtualChannelDraftStore>) {
+        self.fs_store
+            .write("", "", VIRTUAL_CHANNEL_DRAFT_STORE_FNAME, drafts.encode())
+            .unwrap();
+    }
+
+    pub(crate) fn virtual_channel_ensure_no_client_value(
+        &self,
+        chan_details: &ChannelDetails,
+        ldk_data_dir: &Path,
+    ) -> Result<(), String> {
+        if chan_details.has_inflight_htlcs {
+            return Err("virtual cleanup is blocked while HTLCs are still in flight".to_string());
+        }
+        let channel_id_hex = chan_details.channel_id.0.as_hex().to_string();
+        let entries = fs::read_dir(ldk_data_dir)
+            .map_err(|_| "virtual cleanup could not inspect RGB temp artifacts".to_string())?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|_| "virtual cleanup could not inspect RGB temp artifacts".to_string())?;
+            let path = entry.path();
+            let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !matches!(extension, "inbound_pending" | "outbound_pending") {
+                continue;
+            }
+            let Some(file_stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if file_stem.starts_with(&channel_id_hex) && file_stem.len() > channel_id_hex.len() {
+                return Err(
+                    "virtual cleanup is blocked while RGB payment temp artifacts remain"
+                        .to_string(),
+                );
+            }
+        }
+
+        match chan_details.counterparty_balance_sats_floor {
+            Some(0) => {}
+            Some(balance_floor) => {
+                return Err(format!(
+                    "virtual cleanup is blocked while counterparty BTC balance floor is {balance_floor} sat"
+                ))
+            }
+            None => {
+                return Err(
+                    "virtual cleanup requires an exact counterparty BTC balance floor proof"
+                        .to_string(),
+                )
+            }
+        }
+
+        let final_rgb_state_path = get_rgb_channel_info_path(
+            &chan_details.channel_id.0.as_hex().to_string(),
+            ldk_data_dir,
+            false,
+        );
+        let pending_rgb_state_path = get_rgb_channel_info_path(
+            &chan_details.channel_id.0.as_hex().to_string(),
+            ldk_data_dir,
+            true,
+        );
+        let is_rgb_backed = final_rgb_state_path.exists() || pending_rgb_state_path.exists();
+        if !is_rgb_backed {
+            return Ok(());
+        }
+
+        if !final_rgb_state_path.exists() || !pending_rgb_state_path.exists() {
+            return Err(
+                "virtual cleanup requires both final and pending RGB channel state".to_string(),
+            );
+        }
+
+        let read_rgb_info_strict = |path: &Path| -> Result<RgbInfo, String> {
+            let serialized = fs::read_to_string(path).map_err(|_| {
+                format!(
+                    "virtual cleanup requires readable RGB state at {}",
+                    path.display()
+                )
+            })?;
+            serde_json::from_str(&serialized).map_err(|_| {
+                format!(
+                    "virtual cleanup requires parseable RGB state at {}",
+                    path.display()
+                )
+            })
+        };
+
+        let final_rgb_state = read_rgb_info_strict(&final_rgb_state_path)?;
+        let pending_rgb_state = read_rgb_info_strict(&pending_rgb_state_path)?;
+
+        if final_rgb_state.contract_id != pending_rgb_state.contract_id
+            || final_rgb_state.schema != pending_rgb_state.schema
+            || final_rgb_state.local_rgb_amount != pending_rgb_state.local_rgb_amount
+            || final_rgb_state.remote_rgb_amount != pending_rgb_state.remote_rgb_amount
+        {
+            return Err(
+                "virtual cleanup is blocked while RGB channel state is still diverged".to_string(),
+            );
+        }
+
+        if final_rgb_state.remote_rgb_amount != 0 {
+            return Err(format!(
+                "virtual cleanup is blocked while counterparty RGB balance is {}",
+                final_rgb_state.remote_rgb_amount
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn virtual_channel_session_add(&self, session: VirtualChannelSession) {
+        let mut sessions = self.get_virtual_channel_session_store();
+        sessions.entries.insert(session.channel_id, session);
+        self.virtual_channel_session_store_save(sessions);
+    }
+
+    pub(crate) fn virtual_channel_session_get(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Option<VirtualChannelSession> {
+        self.get_virtual_channel_session_store()
+            .entries
+            .get(channel_id)
+            .cloned()
+    }
+
+    pub(crate) fn virtual_channel_session_update(&self, session: VirtualChannelSession) {
+        let mut sessions = self.get_virtual_channel_session_store();
+        sessions.entries.insert(session.channel_id, session);
+        self.virtual_channel_session_store_save(sessions);
+    }
+
+    pub(crate) fn virtual_channel_session_update_status(
+        &self,
+        session: &VirtualChannelSession,
+        status: VirtualChannelSessionStatus,
+    ) {
+        let mut updated_session = session.clone();
+        updated_session.status = status;
+        updated_session.updated_at = get_current_timestamp();
+        self.virtual_channel_session_update(updated_session);
+    }
+
+    pub(crate) fn virtual_channel_session_store(
+        &self,
+    ) -> LdkHashMap<ChannelId, VirtualChannelSession> {
+        self.get_virtual_channel_session_store().entries.clone()
+    }
+
+    fn virtual_channel_session_store_save(&self, sessions: MutexGuard<VirtualChannelSessionStore>) {
+        self.fs_store
+            .write(
+                "",
+                "",
+                VIRTUAL_CHANNEL_SESSION_STORE_FNAME,
+                sessions.encode(),
+            )
             .unwrap();
     }
 }
@@ -524,32 +876,159 @@ pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
     Arc<RgbOutputSpender>,
 >;
 
-fn _update_rgb_channel_amount(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
+pub(crate) fn _clear_rgb_payment_pending_markers(ldk_data_dir: &Path, payment_hash: &PaymentHash) {
+    _clear_rgb_payment_raw_pending_markers(ldk_data_dir, payment_hash);
+    for attachment in _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash) {
+        let _ = fs::remove_file(attachment.path);
+    }
+}
+
+pub(crate) fn _clear_rgb_payment_raw_pending_markers(
+    ldk_data_dir: &Path,
+    payment_hash: &PaymentHash,
+) {
+    for inbound in [false, true] {
+        let _ = fs::remove_file(get_rgb_payment_info_pending_path(
+            payment_hash,
+            ldk_data_dir,
+            inbound,
+        ));
+    }
+}
+
+#[derive(Clone)]
+struct RgbChannelPaymentPendingAttachment {
+    channel_id: String,
+    path: PathBuf,
+}
+
+fn _collect_rgb_channel_payment_pending_attachments(
+    ldk_data_dir: &Path,
+    payment_hash: &PaymentHash,
+) -> Vec<RgbChannelPaymentPendingAttachment> {
     let payment_hash_str = hex_str(&payment_hash.0);
-    for entry in fs::read_dir(ldk_data_dir).unwrap() {
-        let file = entry.unwrap();
-        let file_name = file.file_name();
-        let file_name_str = file_name.to_string_lossy();
-        let mut file_path_no_ext = file.path().clone();
-        file_path_no_ext.set_extension("");
-        let file_name_str_no_ext = file_path_no_ext.file_name().unwrap().to_string_lossy();
-        if file_name_str.contains(&payment_hash_str) && file_name_str_no_ext != payment_hash_str {
-            let rgb_payment_info = parse_rgb_payment_info(&file.path());
-            let channel_id_str = file_name_str_no_ext.replace(&payment_hash_str, "");
+    let mut attachments = Vec::new();
 
-            if rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
-                continue;
-            }
+    let Ok(entries) = fs::read_dir(ldk_data_dir) else {
+        return Vec::new();
+    };
 
-            let (offered, received) = if receiver {
-                (0, rgb_payment_info.amount)
-            } else {
-                (rgb_payment_info.amount, 0)
-            };
-            update_rgb_channel_amount(&channel_id_str, offered, received, ldk_data_dir, false);
-            break;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if !matches!(extension, "inbound_pending" | "outbound_pending") {
+            continue;
+        }
+        let Some(file_stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if file_stem == payment_hash_str || !file_stem.ends_with(&payment_hash_str) {
+            continue;
+        }
+        let channel_id = &file_stem[..file_stem.len() - payment_hash_str.len()];
+        if channel_id.len() != 64 {
+            continue;
+        }
+        attachments.push(RgbChannelPaymentPendingAttachment {
+            channel_id: channel_id.to_string(),
+            path,
+        });
+    }
+
+    attachments
+}
+
+fn _finalize_rgb_channel_payment(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
+    let mut applied_any = false;
+    let mut applied_attachment_paths = Vec::new();
+
+    for attachment in _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash) {
+        let rgb_payment_info = parse_rgb_payment_info(&attachment.path);
+        if rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
+            continue;
+        }
+
+        let (offered, received) = if receiver {
+            (0, rgb_payment_info.amount)
+        } else {
+            (rgb_payment_info.amount, 0)
+        };
+        if _safe_update_rgb_channel_amount(
+            &attachment.channel_id,
+            offered,
+            received,
+            ldk_data_dir,
+            false,
+        ) {
+            applied_any = true;
+            applied_attachment_paths.push(attachment.path);
         }
     }
+
+    if applied_any {
+        for attachment_path in applied_attachment_paths {
+            let _ = fs::remove_file(attachment_path);
+        }
+        if _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash).is_empty() {
+            _clear_rgb_payment_raw_pending_markers(ldk_data_dir, payment_hash);
+        }
+    }
+}
+
+fn _finalize_virtual_rgb_channel_info(
+    ldk_data_dir: &Path,
+    temporary_channel_id: &ChannelId,
+    channel_id: &ChannelId,
+) {
+    let tmp_id = temporary_channel_id.to_string();
+    let final_id = channel_id.to_string();
+    for pending in [false, true] {
+        let src = if pending {
+            ldk_data_dir.join(format!("{tmp_id}.pending"))
+        } else {
+            ldk_data_dir.join(&tmp_id)
+        };
+        if !src.exists() {
+            continue;
+        }
+        let dst = if pending {
+            ldk_data_dir.join(format!("{final_id}.pending"))
+        } else {
+            ldk_data_dir.join(&final_id)
+        };
+        if !dst.exists() {
+            fs::copy(&src, &dst).expect("able to persist virtual RGB channel info");
+        }
+        let _ = fs::remove_file(src);
+    }
+}
+
+fn _safe_update_rgb_channel_amount(
+    channel_id: &str,
+    rgb_offered_htlc: u64,
+    rgb_received_htlc: u64,
+    ldk_data_dir: &Path,
+    pending: bool,
+) -> bool {
+    let info_file_path = get_rgb_channel_info_path(channel_id, ldk_data_dir, pending);
+    if !info_file_path.exists() {
+        tracing::warn!(
+            "Skipping RGB channel balance update for channel {} (pending={}) because channel RGB info file is missing",
+            channel_id,
+            pending
+        );
+        return false;
+    }
+    update_rgb_channel_amount(
+        channel_id,
+        rgb_offered_htlc,
+        rgb_received_htlc,
+        ldk_data_dir,
+        pending,
+    );
+    true
 }
 
 async fn handle_ldk_events(
@@ -565,6 +1044,9 @@ async fn handle_ldk_events(
             output_script,
             ..
         } => {
+            let ldk_data_dir = PathBuf::from(&static_state.ldk_data_dir);
+            let is_colored = is_channel_rgb(&temporary_channel_id, &ldk_data_dir);
+
             let addr = WitnessProgram::from_scriptpubkey(
                 output_script.as_bytes(),
                 match static_state.network {
@@ -579,10 +1061,235 @@ async fn handle_ldk_events(
             .expect("Lightning funding tx should always be to a SegWit output");
             let script_buf = ScriptBuf::from_bytes(addr.to_scriptpubkey());
 
-            let is_colored = is_channel_rgb(
-                &temporary_channel_id,
-                &PathBuf::from(&static_state.ldk_data_dir),
-            );
+            if let Some(virtual_draft) =
+                unlocked_state.virtual_channel_draft_get(&temporary_channel_id)
+            {
+                let reject_virtual_open = |reason: String| {
+                    tracing::error!(
+                        "rejecting virtual channel {} with {}: {}",
+                        temporary_channel_id,
+                        hex_str(&counterparty_node_id.serialize()),
+                        reason,
+                    );
+                    let temporary_marker_path = get_virtual_channel_marker_path(
+                        &temporary_channel_id.to_string(),
+                        &static_state.ldk_data_dir,
+                    );
+                    let _ = fs::remove_file(temporary_marker_path);
+                    unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
+                    *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                };
+
+                let mut virtual_funding_txo = virtual_channel_synthetic_outpoint(
+                    static_state.network,
+                    &unlocked_state.channel_manager.get_our_node_id(),
+                    &counterparty_node_id,
+                );
+                let duplicate_synthetic_funding_txo = {
+                    let session_store = unlocked_state.get_virtual_channel_session_store();
+                    session_store.contains_virtual_funding_txo(&virtual_funding_txo)
+                };
+                if duplicate_synthetic_funding_txo {
+                    reject_virtual_open(format!(
+                        "duplicate synthetic funding outpoint {} already exists in session store",
+                        virtual_funding_txo,
+                    ));
+                    return Ok(());
+                }
+                let mut channel_id = ChannelId::v1_from_funding_outpoint(virtual_funding_txo);
+
+                if is_colored {
+                    let (rgb_info, _) =
+                        get_rgb_channel_info_pending(&temporary_channel_id, &ldk_data_dir);
+                    let channel_rgb_amount = rgb_info.local_rgb_amount;
+                    let asset_id = rgb_info.contract_id.to_string();
+                    let assignment = match rgb_info.schema {
+                        AssetSchema::Nia | AssetSchema::Cfa => {
+                            Assignment::Fungible(channel_rgb_amount)
+                        }
+                        AssetSchema::Uda => Assignment::NonFungible,
+                        AssetSchema::Ifa => todo!(),
+                    };
+                    let recipient_id =
+                        recipient_id_from_script_buf(script_buf, static_state.network);
+                    let recipient_map = map! {
+                        asset_id.clone() => vec![Recipient {
+                            recipient_id,
+                            witness_data: Some(WitnessData {
+                                amount_sat: channel_value_satoshis,
+                                blinding: Some(STATIC_BLINDING),
+                            }),
+                            assignment,
+                            transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
+                    }]};
+                    let unlocked_state_copy = unlocked_state.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        unlocked_state_copy.rgb_send_begin(recipient_map, true, FEE_RATE, 0)
+                    })
+                    .await
+                    .unwrap();
+
+                    let unsigned_psbt = match res {
+                        Ok(psbt) => psbt,
+                        Err(e) => {
+                            tracing::error!("cannot prepare virtual funding transfer: {e}");
+                            return Err(ReplayEvent());
+                        }
+                    };
+
+                    let signed_psbt = match unlocked_state.rgb_sign_psbt(unsigned_psbt) {
+                        Ok(psbt) => psbt,
+                        Err(e) => {
+                            tracing::error!("cannot sign virtual funding transfer PSBT: {e}");
+                            return Err(ReplayEvent());
+                        }
+                    };
+                    let psbt = match Psbt::from_str(&signed_psbt) {
+                        Ok(psbt) => psbt,
+                        Err(e) => {
+                            tracing::error!(
+                                "cannot parse signed virtual funding transfer PSBT: {e}"
+                            );
+                            return Err(ReplayEvent());
+                        }
+                    };
+                    let funding_psbt = match psbt.extract_tx() {
+                        Ok(tx) => tx,
+                        Err(e) => {
+                            tracing::error!("cannot extract virtual funding transaction: {e}");
+                            return Err(ReplayEvent());
+                        }
+                    };
+                    let Some(virtual_funding_vout) = funding_psbt
+                        .output
+                        .iter()
+                        .position(|txout| {
+                            txout.script_pubkey.as_bytes() == output_script.as_bytes()
+                        })
+                        .map(|vout| vout as u16)
+                    else {
+                        tracing::error!(
+                            "cannot find virtual funding output in extracted transaction"
+                        );
+                        return Err(ReplayEvent());
+                    };
+                    virtual_funding_txo = OutPoint {
+                        txid: funding_psbt.compute_txid(),
+                        index: virtual_funding_vout,
+                    };
+                    channel_id = ChannelId::v1_from_funding_outpoint(virtual_funding_txo);
+
+                    let duplicate_virtual_funding_txo = {
+                        let session_store = unlocked_state.get_virtual_channel_session_store();
+                        session_store.contains_virtual_funding_txo(&virtual_funding_txo)
+                    };
+                    if duplicate_virtual_funding_txo {
+                        reject_virtual_open(format!(
+                            "duplicate virtual funding outpoint {} already exists in session store",
+                            virtual_funding_txo,
+                        ));
+                        return Ok(());
+                    }
+
+                    let witness_id = virtual_funding_txo.txid.to_string();
+
+                    let witness_id_clone = witness_id.clone();
+                    let unlocked_state_copy = unlocked_state.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        unlocked_state_copy.rgb_upsert_witness(
+                            RgbTxid::from_str(&witness_id_clone).unwrap(),
+                            WitnessOrd::Tentative,
+                        )
+                    })
+                    .await
+                    .unwrap();
+
+                    if let Err(e) = res {
+                        tracing::error!("cannot register virtual funding witness: {e}");
+                        return Err(ReplayEvent());
+                    }
+
+                    let consignment_path =
+                        unlocked_state.rgb_get_send_consignment_path(&asset_id, &witness_id);
+                    let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
+                        .unwrap()
+                        .endpoint;
+                    let consignment_path_copy = consignment_path.clone();
+                    let unlocked_state_copy = unlocked_state.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        unlocked_state_copy.rgb_post_consignment(
+                            &proxy_url,
+                            witness_id.clone(),
+                            &consignment_path_copy,
+                            witness_id,
+                            None,
+                        )
+                    })
+                    .await
+                    .unwrap();
+
+                    if let Err(e) = res {
+                        tracing::error!("cannot post virtual funding consignment: {e}");
+                        return Err(ReplayEvent());
+                    }
+                    let _ = fs::remove_file(&consignment_path);
+                }
+
+                match unlocked_state
+                    .channel_manager
+                    .unsafe_manual_funding_transaction_generated(
+                        temporary_channel_id,
+                        counterparty_node_id,
+                        virtual_funding_txo,
+                        ChannelFundingType::Virtual,
+                    ) {
+                    Ok(()) => {
+                        _finalize_virtual_rgb_channel_info(
+                            &static_state.ldk_data_dir,
+                            &temporary_channel_id,
+                            &channel_id,
+                        );
+                        let marker_path = get_virtual_channel_marker_path(
+                            &channel_id.to_string(),
+                            &static_state.ldk_data_dir,
+                        );
+                        fs::write(marker_path, b"")
+                            .expect("able to persist virtual channel marker");
+                        unlocked_state.virtual_channel_session_add(VirtualChannelSession {
+                            channel_id,
+                            created_at: virtual_draft.created_at,
+                            former_temporary_channel_id: temporary_channel_id,
+                            peer_id: virtual_draft.peer_id,
+                            status: VirtualChannelSessionStatus::Active,
+                            virtual_funding_txo,
+                            updated_at: get_current_timestamp(),
+                        });
+                        unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
+                        *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                        tracing::info!(
+                            "EVENT: registered trusted no-broadcast funding {} for virtual channel {}",
+                            virtual_funding_txo,
+                            channel_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "ERROR: Failed trusted no-broadcast funding registration for {}: {:?}",
+                            temporary_channel_id,
+                            e,
+                        );
+                        let temporary_marker_path = get_virtual_channel_marker_path(
+                            &temporary_channel_id.to_string(),
+                            &static_state.ldk_data_dir,
+                        );
+                        let _ = fs::remove_file(temporary_marker_path);
+                        unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
+                        *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                    }
+                }
+                return Ok(());
+            }
+
             let (unsigned_psbt, asset_id) = if is_colored {
                 let (rgb_info, _) = get_rgb_channel_info_pending(
                     &temporary_channel_id,
@@ -657,12 +1364,13 @@ async fn handle_ldk_events(
                 let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
+                let consignment_path_copy = consignment_path.clone();
                 let unlocked_state_copy = unlocked_state.clone();
                 let res = tokio::task::spawn_blocking(move || {
                     unlocked_state_copy.rgb_post_consignment(
                         &proxy_url,
                         funding_txid.clone(),
-                        &consignment_path,
+                        &consignment_path_copy,
                         funding_txid,
                         None,
                     )
@@ -674,6 +1382,11 @@ async fn handle_ldk_events(
                     tracing::error!("cannot post consignment: {e}");
                     return Err(ReplayEvent());
                 }
+                tracing::debug!(
+                    asset_id,
+                    consignment_path = %consignment_path.display(),
+                    "Preserving consignment_out for rgb_send_end"
+                );
             }
 
             let channel_manager_copy = unlocked_state.channel_manager.clone();
@@ -781,7 +1494,7 @@ async fn handle_ldk_events(
                 }
             }
 
-            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, true);
+            _finalize_rgb_channel_payment(&static_state.ldk_data_dir, &payment_hash, true);
             if is_maker_swap {
                 unlocked_state.update_maker_swap_status(&payment_hash, SwapStatus::Succeeded);
             } else {
@@ -802,7 +1515,7 @@ async fn handle_ldk_events(
             payment_id,
             ..
         } => {
-            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, false);
+            _finalize_rgb_channel_payment(&static_state.ldk_data_dir, &payment_hash, false);
 
             if unlocked_state.is_maker_swap(&payment_hash) {
                 tracing::info!(
@@ -834,18 +1547,81 @@ async fn handle_ldk_events(
         Event::OpenChannelRequest {
             ref temporary_channel_id,
             ref counterparty_node_id,
+            ref channel_type,
             ..
         } => {
             let mut random_bytes = [0u8; 16];
             random_bytes
                 .copy_from_slice(&unlocked_state.keys_manager.get_secure_random_bytes()[..16]);
             let user_channel_id = u128::from_be_bytes(random_bytes);
-            let res = unlocked_state.channel_manager.accept_inbound_channel(
-                temporary_channel_id,
-                counterparty_node_id,
-                user_channel_id,
-                None,
-            );
+
+            let (res, accepted) = if static_state.enable_virtual_channels_v0 {
+                let trusted_virtual_peer = static_state.virtual_peer_pubkeys.is_empty()
+                    || static_state
+                        .virtual_peer_pubkeys
+                        .iter()
+                        .any(|trusted_peer| trusted_peer == counterparty_node_id);
+                if !trusted_virtual_peer {
+                    let err = "untrusted_virtual_peer".to_string();
+                    tracing::error!(
+                        "EVENT: Rejected inbound trusted virtual channel ({}) from {}: {}",
+                        temporary_channel_id,
+                        hex_str(&counterparty_node_id.serialize()),
+                        err,
+                    );
+                    (
+                        unlocked_state
+                            .channel_manager
+                            .force_close_broadcasting_latest_txn(
+                                temporary_channel_id,
+                                counterparty_node_id,
+                                err,
+                            ),
+                        false,
+                    )
+                } else if !channel_type.supports_scid_privacy() {
+                    let err = "unsupported_scid_alias".to_string();
+                    tracing::error!(
+                        "EVENT: Rejected inbound channel ({}) from {}: {}",
+                        temporary_channel_id,
+                        hex_str(&counterparty_node_id.serialize()),
+                        err,
+                    );
+                    (
+                        unlocked_state
+                            .channel_manager
+                            .force_close_broadcasting_latest_txn(
+                                temporary_channel_id,
+                                counterparty_node_id,
+                                err,
+                            ),
+                        false,
+                    )
+                } else {
+                    (
+                        unlocked_state
+                            .channel_manager
+                            .accept_inbound_channel_from_trusted_peer_0conf(
+                                temporary_channel_id,
+                                counterparty_node_id,
+                                user_channel_id,
+                                None,
+                                ChannelFundingType::Virtual,
+                            ),
+                        true,
+                    )
+                }
+            } else {
+                (
+                    unlocked_state.channel_manager.accept_inbound_channel(
+                        temporary_channel_id,
+                        counterparty_node_id,
+                        user_channel_id,
+                        None,
+                    ),
+                    true,
+                )
+            };
 
             if let Err(e) = res {
                 tracing::error!(
@@ -854,9 +1630,15 @@ async fn handle_ldk_events(
                     hex_str(&counterparty_node_id.serialize()),
                     e,
                 );
-            } else {
+            } else if accepted {
                 tracing::info!(
                     "EVENT: Accepted inbound channel ({}) from {}",
+                    temporary_channel_id,
+                    hex_str(&counterparty_node_id.serialize()),
+                );
+            } else {
+                tracing::info!(
+                    "EVENT: Rejected inbound channel ({}) from {}",
                     temporary_channel_id,
                     hex_str(&counterparty_node_id.serialize()),
                 );
@@ -873,6 +1655,7 @@ async fn handle_ldk_events(
             ..
         } => {
             if let Some(hash) = payment_hash {
+                _clear_rgb_payment_pending_markers(&static_state.ldk_data_dir, &hash);
                 tracing::error!(
                     "EVENT: Failed to send payment to payment ID {}, payment hash {}: {:?}",
                     payment_id,
@@ -923,7 +1706,7 @@ async fn handle_ldk_events(
             let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
             if let Some(outbound_amount_forwarded_rgb) = outbound_amount_forwarded_rgb {
-                update_rgb_channel_amount(
+                _safe_update_rgb_channel_amount(
                     &next_channel_id_str,
                     outbound_amount_forwarded_rgb,
                     0,
@@ -932,7 +1715,7 @@ async fn handle_ldk_events(
                 );
             }
             if let Some(inbound_amount_forwarded_rgb) = inbound_amount_forwarded_rgb {
-                update_rgb_channel_amount(
+                _safe_update_rgb_channel_amount(
                     &prev_channel_id_str,
                     0,
                     inbound_amount_forwarded_rgb,
@@ -944,6 +1727,7 @@ async fn handle_ldk_events(
             if unlocked_state.is_taker_swap(&payment_hash) {
                 unlocked_state.update_taker_swap_status(&payment_hash, SwapStatus::Succeeded);
             }
+            _clear_rgb_payment_pending_markers(&static_state.ldk_data_dir, &payment_hash);
 
             let read_only_network_graph = unlocked_state.network_graph.read_only();
             let nodes = read_only_network_graph.nodes();
@@ -1039,6 +1823,18 @@ async fn handle_ldk_events(
 
             unlocked_state.add_channel_id(former_temporary_channel_id.unwrap(), channel_id);
 
+            if unlocked_state
+                .virtual_channel_session_store()
+                .contains_key(&channel_id)
+            {
+                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                tracing::info!(
+                    "EVENT: virtual channel {} is pending in trusted no-broadcast mode",
+                    channel_id,
+                );
+                return Ok(());
+            }
+
             let funding_txid = funding_txo.txid.to_string();
             let psbt_path = static_state
                 .ldk_data_dir
@@ -1054,7 +1850,7 @@ async fn handle_ldk_events(
                     is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir));
                 tracing::info!("Initiator of the channel (colored: {})", is_chan_colored);
 
-                let _txid = tokio::task::spawn_blocking(move || {
+                let finalize_result = match tokio::task::spawn_blocking(move || {
                     if is_chan_colored {
                         state_copy.rgb_send_end(psbt_str_copy).map(|r| r.txid)
                     } else {
@@ -1062,13 +1858,33 @@ async fn handle_ldk_events(
                     }
                 })
                 .await
-                .unwrap()
-                .map_err(|e| {
-                    tracing::error!("Error completing channel opening: {e:?}");
-                    ReplayEvent()
-                })?;
-
+                {
+                    Ok(res) => res,
+                    Err(e) => {
+                        *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                        tracing::error!(
+                            ?e,
+                            ?channel_id,
+                            funding_txid,
+                            is_chan_colored,
+                            proxy_endpoint = %unlocked_state.proxy_endpoint,
+                            "Channel opening finalization task failed"
+                        );
+                        return Err(ReplayEvent());
+                    }
+                };
                 *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+                if let Err(e) = finalize_result {
+                    tracing::error!(
+                        ?e,
+                        ?channel_id,
+                        funding_txid,
+                        is_chan_colored,
+                        proxy_endpoint = %unlocked_state.proxy_endpoint,
+                        "Error completing channel opening"
+                    );
+                    return Err(ReplayEvent());
+                }
             } else {
                 // acceptor
                 let consignment_path = static_state
@@ -1126,7 +1942,40 @@ async fn handle_ldk_events(
                 reason
             );
 
-            unlocked_state.delete_channel_id(channel_id);
+            let former_temporary_channel_id = unlocked_state.delete_channel_id(channel_id);
+            let virtual_draft_temporary_channel_id = if unlocked_state
+                .virtual_channel_draft_get(&channel_id)
+                .is_some()
+            {
+                Some(channel_id)
+            } else {
+                former_temporary_channel_id.filter(|temporary_channel_id| {
+                    unlocked_state
+                        .virtual_channel_draft_get(temporary_channel_id)
+                        .is_some()
+                })
+            };
+
+            if let Some(temporary_channel_id) = virtual_draft_temporary_channel_id {
+                unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
+                let temporary_marker_path = get_virtual_channel_marker_path(
+                    &temporary_channel_id.to_string(),
+                    &static_state.ldk_data_dir,
+                );
+                let _ = fs::remove_file(temporary_marker_path);
+                let channel_marker_path = get_virtual_channel_marker_path(
+                    &channel_id.to_string(),
+                    &static_state.ldk_data_dir,
+                );
+                let _ = fs::remove_file(channel_marker_path);
+                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+
+                tracing::warn!(
+                    "EVENT: cleaned up failed virtual open draft {} after channel close {}",
+                    temporary_channel_id,
+                    channel_id,
+                );
+            }
         }
         Event::DiscardFunding { channel_id, .. } => {
             // A "real" node should probably "lock" the UTXOs spent in funding transactions until
@@ -1139,6 +1988,11 @@ async fn handle_ldk_events(
             *unlocked_state.rgb_send_lock.lock().unwrap() = false;
 
             unlocked_state.delete_channel_id(channel_id);
+            let channel_marker_path = get_virtual_channel_marker_path(
+                &channel_id.to_string(),
+                &static_state.ldk_data_dir,
+            );
+            let _ = fs::remove_file(channel_marker_path);
         }
         Event::HTLCIntercepted {
             is_swap,
@@ -1713,6 +2567,7 @@ pub(crate) async fn start_ldk(
     user_config
         .channel_handshake_config
         .negotiate_anchors_zero_fee_htlc_tx = true;
+    user_config.accept_forwards_to_priv_channels = static_state.enable_virtual_channels_v0;
     user_config.manually_accept_inbound_channels = true;
     let mut restarting_node = true;
     let (channel_manager_blockhash, channel_manager) = {
@@ -2087,6 +2942,23 @@ pub(crate) async fn start_ldk(
     let channel_ids_map = Arc::new(Mutex::new(disk::read_channel_ids_info(
         &ldk_data_dir.join(CHANNEL_IDS_FNAME),
     )));
+    let virtual_channel_draft_store = Arc::new(Mutex::new(disk::read_virtual_channel_draft_store(
+        &ldk_data_dir.join(VIRTUAL_CHANNEL_DRAFT_STORE_FNAME),
+    )));
+    let virtual_channel_session_store =
+        Arc::new(Mutex::new(disk::read_virtual_channel_session_store(
+            &ldk_data_dir.join(VIRTUAL_CHANNEL_SESSION_STORE_FNAME),
+        )));
+    {
+        let sessions = virtual_channel_session_store.lock().unwrap();
+        for channel_id in sessions.entries.keys() {
+            let marker_path =
+                get_virtual_channel_marker_path(&channel_id.to_string(), &ldk_data_dir_path);
+            if !marker_path.exists() {
+                fs::write(marker_path, b"").expect("able to recover virtual channel marker");
+            }
+        }
+    }
 
     let unlocked_state = Arc::new(UnlockedAppState {
         channel_manager: Arc::clone(&channel_manager),
@@ -2107,6 +2979,8 @@ pub(crate) async fn start_ldk(
         rgb_send_lock: Arc::new(Mutex::new(false)),
         channel_ids_map,
         proxy_endpoint: proxy_endpoint.to_string(),
+        virtual_channel_draft_store,
+        virtual_channel_session_store,
     });
 
     let recent_payments_payment_ids = channel_manager
@@ -2323,4 +3197,308 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     }
 
     tracing::info!("Stopped LDK");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lightning::rgb_utils::{
+        get_rgb_channel_payment_info_path, get_rgb_payment_info_path,
+        get_rgb_payment_info_pending_path, parse_rgb_channel_info, write_rgb_channel_info,
+        RgbPaymentInfo,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rln-{test_name}-{unique}"));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn test_contract_id() -> ContractId {
+        ContractId::from_str("rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U").unwrap()
+    }
+
+    fn write_rgb_payment_info(path: &Path, rgb_payment_info: &RgbPaymentInfo) {
+        fs::write(path, serde_json::to_string(rgb_payment_info).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn clear_rgb_payment_pending_markers_removes_only_pending_files() {
+        let ldk_data_dir = temp_test_dir("clear-rgb-pending-markers");
+        let channel_id = ChannelId([1; 32]);
+        let payment_hash = PaymentHash([2; 32]);
+
+        let raw_final_path = get_rgb_payment_info_path(&payment_hash, &ldk_data_dir, false);
+        let raw_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
+        let channel_final_path = get_rgb_channel_payment_info_path(
+            &channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            false,
+            false,
+        );
+        let channel_pending_path = get_rgb_channel_payment_info_path(
+            &channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            false,
+            true,
+        );
+
+        fs::write(&raw_final_path, b"raw-final").unwrap();
+        fs::write(&raw_pending_path, b"raw-pending").unwrap();
+        fs::write(&channel_final_path, b"channel-final").unwrap();
+        fs::write(&channel_pending_path, b"channel-pending").unwrap();
+
+        _clear_rgb_payment_pending_markers(&ldk_data_dir, &payment_hash);
+
+        assert!(raw_final_path.exists());
+        assert!(!raw_pending_path.exists());
+        assert!(channel_final_path.exists());
+        assert!(!channel_pending_path.exists());
+
+        fs::remove_dir_all(ldk_data_dir).unwrap();
+    }
+
+    #[test]
+    fn clear_rgb_payment_raw_pending_markers_removes_only_raw_pending_files() {
+        let ldk_data_dir = temp_test_dir("clear-rgb-raw-pending-markers");
+        let channel_id = ChannelId([7; 32]);
+        let payment_hash = PaymentHash([8; 32]);
+
+        let raw_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
+        let channel_pending_path = get_rgb_channel_payment_info_path(
+            &channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            false,
+            true,
+        );
+
+        fs::write(&raw_pending_path, b"raw-pending").unwrap();
+        fs::write(&channel_pending_path, b"channel-pending").unwrap();
+
+        _clear_rgb_payment_raw_pending_markers(&ldk_data_dir, &payment_hash);
+
+        assert!(!raw_pending_path.exists());
+        assert!(channel_pending_path.exists());
+
+        fs::remove_dir_all(ldk_data_dir).unwrap();
+    }
+
+    #[test]
+    fn finalize_rgb_channel_payment_clears_pending_markers_after_apply() {
+        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-applies");
+        let channel_id = ChannelId([3; 32]);
+        let payment_hash = PaymentHash([4; 32]);
+
+        let rgb_info = RgbInfo {
+            contract_id: test_contract_id(),
+            schema: AssetSchema::Nia,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+        };
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&hex_str(&channel_id.0), &ldk_data_dir, false),
+            &rgb_info,
+        );
+
+        let rgb_payment_info = RgbPaymentInfo {
+            contract_id: rgb_info.contract_id,
+            amount: 25,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+            swap_payment: false,
+            inbound: false,
+        };
+        let raw_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
+        let channel_pending_path = get_rgb_channel_payment_info_path(
+            &channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            false,
+            true,
+        );
+        write_rgb_payment_info(&raw_pending_path, &rgb_payment_info);
+        write_rgb_payment_info(&channel_pending_path, &rgb_payment_info);
+
+        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+
+        let updated_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
+            &hex_str(&channel_id.0),
+            &ldk_data_dir,
+            false,
+        ));
+        assert_eq!(updated_rgb_info.local_rgb_amount, 75);
+        assert_eq!(updated_rgb_info.remote_rgb_amount, 25);
+        assert!(!raw_pending_path.exists());
+        assert!(!channel_pending_path.exists());
+
+        fs::remove_dir_all(ldk_data_dir).unwrap();
+    }
+
+    #[test]
+    fn finalize_rgb_channel_payment_leaves_pending_markers_when_nothing_applies() {
+        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-skips");
+        let channel_id = ChannelId([5; 32]);
+        let payment_hash = PaymentHash([6; 32]);
+
+        let rgb_info = RgbInfo {
+            contract_id: test_contract_id(),
+            schema: AssetSchema::Nia,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+        };
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&hex_str(&channel_id.0), &ldk_data_dir, false),
+            &rgb_info,
+        );
+
+        let rgb_payment_info = RgbPaymentInfo {
+            contract_id: rgb_info.contract_id,
+            amount: 25,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+            swap_payment: true,
+            inbound: true,
+        };
+        let raw_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, true);
+        let channel_pending_path = get_rgb_channel_payment_info_path(
+            &channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            true,
+            true,
+        );
+        write_rgb_payment_info(&raw_pending_path, &rgb_payment_info);
+        write_rgb_payment_info(&channel_pending_path, &rgb_payment_info);
+
+        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+
+        let unchanged_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
+            &hex_str(&channel_id.0),
+            &ldk_data_dir,
+            false,
+        ));
+        assert_eq!(unchanged_rgb_info.local_rgb_amount, 100);
+        assert_eq!(unchanged_rgb_info.remote_rgb_amount, 0);
+        assert!(raw_pending_path.exists());
+        assert!(channel_pending_path.exists());
+
+        fs::remove_dir_all(ldk_data_dir).unwrap();
+    }
+
+    #[test]
+    fn finalize_rgb_channel_payment_preserves_other_direction_markers_until_they_apply() {
+        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-split-directions");
+        let inbound_channel_id = ChannelId([9; 32]);
+        let outbound_channel_id = ChannelId([10; 32]);
+        let payment_hash = PaymentHash([11; 32]);
+
+        let inbound_rgb_info = RgbInfo {
+            contract_id: test_contract_id(),
+            schema: AssetSchema::Nia,
+            local_rgb_amount: 0,
+            remote_rgb_amount: 100,
+        };
+        let outbound_rgb_info = RgbInfo {
+            contract_id: test_contract_id(),
+            schema: AssetSchema::Nia,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+        };
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&hex_str(&inbound_channel_id.0), &ldk_data_dir, false),
+            &inbound_rgb_info,
+        );
+        write_rgb_channel_info(
+            &get_rgb_channel_info_path(&hex_str(&outbound_channel_id.0), &ldk_data_dir, false),
+            &outbound_rgb_info,
+        );
+
+        let inbound_payment_info = RgbPaymentInfo {
+            contract_id: inbound_rgb_info.contract_id,
+            amount: 20,
+            local_rgb_amount: 0,
+            remote_rgb_amount: 100,
+            swap_payment: true,
+            inbound: true,
+        };
+        let outbound_payment_info = RgbPaymentInfo {
+            contract_id: outbound_rgb_info.contract_id,
+            amount: 10,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+            swap_payment: true,
+            inbound: false,
+        };
+
+        let raw_inbound_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, true);
+        let raw_outbound_pending_path =
+            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
+        let inbound_channel_pending_path = get_rgb_channel_payment_info_path(
+            &inbound_channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            true,
+            true,
+        );
+        let outbound_channel_pending_path = get_rgb_channel_payment_info_path(
+            &outbound_channel_id,
+            &payment_hash,
+            &ldk_data_dir,
+            false,
+            true,
+        );
+        write_rgb_payment_info(&raw_inbound_pending_path, &inbound_payment_info);
+        write_rgb_payment_info(&raw_outbound_pending_path, &outbound_payment_info);
+        write_rgb_payment_info(&inbound_channel_pending_path, &inbound_payment_info);
+        write_rgb_payment_info(&outbound_channel_pending_path, &outbound_payment_info);
+
+        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, true);
+
+        let updated_inbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
+            &hex_str(&inbound_channel_id.0),
+            &ldk_data_dir,
+            false,
+        ));
+        let unchanged_outbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
+            &hex_str(&outbound_channel_id.0),
+            &ldk_data_dir,
+            false,
+        ));
+        assert_eq!(updated_inbound_rgb_info.local_rgb_amount, 20);
+        assert_eq!(updated_inbound_rgb_info.remote_rgb_amount, 80);
+        assert_eq!(unchanged_outbound_rgb_info.local_rgb_amount, 100);
+        assert_eq!(unchanged_outbound_rgb_info.remote_rgb_amount, 0);
+        assert!(!inbound_channel_pending_path.exists());
+        assert!(outbound_channel_pending_path.exists());
+        assert!(raw_inbound_pending_path.exists());
+        assert!(raw_outbound_pending_path.exists());
+
+        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+
+        let updated_outbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
+            &hex_str(&outbound_channel_id.0),
+            &ldk_data_dir,
+            false,
+        ));
+        assert_eq!(updated_outbound_rgb_info.local_rgb_amount, 90);
+        assert_eq!(updated_outbound_rgb_info.remote_rgb_amount, 10);
+        assert!(!outbound_channel_pending_path.exists());
+        assert!(!raw_inbound_pending_path.exists());
+        assert!(!raw_outbound_pending_path.exists());
+
+        fs::remove_dir_all(ldk_data_dir).unwrap();
+    }
 }

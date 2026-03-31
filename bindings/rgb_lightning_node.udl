@@ -205,6 +205,7 @@ dictionary Channel {
     ContractId? asset_id;
     u64? asset_local_amount;
     u64? asset_remote_amount;
+    string? virtual_open_mode;
 };
 
 enum ChannelStatus {
@@ -461,6 +462,8 @@ dictionary SdkInitRequest {
     u16 ldk_peer_listening_port;
     string network;
     u16 max_media_upload_size_mb;
+    boolean? enable_virtual_channels_v0;
+    sequence<PublicKey>? virtual_peer_pubkeys;
 };
 
 dictionary SdkUnlockRequest {
@@ -487,6 +490,7 @@ dictionary SdkOpenChannelRequest {
     ContractId? asset_id;
     u64? asset_amount;
     u64? push_asset_amount;
+    string? virtual_open_mode;
 };
 
 dictionary SdkOpenChannelResponse {

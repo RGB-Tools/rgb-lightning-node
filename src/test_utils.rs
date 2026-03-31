@@ -23,6 +23,8 @@ pub fn mock_locked_app_state() -> TestAppState {
             ldk_data_dir: path.join(".ldk"),
             logger: Arc::new(FilesystemLogger::new(path)),
             max_media_upload_size_mb: 1,
+            enable_virtual_channels_v0: false,
+            virtual_peer_pubkeys: vec![],
         }),
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),

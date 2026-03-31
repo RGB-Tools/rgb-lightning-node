@@ -14,6 +14,8 @@ pub struct NodeConfig {
     pub network: BitcoinNetwork,
     pub max_media_upload_size_mb: u16,
     pub root_public_key: Option<biscuit_auth::PublicKey>,
+    pub enable_virtual_channels_v0: bool,
+    pub virtual_peer_pubkeys: Vec<bitcoin::secp256k1::PublicKey>,
 }
 
 #[derive(Clone)]
@@ -40,6 +42,8 @@ impl NodeHandle {
             network: config.network,
             max_media_upload_size_mb: config.max_media_upload_size_mb,
             root_public_key: config.root_public_key,
+            enable_virtual_channels_v0: config.enable_virtual_channels_v0,
+            virtual_peer_pubkeys: config.virtual_peer_pubkeys,
         };
         let state = start_daemon(&args).await?;
         Ok(Self { state })

@@ -60,6 +60,8 @@ mod uniffi_smoke_tests {
                 ldk_data_dir: tmp.path().join(".ldk"),
                 logger: Arc::new(FilesystemLogger::new(tmp.path().to_path_buf())),
                 max_media_upload_size_mb: 1,
+                enable_virtual_channels_v0: false,
+                virtual_peer_pubkeys: vec![],
             }),
             cancel_token: CancellationToken::new(),
             unlocked_app_state: Arc::new(TokioMutex::new(None)),

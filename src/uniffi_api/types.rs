@@ -139,6 +139,7 @@ pub struct Channel {
     pub asset_id: Option<ContractId>,
     pub asset_local_amount: Option<u64>,
     pub asset_remote_amount: Option<u64>,
+    pub virtual_open_mode: Option<String>,
 }
 
 pub enum ChannelStatus {
@@ -388,6 +389,7 @@ pub struct SdkOpenChannelRequest {
     pub asset_id: Option<ContractId>,
     pub asset_amount: Option<u64>,
     pub push_asset_amount: Option<u64>,
+    pub virtual_open_mode: Option<String>,
 }
 
 pub struct SdkOpenChannelResponse {
@@ -552,6 +554,8 @@ pub struct SdkInitRequest {
     pub ldk_peer_listening_port: u16,
     pub network: String,
     pub max_media_upload_size_mb: u16,
+    pub enable_virtual_channels_v0: Option<bool>,
+    pub virtual_peer_pubkeys: Option<Vec<PublicKey>>,
 }
 
 pub struct SendRgbRequest {

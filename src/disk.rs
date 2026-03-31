@@ -16,7 +16,7 @@ use std::sync::Arc;
 use crate::error::APIError;
 use crate::ldk::{
     ChannelIdsMap, InboundPaymentInfoStorage, NetworkGraph, OutboundPaymentInfoStorage,
-    OutputSpenderTxes, SwapMap,
+    OutputSpenderTxes, SwapMap, VirtualChannelDraftStore, VirtualChannelSessionStore,
 };
 use crate::utils::{parse_peer_info, LOGS_DIR};
 
@@ -30,6 +30,8 @@ pub(crate) const CHANNEL_PEER_DATA: &str = "channel_peer_data";
 pub(crate) const OUTPUT_SPENDER_TXES: &str = "output_spender_txes";
 
 pub(crate) const CHANNEL_IDS_FNAME: &str = "channel_ids";
+pub(crate) const VIRTUAL_CHANNEL_DRAFT_STORE_FNAME: &str = "virtual_channel_drafts";
+pub(crate) const VIRTUAL_CHANNEL_SESSION_STORE_FNAME: &str = "virtual_channel_sessions";
 
 pub(crate) const MAKER_SWAPS_FNAME: &str = "maker_swaps";
 pub(crate) const TAKER_SWAPS_FNAME: &str = "taker_swaps";
@@ -221,5 +223,27 @@ pub(crate) fn read_channel_ids_info(path: &Path) -> ChannelIdsMap {
     }
     ChannelIdsMap {
         channel_ids: new_hash_map(),
+    }
+}
+
+pub(crate) fn read_virtual_channel_draft_store(path: &Path) -> VirtualChannelDraftStore {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = VirtualChannelDraftStore::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    VirtualChannelDraftStore {
+        entries: new_hash_map(),
+    }
+}
+
+pub(crate) fn read_virtual_channel_session_store(path: &Path) -> VirtualChannelSessionStore {
+    if let Ok(file) = File::open(path) {
+        if let Ok(info) = VirtualChannelSessionStore::read(&mut BufReader::new(file)) {
+            return info;
+        }
+    }
+    VirtualChannelSessionStore {
+        entries: new_hash_map(),
     }
 }

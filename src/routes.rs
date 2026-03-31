@@ -10,6 +10,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Network, ScriptBuf};
 use hex::DisplayHex;
+use lightning::chain::channelmonitor::Balance;
 use lightning::ln::{channelmanager::OptionalOfferPaymentParams, types::ChannelId};
 use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
@@ -21,7 +22,6 @@ use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
-use lightning::chain::channelmonitor::Balance;
 use lightning::{
     ln::channel_state::ChannelShutdownState, onion_message::messenger::MessageSendInstructions,
 };
@@ -75,7 +75,10 @@ use tokio::{
     sync::MutexGuard as TokioMutexGuard,
 };
 
-use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices};
+use crate::ldk::{
+    _clear_rgb_payment_raw_pending_markers, start_ldk, stop_ldk, LdkBackgroundServices,
+    VirtualChannelSessionStatus,
+};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
@@ -85,9 +88,9 @@ use crate::utils::{
 use crate::{
     backup::{do_backup, restore_backup},
     core_types::{
-        HTLCStatus, HTLC_MIN_MSAT, SwapStatus, UnlockRequest as CoreUnlockRequest,
-        DEFAULT_FINAL_CLTV_EXPIRY_DELTA, DUST_LIMIT_MSAT, FEE_RATE, MAX_SWAP_FEE_MSAT,
-        MIN_CHANNEL_CONFIRMATIONS, UTXO_SIZE_SAT,
+        HTLCStatus, SwapStatus, UnlockRequest as CoreUnlockRequest,
+        DEFAULT_FINAL_CLTV_EXPIRY_DELTA, DUST_LIMIT_MSAT, FEE_RATE, HTLC_MIN_MSAT,
+        MAX_SWAP_FEE_MSAT, MIN_CHANNEL_CONFIRMATIONS, UTXO_SIZE_SAT,
     },
     rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional},
 };
@@ -106,6 +109,7 @@ const OPENRGBCHANNEL_MIN_SAT: u64 = HTLC_MIN_MSAT / 1000 * 10 + 10;
 const OPENCHANNEL_MIN_SAT: u64 = 5506;
 const OPENCHANNEL_MAX_SAT: u64 = 16777215;
 const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
+const VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST: &str = "trusted_no_broadcast";
 
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 
@@ -400,6 +404,7 @@ pub(crate) struct Channel {
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_local_amount: Option<u64>,
     pub(crate) asset_remote_amount: Option<u64>,
+    pub(crate) virtual_open_mode: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -829,6 +834,7 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) fee_base_msat: Option<u32>,
     pub(crate) fee_proportional_millionths: Option<u32>,
     pub(crate) temporary_channel_id: Option<String>,
+    pub(crate) virtual_open_mode: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1445,22 +1451,134 @@ pub(crate) async fn close_channel(
             Err(_) => return Err(APIError::InvalidPubkey),
         };
 
-        if let Some(chan_details) = unlocked_state
+        let virtual_session = unlocked_state.virtual_channel_session_get(&requested_cid);
+        if let Some(session) = virtual_session.as_ref() {
+            if session.peer_id != peer_pubkey {
+                return Err(APIError::CannotCloseChannel(
+                    "peer pubkey does not match trusted virtual channel session".to_string(),
+                ));
+            }
+        }
+
+        let chan_details = if let Some(chan_details) = unlocked_state
             .channel_manager
             .list_channels()
-            .iter()
+            .into_iter()
             .find(|c| c.channel_id == requested_cid)
         {
-            match chan_details.channel_shutdown_state {
-                Some(ChannelShutdownState::NotShuttingDown) => {}
-                _ => {
-                    return Err(APIError::CannotCloseChannel(s!(
-                        "Channel is already being closed"
-                    )))
+            if chan_details.trusted_no_broadcast {
+                if let Some(session) = virtual_session.as_ref() {
+                    match session.status {
+                        VirtualChannelSessionStatus::Abandoned => {
+                            tracing::warn!(
+                                "virtual session {} is persisted as abandoned but the live trusted channel is still present; retrying close without rewriting session state",
+                                requested_cid
+                            );
+                        }
+                        VirtualChannelSessionStatus::AbandonPending => {
+                            return Err(APIError::CannotCloseChannel(
+                                "virtual cleanup is already in progress".to_string(),
+                            ));
+                        }
+                        VirtualChannelSessionStatus::Active => {}
+                    }
                 }
             }
+            chan_details
         } else {
+            if let Some(session) = virtual_session.as_ref() {
+                if !matches!(session.status, VirtualChannelSessionStatus::Abandoned) {
+                    unlocked_state.virtual_channel_session_update_status(
+                        session,
+                        VirtualChannelSessionStatus::Abandoned,
+                    );
+                }
+                return Ok(Json(EmptyResponse {}));
+            }
             return Err(APIError::UnknownChannelId);
+        };
+
+        if virtual_session.is_some() && !chan_details.trusted_no_broadcast {
+            return Err(APIError::Unexpected(format!(
+                "virtual channel session exists for {requested_cid}, but live channel is not trusted_no_broadcast"
+            )));
+        }
+
+        match chan_details.channel_shutdown_state {
+            Some(ChannelShutdownState::NotShuttingDown) => {}
+            _ => return Err(APIError::CannotCloseChannel(s!("Channel is already being closed"))),
+        }
+
+        if chan_details.trusted_no_broadcast {
+            if !state.static_state.enable_virtual_channels_v0 {
+                return Err(APIError::CannotCloseChannel(
+                    "trusted virtual channels v0 are disabled".to_string(),
+                ));
+            }
+            let Some(session) = virtual_session else {
+                return Err(APIError::CannotCloseChannel(
+                    "virtual cleanup is host-only and requires a host-side session".to_string(),
+                ));
+            };
+            if payload.force {
+                return Err(APIError::CannotCloseChannel(
+                    "force=true is not supported for trusted virtual channels".to_string(),
+                ));
+            }
+            unlocked_state
+                .virtual_channel_ensure_no_client_value(
+                    &chan_details,
+                    &state.static_state.ldk_data_dir,
+                )
+                .map_err(APIError::CannotCloseChannel)?;
+
+            unlocked_state.virtual_channel_session_update_status(
+                &session,
+                VirtualChannelSessionStatus::AbandonPending,
+            );
+            match unlocked_state.channel_manager.abandon_virtual_channel(
+                &requested_cid,
+                &peer_pubkey,
+                true,
+            ) {
+                Ok(()) => {
+                    unlocked_state.virtual_channel_session_update_status(
+                        &session,
+                        VirtualChannelSessionStatus::Abandoned,
+                    );
+                    tracing::info!("EVENT: abandon_virtual_channel succeeded; session is now abandoned");
+                }
+                Err(e) => {
+                    let error = match e {
+                        LDKAPIError::APIMisuseError { err } => err,
+                        _ => format!("{e:?}"),
+                    };
+                    let live_virtual_channel_still_exists = unlocked_state
+                        .channel_manager
+                        .list_channels()
+                        .into_iter()
+                        .any(|c| c.channel_id == requested_cid && c.trusted_no_broadcast);
+                    if live_virtual_channel_still_exists {
+                        unlocked_state.virtual_channel_session_update_status(
+                            &session,
+                            VirtualChannelSessionStatus::Active,
+                        );
+                        return Err(APIError::CannotCloseChannel(error));
+                    }
+                    unlocked_state.virtual_channel_session_update_status(
+                        &session,
+                        VirtualChannelSessionStatus::Abandoned,
+                    );
+                    tracing::info!(
+                        "EVENT: abandon_virtual_channel returned error '{}' but channel {} is absent from live LDK state; reconciling session to abandoned",
+                        error,
+                        requested_cid,
+                    );
+                    return Ok(Json(EmptyResponse {}));
+                }
+            }
+
+            return Ok(Json(EmptyResponse {}));
         }
 
         if payload.force {
@@ -1810,7 +1928,7 @@ pub(crate) async fn get_swap(
     let requested_ph = PaymentHash(payment_hash_vec.unwrap().try_into().unwrap());
 
     let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
-        let mut status = swap_data.status.clone();
+        let mut status = swap_data.status;
         if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
             status = SwapStatus::Expired;
         } else if status == SwapStatus::Pending
@@ -1820,9 +1938,9 @@ pub(crate) async fn get_swap(
         }
         if status != swap_data.status {
             if taker {
-                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
+                unlocked_state.update_taker_swap_status(payment_hash, status);
             } else {
-                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
+                unlocked_state.update_maker_swap_status(payment_hash, status);
             }
         }
         Swap {
@@ -2098,6 +2216,10 @@ pub(crate) async fn keysend(
             }
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
+                _clear_rgb_payment_raw_pending_markers(
+                    &state.static_state.ldk_data_dir,
+                    &payment_hash,
+                );
                 unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
                 HTLCStatus::Failed
             }
@@ -2197,6 +2319,7 @@ pub(crate) async fn list_channels(
     let unlocked_state = guard.as_ref().unwrap();
 
     let mut channels = vec![];
+    let virtual_sessions = unlocked_state.virtual_channel_session_store();
     for chan_info in unlocked_state.channel_manager.list_channels() {
         let status = match chan_info.channel_shutdown_state.unwrap() {
             ChannelShutdownState::NotShuttingDown => {
@@ -2222,6 +2345,10 @@ pub(crate) async fn list_channels(
             public: chan_info.is_announced,
             ..Default::default()
         };
+
+        if virtual_sessions.contains_key(&chan_info.channel_id) {
+            channel.virtual_open_mode = Some(VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST.to_string());
+        }
 
         if let Some(funding_txo) = chan_info.funding_txo {
             channel.funding_txid = Some(funding_txo.txid.to_string());
@@ -2358,7 +2485,7 @@ pub(crate) async fn list_swaps(
     let unlocked_state = guard.as_ref().unwrap();
 
     let map_swap = |payment_hash: &PaymentHash, swap_data: &SwapData, taker: bool| {
-        let mut status = swap_data.status.clone();
+        let mut status = swap_data.status;
         if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
             status = SwapStatus::Expired;
         } else if status == SwapStatus::Pending
@@ -2368,9 +2495,9 @@ pub(crate) async fn list_swaps(
         }
         if status != swap_data.status {
             if taker {
-                unlocked_state.update_taker_swap_status(payment_hash, status.clone());
+                unlocked_state.update_taker_swap_status(payment_hash, status);
             } else {
-                unlocked_state.update_maker_swap_status(payment_hash, status.clone());
+                unlocked_state.update_maker_swap_status(payment_hash, status);
             }
         }
         Swap {
@@ -2800,6 +2927,10 @@ pub(crate) async fn maker_execute(
             }
             Err(e) => {
                 tracing::warn!("ERROR: failed to send payment: {:?}", e);
+                _clear_rgb_payment_raw_pending_markers(
+                    &state.static_state.ldk_data_dir,
+                    &swapstring.payment_hash,
+                );
                 (HTLCStatus::Failed, Some(e))
             }
         };
@@ -2972,6 +3103,33 @@ pub(crate) async fn node_info(
     }))
 }
 
+struct OpenChannelVirtualIntentGuard {
+    unlocked_state: Arc<UnlockedAppState>,
+    temporary_channel_id: Option<ChannelId>,
+}
+
+impl OpenChannelVirtualIntentGuard {
+    fn new(unlocked_state: Arc<UnlockedAppState>, temporary_channel_id: ChannelId) -> Self {
+        Self {
+            unlocked_state,
+            temporary_channel_id: Some(temporary_channel_id),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.temporary_channel_id = None;
+    }
+}
+
+impl Drop for OpenChannelVirtualIntentGuard {
+    fn drop(&mut self) {
+        if let Some(temporary_channel_id) = self.temporary_channel_id.take() {
+            self.unlocked_state
+                .virtual_channel_draft_delete(&temporary_channel_id);
+        }
+    }
+}
+
 pub(crate) async fn open_channel(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<OpenChannelRequest>, APIError>,
@@ -2984,15 +3142,44 @@ pub(crate) async fn open_channel(
             return Err(APIError::OpenChannelInProgress);
         }
 
-        let temporary_channel_id = if let Some(tmp_chan_id_str) = payload.temporary_channel_id {
-            let tmp_chan_id = check_channel_id(&tmp_chan_id_str)?;
-            if unlocked_state.channel_ids().contains_key(&tmp_chan_id) {
-                return Err(APIError::TemporaryChannelIdAlreadyUsed);
+        let is_virtual_open = match payload.virtual_open_mode.as_deref() {
+            None => false,
+            Some(VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST) => true,
+            Some(other) => {
+                return Err(APIError::InvalidRequest(format!(
+                    "unknown virtual_open_mode: {other}"
+                )));
             }
-            Some(tmp_chan_id)
-        } else {
-            None
         };
+
+        if is_virtual_open && !state.static_state.enable_virtual_channels_v0 {
+            return Err(APIError::InvalidRequest(
+                "trusted virtual channels v0 are disabled".to_string(),
+            ));
+        }
+
+        if is_virtual_open && payload.public {
+            return Err(APIError::InvalidRequest(
+                "virtual channels requires public=false".to_string(),
+            ));
+        }
+
+        let mut temporary_channel_id = payload
+            .temporary_channel_id
+            .as_deref()
+            .map(check_channel_id)
+            .transpose()?;
+        if !is_virtual_open {
+            if let Some(temporary_channel_id) = temporary_channel_id.as_ref() {
+                if unlocked_state.channel_ids().contains_key(temporary_channel_id)
+                    || unlocked_state
+                        .virtual_channel_draft_store()
+                        .contains_key(temporary_channel_id)
+                {
+                    return Err(APIError::TemporaryChannelIdAlreadyUsed);
+                }
+            }
+        }
 
         let colored_info = match (payload.asset_id, payload.asset_amount) {
             (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
@@ -3054,6 +3241,18 @@ pub(crate) async fn open_channel(
         let (peer_pubkey, mut peer_addr) =
             parse_peer_info(payload.peer_pubkey_and_opt_addr.to_string())?;
 
+        let mut virtual_draft_reservation = if is_virtual_open {
+            let reserved_temporary_channel_id = unlocked_state
+                .virtual_channel_add_intent(peer_pubkey, temporary_channel_id)?;
+            temporary_channel_id = Some(reserved_temporary_channel_id);
+            Some(OpenChannelVirtualIntentGuard::new(
+                unlocked_state.clone(),
+                reserved_temporary_channel_id,
+            ))
+        } else {
+            None
+        };
+
         let peer_data_path = state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA);
         if peer_addr.is_none() {
             if let Some(peer) = unlocked_state.peer_manager.peer_by_node_id(&peer_pubkey) {
@@ -3093,15 +3292,30 @@ pub(crate) async fn open_channel(
         }
         let config = UserConfig {
             channel_handshake_limits: ChannelHandshakeLimits {
+                trust_own_funding_0conf: is_virtual_open,
                 // lnd's max to_self_delay is 2016, so we want to be compatible.
                 their_to_self_delay: 2016,
                 ..Default::default()
             },
             channel_handshake_config: ChannelHandshakeConfig {
-                announce_for_forwarding: payload.public,
+                announce_for_forwarding: if is_virtual_open {
+                    false
+                } else {
+                    payload.public
+                },
                 our_htlc_minimum_msat: HTLC_MIN_MSAT,
-                minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
+                minimum_depth: if is_virtual_open {
+                    0
+                } else {
+                    MIN_CHANNEL_CONFIRMATIONS as u32
+                },
+                negotiate_scid_privacy: is_virtual_open,
                 negotiate_anchors_zero_fee_htlc_tx: payload.with_anchors,
+                their_channel_reserve_satoshis_override: if is_virtual_open {
+                    Some(0)
+                } else {
+                    None
+                },
                 ..Default::default()
             },
             channel_config,
@@ -3122,44 +3336,47 @@ pub(crate) async fn open_channel(
         };
 
         let schema = if let Some((contract_id, asset_amount)) = &colored_info {
-            let mut fake_p2wsh: [u8; 34] = [0; 34];
-            fake_p2wsh[1] = 32;
-            let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
-            let recipient_id = recipient_id_from_script_buf(script_buf, state.static_state.network);
-            let asset_id = contract_id.to_string();
             let schema = unlocked_state
                 .rgb_get_asset_metadata(*contract_id)?
                 .asset_schema;
-            let assignment = match schema {
-                RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa => {
-                    Assignment::Fungible(*asset_amount)
-                }
-                RgbLibAssetSchema::Uda => Assignment::NonFungible,
-                RgbLibAssetSchema::Ifa => todo!(),
-            };
+            if !is_virtual_open {
+                let mut fake_p2wsh: [u8; 34] = [0; 34];
+                fake_p2wsh[1] = 32;
+                let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
+                let recipient_id =
+                    recipient_id_from_script_buf(script_buf, state.static_state.network);
+                let asset_id = contract_id.to_string();
+                let assignment = match schema {
+                    RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa => {
+                        Assignment::Fungible(*asset_amount)
+                    }
+                    RgbLibAssetSchema::Uda => Assignment::NonFungible,
+                    RgbLibAssetSchema::Ifa => todo!(),
+                };
 
-            let recipient_map = map! {
-                asset_id => vec![RgbLibRecipient {
-                    recipient_id,
-                    witness_data: Some(RgbLibWitnessData {
-                        amount_sat: payload.capacity_sat,
-                        blinding: Some(STATIC_BLINDING + 1),
-                    }),
-                    assignment: assignment.into(),
-                    transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
-            }]};
+                let recipient_map = map! {
+                    asset_id => vec![RgbLibRecipient {
+                        recipient_id,
+                        witness_data: Some(RgbLibWitnessData {
+                            amount_sat: payload.capacity_sat,
+                            blinding: Some(STATIC_BLINDING + 1),
+                        }),
+                        assignment: assignment.into(),
+                        transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
+                }]};
 
-            let unlocked_state_copy = unlocked_state.clone();
-            tokio::task::spawn_blocking(move || {
-                unlocked_state_copy.rgb_send_begin(
-                    recipient_map,
-                    true,
-                    FEE_RATE,
-                    MIN_CHANNEL_CONFIRMATIONS,
-                )
-            })
-            .await
-            .unwrap()?;
+                let unlocked_state_copy = unlocked_state.clone();
+                tokio::task::spawn_blocking(move || {
+                    unlocked_state_copy.rgb_send_begin(
+                        recipient_map,
+                        true,
+                        FEE_RATE,
+                        MIN_CHANNEL_CONFIRMATIONS,
+                    )
+                })
+                .await
+                .unwrap()?;
+            }
             Some(schema)
         } else {
             None
@@ -3201,6 +3418,9 @@ pub(crate) async fn open_channel(
                     _ => APIError::FailedOpenChannel(format!("{e:?}")),
                 }
             })?;
+        if let Some(virtual_draft_reservation) = virtual_draft_reservation.as_mut() {
+            virtual_draft_reservation.disarm();
+        }
         let temporary_channel_id = temporary_channel_id.0.as_hex().to_string();
         tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
 
@@ -3639,6 +3859,10 @@ pub(crate) async fn send_payment(
                 },
                 Err(e) => {
                     tracing::error!("ERROR: failed to send payment: {:?}", e);
+                    _clear_rgb_payment_raw_pending_markers(
+                        &state.static_state.ldk_data_dir,
+                        &payment_hash,
+                    );
                     status = HTLCStatus::Failed;
                     unlocked_state.update_outbound_payment_status(payment_id, status);
                 },

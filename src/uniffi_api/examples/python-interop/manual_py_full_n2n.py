@@ -66,6 +66,8 @@ def make_node(storage: Path, daemon_port: int, peer_port: int) -> rln.SdkNode:
         ldk_peer_listening_port=peer_port,
         network="regtest",
         max_media_upload_size_mb=20,
+        enable_virtual_channels_v0=False,
+        virtual_peer_pubkeys=None,
     )
     return rln.SdkNode.create(req)
 

@@ -1425,6 +1425,9 @@ components:
             - integer
             - 'null'
           example: 0
+        virtual_open_mode:
+          type: string
+          example: trusted_no_broadcast
     ChannelStatus:
       type: string
       enum:
@@ -2296,6 +2299,9 @@ components:
             - string
             - 'null'
           example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
+        virtual_open_mode:
+          type: string
+          example: trusted_no_broadcast
     OpenChannelResponse:
       type: object
       required:

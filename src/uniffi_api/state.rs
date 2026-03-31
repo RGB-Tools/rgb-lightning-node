@@ -122,6 +122,7 @@ pub(crate) fn map_api_error(err: APIError) -> RlnError {
         | APIError::UnlockedNode
         | APIError::ChangingState
         | APIError::OpenChannelInProgress
+        | APIError::CannotCloseChannel(_)
         | APIError::DuplicatePayment(_)
         | APIError::RecipientIDAlreadyUsed
         | APIError::TemporaryChannelIdAlreadyUsed

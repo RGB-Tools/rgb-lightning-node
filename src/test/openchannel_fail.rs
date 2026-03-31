@@ -35,6 +35,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -70,6 +71,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -98,6 +100,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -131,6 +134,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -164,6 +168,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -192,6 +197,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -225,6 +231,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -258,6 +265,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -293,6 +301,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -326,6 +335,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -359,6 +369,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -394,6 +405,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -427,6 +439,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -460,6 +473,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: Some(s!("ttoooosshhoorrtt")),
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -493,6 +507,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))
@@ -514,6 +529,7 @@ async fn open_fail() {
         fee_base_msat: None,
         fee_proportional_millionths: None,
         temporary_channel_id: None,
+        virtual_open_mode: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/openchannel"))

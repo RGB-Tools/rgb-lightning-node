@@ -2,6 +2,7 @@ use amplify::s;
 use biscuit_auth::{builder::date, macros::*, KeyPair};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
+use bitcoin::secp256k1::PublicKey;
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
 use lightning_invoice::Bolt11Invoice;
@@ -19,8 +20,9 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tracing_test::traced_test;
 
+use crate::core_types::{HTLCStatus, SwapStatus, FEE_RATE};
 use crate::error::APIErrorResponse;
-use crate::core_types::{FEE_RATE, HTLCStatus, SwapStatus};
+use crate::routes::ChannelStatus;
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetNIA, AssetUDA,
     Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse, ChangePasswordRequest,
@@ -28,19 +30,19 @@ use crate::routes::{
     DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
     DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
     GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
-    InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse,
-    IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
-    IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
-    LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse, ListChannelsResponse,
-    ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
-    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
-    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
-    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, InitRequest,
+    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
+    IssueAssetCFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
+    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
+    ListPeersResponse, ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse,
+    ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse,
+    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
     PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
     RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest,
-    Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
+    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest, Transaction,
+    Transfer, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LOGS_DIR, PROXY_ENDPOINT_LOCAL};
 
@@ -68,6 +70,8 @@ impl Default for UserArgs {
             ldk_peer_listening_port: 9735,
             max_media_upload_size_mb: 3,
             root_public_key: None,
+            enable_virtual_channels_v0: false,
+            virtual_peer_pubkeys: vec![],
         }
     }
 }
@@ -150,6 +154,25 @@ async fn start_daemon(
     root_public_key: Option<biscuit_auth::PublicKey>,
     keep_node_dir: bool,
 ) -> SocketAddr {
+    start_daemon_with_virtual_options(
+        node_test_dir,
+        node_peer_port,
+        root_public_key,
+        keep_node_dir,
+        false,
+        vec![],
+    )
+    .await
+}
+
+async fn start_daemon_with_virtual_options(
+    node_test_dir: &str,
+    node_peer_port: u16,
+    root_public_key: Option<biscuit_auth::PublicKey>,
+    keep_node_dir: bool,
+    enable_virtual_channels_v0: bool,
+    virtual_peer_pubkeys: Vec<PublicKey>,
+) -> SocketAddr {
     if !keep_node_dir && Path::new(&node_test_dir).is_dir() {
         std::fs::remove_dir_all(node_test_dir).unwrap();
     }
@@ -160,6 +183,8 @@ async fn start_daemon(
         storage_dir_path: node_test_dir.into(),
         ldk_peer_listening_port: node_peer_port,
         root_public_key,
+        enable_virtual_channels_v0,
+        virtual_peer_pubkeys,
         ..Default::default()
     };
     tokio::spawn(async move {
@@ -223,8 +248,27 @@ async fn start_node(
     node_peer_port: u16,
     keep_node_dir: bool,
 ) -> (SocketAddr, String) {
+    start_node_with_virtual_options(node_test_dir, node_peer_port, keep_node_dir, false, vec![])
+        .await
+}
+
+async fn start_node_with_virtual_options(
+    node_test_dir: &str,
+    node_peer_port: u16,
+    keep_node_dir: bool,
+    enable_virtual_channels_v0: bool,
+    virtual_peer_pubkeys: Vec<PublicKey>,
+) -> (SocketAddr, String) {
     println!("starting node with peer port {node_peer_port}");
-    let node_address = start_daemon(node_test_dir, node_peer_port, None, keep_node_dir).await;
+    let node_address = start_daemon_with_virtual_options(
+        node_test_dir,
+        node_peer_port,
+        None,
+        keep_node_dir,
+        enable_virtual_channels_v0,
+        virtual_peer_pubkeys,
+    )
+    .await;
 
     let password = format!("{node_test_dir}.{node_peer_port}");
 
@@ -1126,6 +1170,8 @@ async fn open_channel_with_retry(
             None,
             None,
             true,
+            true,
+            None,
         )
         .await;
 
@@ -1162,6 +1208,8 @@ async fn open_channel_raw(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
+    public: bool,
+    virtual_open_mode: Option<&str>,
 ) -> Result<Channel, reqwest::StatusCode> {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
@@ -1193,11 +1241,12 @@ async fn open_channel_raw(
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
         push_asset_amount,
-        public: true,
+        public,
         with_anchors,
         fee_base_msat,
         fee_proportional_millionths,
         temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
+        virtual_open_mode: virtual_open_mode.map(|mode| mode.to_string()),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/openchannel"))
@@ -1211,7 +1260,31 @@ async fn open_channel_raw(
         return Err(status);
     }
 
+    let is_virtual_open = matches!(virtual_open_mode, Some("trusted_no_broadcast"));
+    let expected_asset_id = asset_id.map(str::to_string);
+
     res.json::<OpenChannelResponse>().await.unwrap();
+
+    if is_virtual_open {
+        let t_0 = OffsetDateTime::now_utc();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let channels = list_channels(node_address).await;
+            if let Some(channel) = channels.iter().find(|c| {
+                c.peer_pubkey == dest_peer_pubkey
+                    && c.asset_id == expected_asset_id
+                    && c.asset_local_amount == asset_amount
+                    && c.virtual_open_mode.as_deref() == virtual_open_mode
+            }) {
+                if channel.ready && channel.is_usable {
+                    return Ok(channel.clone());
+                }
+            }
+            if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
+                panic!("virtual channel is taking too long to become ready and usable")
+            }
+        }
+    }
 
     let t_0 = OffsetDateTime::now_utc();
     let mut channel_id = None;
@@ -1294,9 +1367,40 @@ async fn open_channel_with_custom_data(
         fee_proportional_millionths,
         temporary_channel_id,
         with_anchors,
+        true,
+        None,
     )
     .await
     .expect("channel opening should succeed")
+}
+
+async fn open_virtual_channel(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+) -> Channel {
+    open_channel_raw(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        capacity_sat,
+        push_msat,
+        asset_amount,
+        asset_id,
+        None,
+        None,
+        None,
+        None,
+        true,
+        false,
+        Some("trusted_no_broadcast"),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("virtual channel is taking too long to become usable"))
 }
 
 async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
@@ -1907,3 +2011,4 @@ mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
 mod upload_asset_media;
 mod vanilla_payment_on_rgb_channel;
+mod virtual_channels;

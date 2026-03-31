@@ -1,12 +1,10 @@
 // NOTE: This module mirrors core behavior from `src/routes.rs` for SDK consumers.
 // If route-level business logic changes, keep SDK equivalents in sync.
 
-use crate::core_types::{
-    FEE_RATE, MIN_CHANNEL_CONFIRMATIONS,
-};
+use crate::core_types::{FEE_RATE, MIN_CHANNEL_CONFIRMATIONS};
 use crate::disk::{self, CHANNEL_PEER_DATA};
 use crate::error::APIError;
-use crate::ldk::{start_ldk, PaymentInfo};
+use crate::ldk::{start_ldk, PaymentInfo, VirtualChannelSessionStatus};
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
@@ -34,8 +32,8 @@ use lightning::rgb_utils::{
     parse_rgb_payment_info, write_rgb_channel_info, write_rgb_payment_info_file, RgbInfo,
     STATIC_BLINDING,
 };
-use lightning::routing::gossip::RoutingFees;
 use lightning::routing::gossip::NodeId;
+use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{
     Path as LnPath, PaymentParameters, Route, RouteHint, RouteHintHop, RouteParameters,
     RouteParametersConfig,
@@ -47,11 +45,10 @@ use lightning::util::config::{
 };
 use lightning::util::errors::APIError as LDKAPIError;
 use lightning::util::IS_SWAP_SCID;
-use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use lightning::{
-    onion_message::messenger::Destination,
-    onion_message::messenger::MessageSendInstructions,
+    onion_message::messenger::Destination, onion_message::messenger::MessageSendInstructions,
 };
+use lightning_invoice::{Bolt11Invoice, PaymentSecret};
 use regex::Regex;
 use rgb_lib::utils::recipient_id_from_script_buf;
 use rgb_lib::wallet::rust_only::check_indexer_url as rgb_lib_check_indexer_url;
@@ -90,6 +87,37 @@ const SDK_UTXO_SIZE_SAT: u32 = 32_000;
 const SDK_DUST_LIMIT_MSAT: u64 = 546_000;
 const SDK_MAX_SWAP_FEE_MSAT: u64 = SDK_HTLC_MIN_MSAT;
 const SDK_DEFAULT_FINAL_CLTV_EXPIRY_DELTA: u32 = 14;
+const SDK_VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST: &str = "trusted_no_broadcast";
+
+struct OpenChannelVirtualIntentGuard {
+    unlocked_state: Arc<crate::utils::UnlockedAppState>,
+    temporary_channel_id: Option<ChannelId>,
+}
+
+impl OpenChannelVirtualIntentGuard {
+    fn new(
+        unlocked_state: Arc<crate::utils::UnlockedAppState>,
+        temporary_channel_id: ChannelId,
+    ) -> Self {
+        Self {
+            unlocked_state,
+            temporary_channel_id: Some(temporary_channel_id),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.temporary_channel_id = None;
+    }
+}
+
+impl Drop for OpenChannelVirtualIntentGuard {
+    fn drop(&mut self) {
+        if let Some(temporary_channel_id) = self.temporary_channel_id.take() {
+            self.unlocked_state
+                .virtual_channel_draft_delete(&temporary_channel_id);
+        }
+    }
+}
 
 fn check_changing_state(state: &AppState) -> Result<(), APIError> {
     if *state.changing_state.lock().unwrap() {
@@ -335,6 +363,7 @@ pub(crate) struct OpenChannelRequestData {
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_amount: Option<u64>,
     pub(crate) push_asset_amount: Option<u64>,
+    pub(crate) virtual_open_mode: Option<String>,
 }
 
 pub(crate) struct OpenChannelData {
@@ -526,6 +555,7 @@ pub(crate) struct ChannelData {
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_local_amount: Option<u64>,
     pub(crate) asset_remote_amount: Option<u64>,
+    pub(crate) virtual_open_mode: Option<String>,
 }
 
 pub(crate) struct TransactionData {
@@ -1046,6 +1076,7 @@ pub(crate) async fn list_channels(state: Arc<AppState>) -> Result<Vec<ChannelDat
     let unlocked_state = guard.as_ref().unwrap();
 
     let mut channels = vec![];
+    let virtual_sessions = unlocked_state.virtual_channel_session_store();
     for chan_info in unlocked_state.channel_manager.list_channels() {
         let status = match chan_info.channel_shutdown_state.unwrap() {
             ChannelShutdownState::NotShuttingDown => {
@@ -1076,7 +1107,13 @@ pub(crate) async fn list_channels(state: Arc<AppState>) -> Result<Vec<ChannelDat
             asset_id: None,
             asset_local_amount: None,
             asset_remote_amount: None,
+            virtual_open_mode: None,
         };
+
+        if virtual_sessions.contains_key(&chan_info.channel_id) {
+            channel.virtual_open_mode =
+                Some(SDK_VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST.to_string());
+        }
 
         if let Some(funding_txo) = chan_info.funding_txo {
             channel.funding_txid = Some(funding_txo.txid.to_string());
@@ -1399,10 +1436,7 @@ pub(crate) async fn init(
     Ok(InitData { mnemonic })
 }
 
-pub(crate) async fn unlock(
-    state: Arc<AppState>,
-    request: UnlockRequest,
-) -> Result<(), APIError> {
+pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Result<(), APIError> {
     tracing::info!("Unlock started");
     match check_locked(&state).await {
         Ok(unlocked_state) => {
@@ -1487,7 +1521,8 @@ pub(crate) async fn disconnect_peer(
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
 
-    let peer_pubkey = PublicKey::from_str(&request.peer_pubkey).map_err(|_| APIError::InvalidPubkey)?;
+    let peer_pubkey =
+        PublicKey::from_str(&request.peer_pubkey).map_err(|_| APIError::InvalidPubkey)?;
 
     for channel in unlocked_state.channel_manager.list_channels() {
         if channel.counterparty.node_id == peer_pubkey {
@@ -1512,7 +1547,9 @@ pub(crate) async fn disconnect_peer(
         )));
     }
 
-    unlocked_state.peer_manager.disconnect_by_node_id(peer_pubkey);
+    unlocked_state
+        .peer_manager
+        .disconnect_by_node_id(peer_pubkey);
     Ok(())
 }
 
@@ -1538,22 +1575,137 @@ pub(crate) async fn close_channel(
         Err(_) => return Err(APIError::InvalidPubkey),
     };
 
-    if let Some(chan_details) = unlocked_state
+    let virtual_session = unlocked_state.virtual_channel_session_get(&requested_cid);
+    if let Some(session) = virtual_session.as_ref() {
+        if session.peer_id != peer_pubkey {
+            return Err(APIError::CannotCloseChannel(
+                "peer pubkey does not match trusted virtual channel session".to_string(),
+            ));
+        }
+    }
+
+    let chan_details = if let Some(chan_details) = unlocked_state
         .channel_manager
         .list_channels()
-        .iter()
+        .into_iter()
         .find(|c| c.channel_id == requested_cid)
     {
-        match chan_details.channel_shutdown_state {
-            Some(ChannelShutdownState::NotShuttingDown) => {}
-            _ => {
-                return Err(APIError::CannotCloseChannel(s!(
-                    "Channel is already being closed"
-                )))
+        if chan_details.trusted_no_broadcast {
+            if let Some(session) = virtual_session.as_ref() {
+                match session.status {
+                    VirtualChannelSessionStatus::Abandoned => {
+                        tracing::warn!(
+                            "virtual session {} is persisted as abandoned but the live trusted channel is still present; retrying close without rewriting session state",
+                            requested_cid
+                        );
+                    }
+                    VirtualChannelSessionStatus::AbandonPending => {
+                        return Err(APIError::CannotCloseChannel(
+                            "virtual cleanup is already in progress".to_string(),
+                        ));
+                    }
+                    VirtualChannelSessionStatus::Active => {}
+                }
             }
         }
+        chan_details
     } else {
+        if let Some(session) = virtual_session.as_ref() {
+            if !matches!(session.status, VirtualChannelSessionStatus::Abandoned) {
+                unlocked_state.virtual_channel_session_update_status(
+                    session,
+                    VirtualChannelSessionStatus::Abandoned,
+                );
+            }
+            return Ok(());
+        }
         return Err(APIError::UnknownChannelId);
+    };
+
+    if virtual_session.is_some() && !chan_details.trusted_no_broadcast {
+        return Err(APIError::Unexpected(format!(
+            "virtual channel session exists for {requested_cid}, but live channel is not trusted_no_broadcast"
+        )));
+    }
+
+    match chan_details.channel_shutdown_state {
+        Some(ChannelShutdownState::NotShuttingDown) => {}
+        _ => {
+            return Err(APIError::CannotCloseChannel(s!(
+                "Channel is already being closed"
+            )))
+        }
+    }
+
+    if chan_details.trusted_no_broadcast {
+        if !state.static_state.enable_virtual_channels_v0 {
+            return Err(APIError::CannotCloseChannel(
+                "trusted virtual channels v0 are disabled".to_string(),
+            ));
+        }
+        let Some(session) = virtual_session else {
+            return Err(APIError::CannotCloseChannel(
+                "virtual cleanup is host-only and requires a host-side session".to_string(),
+            ));
+        };
+        if request.force {
+            return Err(APIError::CannotCloseChannel(
+                "force=true is not supported for trusted virtual channels".to_string(),
+            ));
+        }
+        unlocked_state
+            .virtual_channel_ensure_no_client_value(&chan_details, &state.static_state.ldk_data_dir)
+            .map_err(APIError::CannotCloseChannel)?;
+
+        unlocked_state.virtual_channel_session_update_status(
+            &session,
+            VirtualChannelSessionStatus::AbandonPending,
+        );
+        match unlocked_state.channel_manager.abandon_virtual_channel(
+            &requested_cid,
+            &peer_pubkey,
+            true,
+        ) {
+            Ok(()) => {
+                unlocked_state.virtual_channel_session_update_status(
+                    &session,
+                    VirtualChannelSessionStatus::Abandoned,
+                );
+                tracing::info!(
+                    "EVENT: abandon_virtual_channel succeeded; session is now abandoned"
+                );
+            }
+            Err(e) => {
+                let error = match e {
+                    LDKAPIError::APIMisuseError { err } => err,
+                    _ => format!("{e:?}"),
+                };
+                let live_virtual_channel_still_exists = unlocked_state
+                    .channel_manager
+                    .list_channels()
+                    .into_iter()
+                    .any(|c| c.channel_id == requested_cid && c.trusted_no_broadcast);
+                if live_virtual_channel_still_exists {
+                    unlocked_state.virtual_channel_session_update_status(
+                        &session,
+                        VirtualChannelSessionStatus::Active,
+                    );
+                    return Err(APIError::CannotCloseChannel(error));
+                }
+                unlocked_state.virtual_channel_session_update_status(
+                    &session,
+                    VirtualChannelSessionStatus::Abandoned,
+                );
+                tracing::info!(
+                    "EVENT: abandon_virtual_channel returned error '{}' but channel {} is absent from live LDK state; reconciling session to abandoned",
+                    error,
+                    requested_cid,
+                );
+                return Ok(());
+            }
+        }
+
+        return Ok(());
     }
 
     if request.force {
@@ -1748,7 +1900,7 @@ pub(crate) async fn keysend(
         PaymentInfo {
             preimage: None,
             secret: None,
-            status: HtlcStatus::Pending.into(),
+            status: HtlcStatus::Pending,
             amt_msat: Some(amt_msat),
             created_at,
             updated_at: created_at,
@@ -1784,7 +1936,7 @@ pub(crate) async fn keysend(
         }
         Err(e) => {
             tracing::error!("ERROR: failed to send payment: {:?}", e);
-            unlocked_state.update_outbound_payment_status(payment_id, HtlcStatus::Failed.into());
+            unlocked_state.update_outbound_payment_status(payment_id, HtlcStatus::Failed);
             HtlcStatus::Failed
         }
     };
@@ -1899,15 +2051,46 @@ pub(crate) async fn open_channel(
         return Err(APIError::OpenChannelInProgress);
     }
 
-    let temporary_channel_id = if let Some(tmp_chan_id_str) = request.temporary_channel_id {
-        let tmp_chan_id = check_channel_id(&tmp_chan_id_str)?;
-        if unlocked_state.channel_ids().contains_key(&tmp_chan_id) {
-            return Err(APIError::TemporaryChannelIdAlreadyUsed);
+    let is_virtual_open = match request.virtual_open_mode.as_deref() {
+        None => false,
+        Some(SDK_VIRTUAL_OPEN_MODE_TRUSTED_NO_BROADCAST) => true,
+        Some(other) => {
+            return Err(APIError::InvalidRequest(format!(
+                "unknown virtual_open_mode: {other}"
+            )));
         }
-        Some(tmp_chan_id)
-    } else {
-        None
     };
+
+    if is_virtual_open && !state.static_state.enable_virtual_channels_v0 {
+        return Err(APIError::InvalidRequest(
+            "trusted virtual channels v0 are disabled".to_string(),
+        ));
+    }
+
+    if is_virtual_open && request.public {
+        return Err(APIError::InvalidRequest(
+            "virtual channels requires public=false".to_string(),
+        ));
+    }
+
+    let mut temporary_channel_id = request
+        .temporary_channel_id
+        .as_deref()
+        .map(check_channel_id)
+        .transpose()?;
+    if !is_virtual_open {
+        if let Some(temporary_channel_id) = temporary_channel_id.as_ref() {
+            if unlocked_state
+                .channel_ids()
+                .contains_key(temporary_channel_id)
+                || unlocked_state
+                    .virtual_channel_draft_store()
+                    .contains_key(temporary_channel_id)
+            {
+                return Err(APIError::TemporaryChannelIdAlreadyUsed);
+            }
+        }
+    }
 
     let colored_info = match (request.asset_id, request.asset_amount) {
         (Some(_), Some(amt)) if amt < SDK_OPENCHANNEL_MIN_RGB_AMT => {
@@ -1966,6 +2149,18 @@ pub(crate) async fn open_channel(
     let (peer_pubkey, mut peer_addr) =
         parse_peer_info(request.peer_pubkey_and_opt_addr.to_string())?;
 
+    let mut virtual_draft_reservation = if is_virtual_open {
+        let reserved_temporary_channel_id =
+            unlocked_state.virtual_channel_add_intent(peer_pubkey, temporary_channel_id)?;
+        temporary_channel_id = Some(reserved_temporary_channel_id);
+        Some(OpenChannelVirtualIntentGuard::new(
+            unlocked_state.clone(),
+            reserved_temporary_channel_id,
+        ))
+    } else {
+        None
+    };
+
     let peer_data_path = state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA);
     if peer_addr.is_none() {
         if let Some(peer) = unlocked_state.peer_manager.peer_by_node_id(&peer_pubkey) {
@@ -2004,14 +2199,25 @@ pub(crate) async fn open_channel(
     }
     let config = UserConfig {
         channel_handshake_limits: ChannelHandshakeLimits {
+            trust_own_funding_0conf: true,
             their_to_self_delay: 2016,
             ..Default::default()
         },
         channel_handshake_config: ChannelHandshakeConfig {
-            announce_for_forwarding: request.public,
+            announce_for_forwarding: if is_virtual_open {
+                false
+            } else {
+                request.public
+            },
             our_htlc_minimum_msat: SDK_HTLC_MIN_MSAT,
-            minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
+            minimum_depth: if is_virtual_open {
+                0
+            } else {
+                MIN_CHANNEL_CONFIRMATIONS as u32
+            },
+            negotiate_scid_privacy: is_virtual_open,
             negotiate_anchors_zero_fee_htlc_tx: request.with_anchors,
+            their_channel_reserve_satoshis_override: if is_virtual_open { Some(0) } else { None },
             ..Default::default()
         },
         channel_config,
@@ -2108,6 +2314,9 @@ pub(crate) async fn open_channel(
                 _ => APIError::FailedOpenChannel(format!("{e:?}")),
             }
         })?;
+    if let Some(virtual_draft_reservation) = virtual_draft_reservation.as_mut() {
+        virtual_draft_reservation.disarm();
+    }
 
     let temporary_channel_id = temporary_channel_id.0.as_hex().to_string();
     tracing::info!("EVENT: initiated channel with peer {}", peer_pubkey);
@@ -2180,7 +2389,7 @@ pub(crate) async fn send_payment(
             PaymentInfo {
                 preimage: None,
                 secret,
-                status: status.into(),
+                status,
                 amt_msat: Some(amt_msat),
                 created_at,
                 updated_at: created_at,
@@ -2203,9 +2412,9 @@ pub(crate) async fn send_payment(
         );
         if pay.is_err() {
             tracing::error!("ERROR: failed to pay: {:?}", pay);
-            unlocked_state.update_outbound_payment_status(payment_id, HtlcStatus::Failed.into());
+            unlocked_state.update_outbound_payment_status(payment_id, HtlcStatus::Failed);
             status = HtlcStatus::Failed;
-            unlocked_state.update_outbound_payment_status(payment_id, status.into());
+            unlocked_state.update_outbound_payment_status(payment_id, status);
         }
         (payment_id, None, secret)
     } else {
@@ -2276,7 +2485,7 @@ pub(crate) async fn send_payment(
             PaymentInfo {
                 preimage: None,
                 secret,
-                status: status.into(),
+                status,
                 amt_msat: Some(amt_msat),
                 created_at,
                 updated_at: created_at,
@@ -2314,7 +2523,7 @@ pub(crate) async fn send_payment(
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
                 status = HtlcStatus::Failed;
-                unlocked_state.update_outbound_payment_status(payment_id, status.into());
+                unlocked_state.update_outbound_payment_status(payment_id, status);
             }
         };
 
@@ -2377,10 +2586,11 @@ pub(crate) async fn maker_execute(
         .and_then(|data| data.try_into().ok())
         .map(PaymentSecret)
         .ok_or(APIError::InvalidPaymentSecret)?;
-    let taker_pk = PublicKey::from_str(&request.taker_pubkey).map_err(|_| APIError::InvalidPubkey)?;
+    let taker_pk =
+        PublicKey::from_str(&request.taker_pubkey).map_err(|_| APIError::InvalidPubkey)?;
 
     if get_current_timestamp() > swapstring.swap_info.expiry {
-        unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Expired.into());
+        unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Expired);
         return Err(APIError::ExpiredSwapOffer);
     }
 
@@ -2394,14 +2604,16 @@ pub(crate) async fn maker_execute(
         .channel_manager
         .list_usable_channels()
         .iter()
-        .filter(|details| match get_rgb_channel_info_optional(
-            &details.channel_id,
-            &state.static_state.ldk_data_dir,
-            false,
-        ) {
-            _ if swap_info.is_from_btc() => true,
-            Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap_info.from_asset => true,
-            _ => false,
+        .filter(|details| {
+            match get_rgb_channel_info_optional(
+                &details.channel_id,
+                &state.static_state.ldk_data_dir,
+                false,
+            ) {
+                _ if swap_info.is_from_btc() => true,
+                Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap_info.from_asset => true,
+                _ => false,
+            }
         })
         .map(|details| {
             let config = details.counterparty.forwarding_info.as_ref().unwrap();
@@ -2420,7 +2632,9 @@ pub(crate) async fn maker_execute(
         })
         .collect();
 
-    let rgb_payment = swap_info.to_asset.map(|to_asset| (to_asset, swap_info.qty_to));
+    let rgb_payment = swap_info
+        .to_asset
+        .map(|to_asset| (to_asset, swap_info.qty_to));
     let first_leg = get_route(
         &unlocked_state.channel_manager,
         &unlocked_state.router,
@@ -2435,7 +2649,9 @@ pub(crate) async fn maker_execute(
         vec![],
     );
 
-    let rgb_payment = swap_info.from_asset.map(|from_asset| (from_asset, swap_info.qty_from));
+    let rgb_payment = swap_info
+        .from_asset
+        .map(|from_asset| (from_asset, swap_info.qty_from));
     let second_leg = get_route(
         &unlocked_state.channel_manager,
         &unlocked_state.router,
@@ -2489,7 +2705,9 @@ pub(crate) async fn maker_execute(
         .sum::<u64>();
 
     if total_fee >= SDK_MAX_SWAP_FEE_MSAT {
-        return Err(APIError::FailedPayment(format!("Fee too high: {total_fee}")));
+        return Err(APIError::FailedPayment(format!(
+            "Fee too high: {total_fee}"
+        )));
     }
 
     let route = Route {
@@ -2520,24 +2738,24 @@ pub(crate) async fn maker_execute(
         );
     }
 
-    unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Pending.into());
+    unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Pending);
 
     let payment_hash: PaymentHash = payment_preimage.into();
-    let err = match unlocked_state.channel_manager.send_spontaneous_payment_with_route(
-        route,
-        payment_hash,
-        payment_preimage,
-        RecipientOnionFields::spontaneous_empty(),
-        PaymentId(swapstring.payment_hash.0),
-    ) {
-        Ok(()) => None,
-        Err(e) => Some(e),
-    };
+    let err = unlocked_state
+        .channel_manager
+        .send_spontaneous_payment_with_route(
+            route,
+            payment_hash,
+            payment_preimage,
+            RecipientOnionFields::spontaneous_empty(),
+            PaymentId(swapstring.payment_hash.0),
+        )
+        .err();
 
     match err {
         None => Ok(()),
         Some(e) => {
-            unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Failed.into());
+            unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Failed);
             Err(APIError::FailedPayment(format!("{e:?}")))
         }
     }
@@ -2606,10 +2824,7 @@ pub(crate) async fn maker_init(
     })
 }
 
-pub(crate) async fn taker(
-    state: Arc<AppState>,
-    request: TakerRequestData,
-) -> Result<(), APIError> {
+pub(crate) async fn taker(state: Arc<AppState>, request: TakerRequestData) -> Result<(), APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
     let swapstring = SwapString::from_str(&request.swapstring)
@@ -2665,8 +2880,8 @@ pub(crate) async fn send_onion_message(
         )));
     }
 
-    let data =
-        hex_str_to_vec(&request.data).ok_or(APIError::InvalidOnionData(s!("need a hex data string")))?;
+    let data = hex_str_to_vec(&request.data)
+        .ok_or(APIError::InvalidOnionData(s!("need a hex data string")))?;
 
     let destination = Destination::Node(intermediate_nodes.pop().unwrap());
     let message_send_instructions = MessageSendInstructions::WithoutReplyPath { destination };
@@ -2816,7 +3031,7 @@ pub(crate) async fn create_ln_invoice(
         PaymentInfo {
             preimage: None,
             secret: Some(*invoice.payment_secret()),
-            status: HtlcStatus::Pending.into(),
+            status: HtlcStatus::Pending,
             amt_msat,
             created_at,
             updated_at: created_at,
@@ -2856,7 +3071,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             asset_id,
             payment_hash: hex_str(&payment_hash.0),
             inbound: true,
-            status: payment_info.status.into(),
+            status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
@@ -2882,7 +3097,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             asset_id,
             payment_hash: hex_str(&payment_hash.0),
             inbound: false,
-            status: payment_info.status.into(),
+            status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
@@ -2927,7 +3142,7 @@ pub(crate) async fn get_payment(
                 asset_id,
                 payment_hash: hex_str(&payment_hash.0),
                 inbound: true,
-                status: payment_info.status.into(),
+                status: payment_info.status,
                 created_at: payment_info.created_at,
                 updated_at: payment_info.updated_at,
                 payee_pubkey: payment_info.payee_pubkey.to_string(),
@@ -2954,7 +3169,7 @@ pub(crate) async fn get_payment(
                 asset_id,
                 payment_hash: hex_str(&payment_hash.0),
                 inbound: false,
-                status: payment_info.status.into(),
+                status: payment_info.status,
                 created_at: payment_info.created_at,
                 updated_at: payment_info.updated_at,
                 payee_pubkey: payment_info.payee_pubkey.to_string(),
@@ -2971,7 +3186,7 @@ fn map_swap(
     taker: bool,
     state: &crate::utils::UnlockedAppState,
 ) -> SwapViewData {
-    let mut status: SwapStatus = swap_data.status.into();
+    let mut status: SwapStatus = swap_data.status;
     if status == SwapStatus::Waiting && get_current_timestamp() > swap_data.swap_info.expiry {
         status = SwapStatus::Expired;
     } else if status == SwapStatus::Pending
@@ -2979,12 +3194,12 @@ fn map_swap(
     {
         status = SwapStatus::Failed;
     }
-    let current_status: SwapStatus = swap_data.status.into();
+    let current_status: SwapStatus = swap_data.status;
     if status != current_status {
         if taker {
-            state.update_taker_swap_status(payment_hash, status.into());
+            state.update_taker_swap_status(payment_hash, status);
         } else {
-            state.update_maker_swap_status(payment_hash, status.into());
+            state.update_maker_swap_status(payment_hash, status);
         }
     }
 

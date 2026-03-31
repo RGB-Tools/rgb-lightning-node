@@ -35,7 +35,7 @@ pub enum APIError {
     #[error("Batch transfer not found")]
     BatchTransferNotFound,
 
-    #[error("Cannot close channel")]
+    #[error("Cannot close channel: {0}")]
     CannotCloseChannel(String),
 
     #[error("Cannot estimate fees")]
@@ -545,6 +545,9 @@ pub enum AppError {
 
     #[error("The provided root public key is invalid")]
     InvalidRootKey,
+
+    #[error("Invalid virtual peer pubkey: {0}")]
+    InvalidVirtualPeerPubkey(String),
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
