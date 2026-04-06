@@ -109,7 +109,10 @@ fn map_payment_data(data: crate::sdk::PaymentData) -> Result<Payment, RlnError> 
         .map_err(|_| RlnError::Internal)?;
     let status = match data.status {
         crate::sdk::HtlcStatus::Pending => HtlcStatus::Pending,
+        crate::sdk::HtlcStatus::Claimable => HtlcStatus::Claimable,
+        crate::sdk::HtlcStatus::Claiming => HtlcStatus::Claiming,
         crate::sdk::HtlcStatus::Succeeded => HtlcStatus::Succeeded,
+        crate::sdk::HtlcStatus::Cancelled => HtlcStatus::Cancelled,
         crate::sdk::HtlcStatus::Failed => HtlcStatus::Failed,
     };
 
@@ -352,6 +355,37 @@ impl SdkNode {
         })
     }
 
+    pub fn issueassetifa(&self, request: SdkIssueAssetIfaRequest) -> Result<AssetIfa, RlnError> {
+        let state = self.handle.app_state();
+        let asset = block_on_sdk(sdk::issue_asset_ifa(
+            state,
+            sdk::IssueAssetIFARequestData {
+                amounts: request.amounts,
+                inflation_amounts: request.inflation_amounts,
+                ticker: request.ticker,
+                name: request.name,
+                precision: request.precision,
+                reject_list_url: request.reject_list_url,
+            },
+        ))?;
+
+        Ok(AssetIfa {
+            asset_id: ContractId::from_str(&asset.asset_id).map_err(|_| RlnError::Internal)?,
+            ticker: asset.ticker,
+            name: asset.name,
+            details: asset.details,
+            precision: asset.precision,
+            initial_supply: asset.initial_supply,
+            max_supply: asset.max_supply,
+            known_circulating_supply: asset.known_circulating_supply,
+            timestamp: asset.timestamp,
+            added_at: asset.added_at,
+            balance: map_asset_balance(asset.balance),
+            media: asset.media.map(map_media),
+            reject_list_url: asset.reject_list_url,
+        })
+    }
+
     pub fn issueassetuda(&self, request: SdkIssueAssetUdaRequest) -> Result<AssetUda, RlnError> {
         let state = self.handle.app_state();
         let asset = block_on_sdk(sdk::issue_asset_uda(
@@ -451,7 +485,10 @@ impl SdkNode {
 
         let status = match response.status {
             crate::sdk::HtlcStatus::Pending => HtlcStatus::Pending,
+            crate::sdk::HtlcStatus::Claimable => HtlcStatus::Claimable,
+            crate::sdk::HtlcStatus::Claiming => HtlcStatus::Claiming,
             crate::sdk::HtlcStatus::Succeeded => HtlcStatus::Succeeded,
+            crate::sdk::HtlcStatus::Cancelled => HtlcStatus::Cancelled,
             crate::sdk::HtlcStatus::Failed => HtlcStatus::Failed,
         };
         let payment_hash =
@@ -600,7 +637,10 @@ impl SdkNode {
         ))?;
         let status = match response.status {
             crate::sdk::HtlcStatus::Pending => HtlcStatus::Pending,
+            crate::sdk::HtlcStatus::Claimable => HtlcStatus::Claimable,
+            crate::sdk::HtlcStatus::Claiming => HtlcStatus::Claiming,
             crate::sdk::HtlcStatus::Succeeded => HtlcStatus::Succeeded,
+            crate::sdk::HtlcStatus::Cancelled => HtlcStatus::Cancelled,
             crate::sdk::HtlcStatus::Failed => HtlcStatus::Failed,
         };
         let payment_hash = response
@@ -942,6 +982,7 @@ impl SdkNode {
                 "nia" => Ok(rgb_lib::AssetSchema::Nia),
                 "uda" => Ok(rgb_lib::AssetSchema::Uda),
                 "cfa" => Ok(rgb_lib::AssetSchema::Cfa),
+                "ifa" => Ok(rgb_lib::AssetSchema::Ifa),
                 _ => Err(RlnError::InvalidRequest),
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1026,7 +1067,32 @@ impl SdkNode {
                     .collect::<Result<Vec<_>, RlnError>>()
             })
             .transpose()?;
-        Ok(ListAssetsResponse { nia, uda, cfa })
+        let ifa = resp
+            .ifa
+            .map(|v| {
+                v.into_iter()
+                    .map(|a| {
+                        Ok(AssetIfa {
+                            asset_id: ContractId::from_str(&a.asset_id)
+                                .map_err(|_| RlnError::Internal)?,
+                            ticker: a.ticker,
+                            name: a.name,
+                            details: a.details,
+                            precision: a.precision,
+                            initial_supply: a.initial_supply,
+                            max_supply: a.max_supply,
+                            known_circulating_supply: a.known_circulating_supply,
+                            timestamp: a.timestamp,
+                            added_at: a.added_at,
+                            balance: map_asset_balance(a.balance),
+                            media: a.media.map(map_media),
+                            reject_list_url: a.reject_list_url,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, RlnError>>()
+            })
+            .transpose()?;
+        Ok(ListAssetsResponse { nia, uda, cfa, ifa })
     }
 
     pub fn decode_ln_invoice(
@@ -1086,7 +1152,10 @@ impl SdkNode {
         let resp = block_on_sdk(sdk::invoice_status(state, invoice.to_string()))?;
         Ok(match resp.status {
             crate::sdk::InvoiceStatus::Pending => InvoiceStatus::Pending,
+            crate::sdk::InvoiceStatus::Claimable => InvoiceStatus::Claimable,
+            crate::sdk::InvoiceStatus::Claiming => InvoiceStatus::Claiming,
             crate::sdk::InvoiceStatus::Succeeded => InvoiceStatus::Succeeded,
+            crate::sdk::InvoiceStatus::Cancelled => InvoiceStatus::Cancelled,
             crate::sdk::InvoiceStatus::Failed => InvoiceStatus::Failed,
             crate::sdk::InvoiceStatus::Expired => InvoiceStatus::Expired,
         })

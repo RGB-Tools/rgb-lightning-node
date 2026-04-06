@@ -24,7 +24,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: 1.85.1
+          toolchain: 1.88.0
           rustflags: ""
 
       - name: Run library-only test suite
@@ -43,7 +43,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: 1.85.1
+          toolchain: 1.88.0
           rustflags: ""
 
       - name: Build host cdylib
@@ -77,7 +77,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: 1.85.1
+          toolchain: 1.88.0
           rustflags: ""
 
       - name: Setup Java
@@ -165,7 +165,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: 1.85.1
+          toolchain: 1.88.0
           rustflags: ""
 
       - name: Install bindgen-cli

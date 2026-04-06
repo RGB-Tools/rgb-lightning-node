@@ -14,6 +14,9 @@ pub(crate) enum HTLCStatus {
     Pending,
     Succeeded,
     Failed,
+    Claimable,
+    Claiming,
+    Cancelled,
 }
 
 impl std::fmt::Display for HTLCStatus {
@@ -22,6 +25,9 @@ impl std::fmt::Display for HTLCStatus {
             HTLCStatus::Pending => "Pending",
             HTLCStatus::Succeeded => "Succeeded",
             HTLCStatus::Failed => "Failed",
+            HTLCStatus::Claimable => "Claimable",
+            HTLCStatus::Claiming => "Claiming",
+            HTLCStatus::Cancelled => "Cancelled",
         };
         write!(f, "{label}")
     }
@@ -31,6 +37,9 @@ impl_writeable_tlv_based_enum!(HTLCStatus,
     (0, Pending) => {},
     (1, Succeeded) => {},
     (2, Failed) => {},
+    (3, Claimable) => {},
+    (4, Claiming) => {},
+    (5, Cancelled) => {},
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]

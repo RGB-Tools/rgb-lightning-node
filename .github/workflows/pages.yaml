@@ -2,7 +2,7 @@ name: Deploy Swagger UI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "stage", "dev" ]
 
 permissions:
   contents: read

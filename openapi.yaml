@@ -115,6 +115,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BtcBalanceResponse'
+  /cancelhodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Cancel a HODL invoice
+      description: Cancel a held HTLC for a HODL invoice. Rejects cancellation if a settlement is already in progress.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCancelRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /changepassword:
     post:
       tags:
@@ -169,6 +187,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /claimhodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Claim a HODL invoice
+      description: Claim a held HTLC for a HODL invoice
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimHodlInvoiceRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimHodlInvoiceResponse'
   /closechannel:
     post:
       tags:
@@ -386,6 +422,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetSwapResponse'
+  /inflate:
+    post:
+      tags:
+        - RGB
+      summary: Inflate RGB assets
+      description: Inflate RGB assets on-chain
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InflateRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InflateResponse'
   /init:
     post:
       tags:
@@ -442,6 +496,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/IssueAssetCFAResponse'
+  /issueassetifa:
+    post:
+      tags:
+        - RGB
+      summary: Issue an RGB IFA asset
+      description: Issue an RGB IFA asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueAssetIFARequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueAssetIFAResponse'
   /issueassetnia:
     post:
       tags:
@@ -638,7 +710,7 @@ paths:
       tags:
         - Invoices
       summary: Get a LN invoice
-      description: Get a LN invoice to receive a payment
+      description: Get a LN invoice to receive a payment. Provide `payment_hash` to create a HODL invoice.
       requestBody:
         content:
           application/json:
@@ -1056,6 +1128,63 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Media'
             - type: 'null'
+    AssetIFA:
+      type: object
+      required:
+        - asset_id
+        - ticker
+        - name
+        - precision
+        - initial_supply
+        - max_supply
+        - known_circulating_supply
+        - timestamp
+        - added_at
+        - balance
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        details:
+          type:
+            - string
+            - 'null'
+          example: asset details
+        precision:
+          type: integer
+          example: 0
+        initial_supply:
+          type: integer
+          example: 777
+        max_supply:
+          type: integer
+          example: 999
+        known_circulating_supply:
+          type: integer
+          example: 888
+        timestamp:
+          type: integer
+          example: 1691160565
+        added_at:
+          type: integer
+          example: 1691161979
+        balance:
+          $ref: '#/components/schemas/AssetBalanceResponse'
+        media:
+          oneOf:
+            - $ref: '#/components/schemas/Media'
+            - type: 'null'
+        reject_list_url:
+          type:
+            - string
+            - 'null'
+          example: https://some.domain/someasset/rejectlist
     AssetMetadataRequest:
       type: object
       required:
@@ -1159,6 +1288,7 @@ components:
         - Nia
         - Uda
         - Cfa
+        - Ifa
     AssetUDA:
       type: object
       required:
@@ -1204,7 +1334,6 @@ components:
         - $ref: '#/components/schemas/AssignmentFungible'
         - $ref: '#/components/schemas/AssignmentNonFungible'
         - $ref: '#/components/schemas/AssignmentInflationRight'
-        - $ref: '#/components/schemas/AssignmentReplaceRight'
         - $ref: '#/components/schemas/AssignmentAny'
       discriminator:
         propertyName: type
@@ -1212,7 +1341,6 @@ components:
           Fungible: '#/components/schemas/AssignmentFungible'
           NonFungible: '#/components/schemas/AssignmentNonFungible'
           InflationRight: '#/components/schemas/AssignmentInflationRight'
-          ReplaceRight: '#/components/schemas/AssignmentReplaceRight'
           Any: '#/components/schemas/AssignmentAny'
     AssignmentAny:
       type: object
@@ -1257,14 +1385,6 @@ components:
         type:
           type: string
           enum: [NonFungible]
-    AssignmentReplaceRight:
-      type: object
-      required:
-        - type
-      properties:
-        type:
-          type: string
-          enum: [ReplaceRight]
     BackupRequest:
       type: object
       required:
@@ -1332,6 +1452,14 @@ components:
           $ref: '#/components/schemas/BtcBalance'
         colored:
           $ref: '#/components/schemas/BtcBalance'
+    CancelHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+      properties:
+        payment_hash:
+          type: string
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     ChangePasswordRequest:
       type: object
       required:
@@ -1457,6 +1585,24 @@ components:
         proxy_endpoint:
           type: string
           example: rpc://127.0.0.1:3000/json-rpc
+    ClaimHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+        - payment_preimage
+      properties:
+        payment_hash:
+          type: string
+          example: b4cb2da889477082a2e47f37a07e646e60ef6f97ffa7a4d88c823efd673da94b
+        payment_preimage:
+          type: string
+          example: eade701c7b23b8799465f4284ad84710fc16a776fbc6483001291149122695a8
+    ClaimHodlInvoiceResponse:
+      type: object
+      properties:
+        changed:
+          type: boolean
+          example: true
     CloseChannelRequest:
       type: object
       required:
@@ -1738,13 +1884,47 @@ components:
       type: string
       enum:
         - Pending
+        - Claimable
+        - Claiming
         - Succeeded
+        - Cancelled
         - Failed
     IndexerProtocol:
       type: string
       enum:
         - Electrum
         - Esplora
+    InflateRequest:
+      type: object
+      required:
+        - asset_id
+        - inflation_amounts
+        - fee_rate
+        - min_confirmations
+      properties:
+        asset_id:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        inflation_amounts:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+          example: [ 100, 50 ]
+        fee_rate:
+          type: integer
+          example: 5
+        min_confirmations:
+          type: integer
+          example: 1
+    InflateResponse:
+      type: object
+      required:
+        - txid
+      properties:
+        txid:
+          type: string
+          example: 7c2c95b9c2aa0a7d140495b664de7973b76561de833f0dd84def3efa08941664
     InitRequest:
       type: object
       required:
@@ -1770,7 +1950,10 @@ components:
       type: string
       enum:
         - Pending
+        - Claimable
+        - Claiming
         - Succeeded
+        - Cancelled
         - Failed
         - Expired
     InvoiceStatusRequest:
@@ -1823,6 +2006,47 @@ components:
       properties:
         asset:
           $ref: '#/components/schemas/AssetCFA'
+    IssueAssetIFARequest:
+      type: object
+      required:
+        - amounts
+        - inflation_amounts
+        - ticker
+        - name
+        - precision
+      properties:
+        amounts:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+          example: [ 1000, 600 ]
+        inflation_amounts:
+          type: array
+          items:
+            type: integer
+          example: [ 100, 50 ]
+        ticker:
+          type: string
+          example: USDT
+        name:
+          type: string
+          example: Tether
+        precision:
+          type: integer
+          example: 0
+        reject_list_url:
+          type:
+            - string
+            - 'null'
+          example: https://some.domain/someasset/rejectlist
+    IssueAssetIFAResponse:
+      type: object
+      required:
+        - asset
+      properties:
+        asset:
+          $ref: '#/components/schemas/AssetIFA'
     IssueAssetNIARequest:
       type: object
       required:
@@ -1937,13 +2161,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssetSchema'
-          example: [ Nia, Uda, Cfa ]
+          example: [ Nia, Uda, Cfa, Ifa ]
     ListAssetsResponse:
       type: object
       required:
         - nia
         - uda
         - cfa
+        - ifa
       properties:
         nia:
           type:
@@ -1963,6 +2188,12 @@ components:
             - 'null'
           items:
             $ref: '#/components/schemas/AssetCFA'
+        ifa:
+          type:
+            - array
+            - 'null'
+          items:
+            $ref: '#/components/schemas/AssetIFA'
     ListChannelsResponse:
       type: object
       required:
@@ -2078,6 +2309,10 @@ components:
             - integer
             - 'null'
           example: 42
+        payment_hash:
+          type: string
+          description: Optional. When provided, the invoice is created as HODL.
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     LNInvoiceResponse:
       type: object
       required:
@@ -2310,11 +2545,17 @@ components:
         temporary_channel_id:
           type: string
           example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
+    PaymentType:
+      type: string
+      enum:
+        - Outbound
+        - InboundAutoClaim
+        - InboundHodl
     Payment:
       type: object
       required:
         - payment_hash
-        - inbound
+        - payment_type
         - status
         - created_at
         - updated_at
@@ -2338,9 +2579,8 @@ components:
         payment_hash:
           type: string
           example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
-        inbound:
-          type: boolean
-          example: true
+        payment_type:
+          $ref: '#/components/schemas/PaymentType'
         status:
           $ref: '#/components/schemas/HTLCStatus'
         created_at:
@@ -2481,11 +2721,11 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Assignment'
             - type: 'null'
-        duration_seconds:
+        expiration_timestamp:
           type:
             - integer
             - 'null'
-          example: 86400
+          example: 1695811760
         witness:
           type: boolean
           example: false
@@ -2618,6 +2858,11 @@ components:
         min_confirmations:
           type: integer
           example: 1
+        expiration_timestamp:
+          type:
+            - integer
+            - 'null'
+          example: 1695811760
         recipient_map:
           type: object
           additionalProperties:
@@ -2904,7 +3149,7 @@ components:
             - string
             - 'null'
           example: null
-        expiration:
+        expiration_timestamp:
           type:
             - integer
             - 'null'
@@ -2925,6 +3170,7 @@ components:
     TransferStatus:
       type: string
       enum:
+        - Initiated
         - WaitingCounterparty
         - WaitingConfirmations
         - Settled

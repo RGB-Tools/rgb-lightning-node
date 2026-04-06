@@ -137,6 +137,9 @@ pub enum APIError {
     #[error("Trying to request fee estimation for an invalid block number")]
     InvalidEstimationBlocks,
 
+    #[error("Invalid expiration")]
+    InvalidExpiration,
+
     #[error("Invalid fee rate: {0}")]
     InvalidFeeRate(String),
 
@@ -163,6 +166,9 @@ pub enum APIError {
 
     #[error("Invalid payment hash: {0}")]
     InvalidPaymentHash(String),
+
+    #[error("Invalid payment preimage")]
+    InvalidPaymentPreimage,
 
     #[error("Invalid payment secret")]
     InvalidPaymentSecret,
@@ -191,6 +197,9 @@ pub enum APIError {
     #[error("The provided recipient ID is neither a blinded UTXO or a script")]
     InvalidRecipientID,
 
+    #[error("The provided recipient map is invalid")]
+    InvalidRecipientMap,
+
     #[error("The provided recipient ID is for a different network than the wallet's one")]
     InvalidRecipientNetwork,
 
@@ -214,6 +223,24 @@ pub enum APIError {
 
     #[error("Invalid transport endpoints: {0}")]
     InvalidTransportEndpoints(String),
+
+    #[error("HTLC claim deadline exceeded")]
+    ClaimDeadlineExceeded,
+
+    #[error("Invoice is already claimed")]
+    InvoiceAlreadyClaimed,
+
+    #[error("Invoice is expired")]
+    InvoiceExpired,
+
+    #[error("No claimable HTLC found for this invoice")]
+    InvoiceNotClaimable,
+
+    #[error("Invoice is not marked as HODL")]
+    InvoiceNotHodl,
+
+    #[error("Invoice settlement is in progress")]
+    InvoiceSettlingInProgress,
 
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
@@ -260,6 +287,9 @@ pub enum APIError {
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
 
+    #[error("Payment hash already used")]
+    PaymentHashAlreadyUsed,
+
     #[error("Payment not found: {0}")]
     PaymentNotFound(String),
 
@@ -292,6 +322,9 @@ pub enum APIError {
 
     #[error("The provided backup has an unsupported version: {version}")]
     UnsupportedBackupVersion { version: String },
+
+    #[error("Inflation is not supported by schema {0}")]
+    UnsupportedInflation(String),
 
     #[error("Layer 1 {0} is not supported")]
     UnsupportedLayer1(String),
@@ -356,12 +389,12 @@ impl From<RgbLibError> for APIError {
             }
             RgbLibError::InvalidAddress { details } => APIError::InvalidAddress(details),
             RgbLibError::InvalidAmountZero => APIError::InvalidAmount(s!("0")),
-            RgbLibError::InvalidAssetID { asset_id } => APIError::InvalidAssetID(asset_id),
             RgbLibError::InvalidAssignment => APIError::InvalidAssignment,
             RgbLibError::InvalidAttachments { details } => APIError::InvalidAttachments(details),
             RgbLibError::InvalidDetails { details } => APIError::InvalidDetails(details),
             RgbLibError::InvalidElectrum { details } => APIError::InvalidIndexer(details),
             RgbLibError::InvalidEstimationBlocks => APIError::InvalidEstimationBlocks,
+            RgbLibError::InvalidExpiration => APIError::InvalidExpiration,
             RgbLibError::InvalidFeeRate { details } => APIError::InvalidFeeRate(details),
             RgbLibError::InvalidFilePath { .. } => APIError::MediaFileNotProvided,
             RgbLibError::InvalidIndexer { details } => APIError::InvalidIndexer(details),
@@ -375,6 +408,7 @@ impl From<RgbLibError> for APIError {
                 APIError::InvalidRecipientData(details)
             }
             RgbLibError::InvalidRecipientID => APIError::InvalidRecipientID,
+            RgbLibError::InvalidRecipientMap => APIError::InvalidRecipientMap,
             RgbLibError::InvalidRecipientNetwork => APIError::InvalidRecipientNetwork,
             RgbLibError::InvalidTicker { details } => APIError::InvalidTicker(details),
             RgbLibError::InvalidTransportEndpoint { details } => {
@@ -386,6 +420,9 @@ impl From<RgbLibError> for APIError {
             RgbLibError::MaxFeeExceeded { txid } => APIError::MaxFeeExceeded(txid),
             RgbLibError::MinFeeNotMet { txid } => APIError::MinFeeNotMet(txid),
             RgbLibError::Network { details } => APIError::Network(details),
+            RgbLibError::NoInflationAmounts => {
+                APIError::InvalidAmount(s!("inflation request with no amounts or zero amounts"))
+            }
             RgbLibError::NoIssuanceAmounts => {
                 APIError::InvalidAmount(s!("issuance request with no provided amounts"))
             }
@@ -393,8 +430,14 @@ impl From<RgbLibError> for APIError {
             RgbLibError::OutputBelowDustLimit => APIError::OutputBelowDustLimit,
             RgbLibError::Proxy { details } => APIError::Network(format!("proxy err: {details}")),
             RgbLibError::RecipientIDAlreadyUsed => APIError::RecipientIDAlreadyUsed,
+            RgbLibError::TooHighInflationAmounts => {
+                APIError::InvalidAmount(s!("inflation amount exceeds the max possible supply"))
+            }
             RgbLibError::TooHighIssuanceAmounts => {
                 APIError::InvalidAmount(s!("trying to issue too many assets"))
+            }
+            RgbLibError::UnsupportedInflation { asset_schema } => {
+                APIError::UnsupportedInflation(format!("{asset_schema}"))
             }
             RgbLibError::UnsupportedLayer1 { layer_1 } => APIError::UnsupportedLayer1(layer_1),
             RgbLibError::UnsupportedTransportType => APIError::UnsupportedTransportType,
@@ -438,6 +481,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidChannelID
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
+            | APIError::InvalidExpiration
             | APIError::InvalidFeeRate(_)
             | APIError::InvalidInvoice(_)
             | APIError::InvalidMediaDigest
@@ -447,12 +491,15 @@ impl IntoResponse for APIError {
             | APIError::InvalidOnionData(_)
             | APIError::InvalidPassword(_)
             | APIError::InvalidPaymentHash(_)
+            | APIError::PaymentHashAlreadyUsed
+            | APIError::InvalidPaymentPreimage
             | APIError::InvalidPaymentSecret
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
             | APIError::InvalidPubkey
             | APIError::InvalidRecipientData(_)
             | APIError::InvalidRecipientID
+            | APIError::InvalidRecipientMap
             | APIError::InvalidRecipientNetwork
             | APIError::InvalidRequest(_)
             | APIError::InvalidSwap(_)
@@ -461,10 +508,12 @@ impl IntoResponse for APIError {
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoint(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::InvoiceExpired
             | APIError::MediaFileEmpty
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
+            | APIError::ClaimDeadlineExceeded
             | APIError::UnsupportedBackupVersion { .. } => {
                 (StatusCode::BAD_REQUEST, self.to_string(), self.name())
             }
@@ -489,6 +538,8 @@ impl IntoResponse for APIError {
             | APIError::InvalidIndexer(_)
             | APIError::InvalidProxyEndpoint
             | APIError::InvalidProxyProtocol(_)
+            | APIError::InvoiceNotHodl
+            | APIError::InvoiceSettlingInProgress
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)
             | APIError::MinFeeNotMet(_)
@@ -506,10 +557,15 @@ impl IntoResponse for APIError {
             | APIError::UnknownLNInvoice
             | APIError::UnknownTemporaryChannelId
             | APIError::UnlockedNode
+            | APIError::UnsupportedInflation(_)
             | APIError::UnsupportedLayer1(_)
             | APIError::UnsupportedTransportType => {
                 (StatusCode::FORBIDDEN, self.to_string(), self.name())
             }
+            APIError::InvoiceAlreadyClaimed => {
+                (StatusCode::CONFLICT, self.to_string(), self.name())
+            }
+            APIError::InvoiceNotClaimable => (StatusCode::NOT_FOUND, self.to_string(), self.name()),
             APIError::Network(_) | APIError::NoValidTransportEndpoint => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),

@@ -96,7 +96,10 @@ pub struct Payment {
 
 pub enum HtlcStatus {
     Pending,
+    Claimable,
+    Claiming,
     Succeeded,
+    Cancelled,
     Failed,
 }
 
@@ -284,10 +287,27 @@ pub struct AssetCfa {
     pub media: Option<Media>,
 }
 
+pub struct AssetIfa {
+    pub asset_id: ContractId,
+    pub ticker: String,
+    pub name: String,
+    pub details: Option<String>,
+    pub precision: u8,
+    pub initial_supply: u64,
+    pub max_supply: u64,
+    pub known_circulating_supply: u64,
+    pub timestamp: i64,
+    pub added_at: i64,
+    pub balance: AssetBalanceInfo,
+    pub media: Option<Media>,
+    pub reject_list_url: Option<String>,
+}
+
 pub struct ListAssetsResponse {
     pub nia: Option<Vec<AssetNia>>,
     pub uda: Option<Vec<AssetUda>>,
     pub cfa: Option<Vec<AssetCfa>>,
+    pub ifa: Option<Vec<AssetIfa>>,
 }
 
 pub struct DecodeLnInvoiceResponse {
@@ -315,7 +335,10 @@ pub struct DecodeRgbInvoiceResponse {
 
 pub enum InvoiceStatus {
     Pending,
+    Claimable,
+    Claiming,
     Succeeded,
+    Cancelled,
     Failed,
     Expired,
 }
@@ -456,6 +479,15 @@ pub struct SdkIssueAssetCfaRequest {
     pub details: Option<String>,
     pub precision: u8,
     pub file_digest: Option<String>,
+}
+
+pub struct SdkIssueAssetIfaRequest {
+    pub amounts: Vec<u64>,
+    pub inflation_amounts: Vec<u64>,
+    pub ticker: String,
+    pub name: String,
+    pub precision: u8,
+    pub reject_list_url: Option<String>,
 }
 
 pub struct SdkIssueAssetUdaRequest {
