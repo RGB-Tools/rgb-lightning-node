@@ -117,28 +117,81 @@ pub(crate) fn map_api_error(err: APIError) -> RlnError {
         | APIError::UnknownContractId
         | APIError::UnknownLNInvoice
         | APIError::UnknownTemporaryChannelId => RlnError::NotFound,
-        APIError::AlreadyInitialized
+        APIError::AllocationsAlreadyAvailable
+        | APIError::AlreadyInitialized
         | APIError::AlreadyUnlocked
+        | APIError::AuthenticationDisabled
         | APIError::UnlockedNode
+        | APIError::CannotCloseChannel(_)
+        | APIError::CannotEstimateFees
         | APIError::ChangingState
         | APIError::OpenChannelInProgress
-        | APIError::CannotCloseChannel(_)
+        | APIError::FailedBdkSync(_)
+        | APIError::FailedBitcoindConnection(_)
+        | APIError::FailedBroadcast(_)
+        | APIError::FailedPeerConnection
+        | APIError::InsufficientAssets
+        | APIError::InsufficientCapacity(_)
+        | APIError::InsufficientFunds(_)
+        | APIError::InvalidIndexer(_)
+        | APIError::InvalidProxyEndpoint
+        | APIError::InvalidProxyProtocol(_)
+        | APIError::MaxFeeExceeded(_)
+        | APIError::MinFeeNotMet(_)
+        | APIError::NetworkMismatch(_, _)
+        | APIError::NoAvailableUtxos
+        | APIError::NoRoute
         | APIError::DuplicatePayment(_)
         | APIError::RecipientIDAlreadyUsed
         | APIError::TemporaryChannelIdAlreadyUsed
+        | APIError::UnsupportedLayer1(_)
+        | APIError::UnsupportedTransportType
         | APIError::CannotFailBatchTransfer => RlnError::Conflict,
-        APIError::InvalidAddress(_)
+        APIError::AnchorsRequired
+        | APIError::ExpiredSwapOffer
+        | APIError::IncompleteRGBInfo
+        | APIError::InvalidAddress(_)
         | APIError::InvalidAmount(_)
+        | APIError::InvalidAnnounceAddresses(_)
+        | APIError::InvalidAnnounceAlias(_)
         | APIError::InvalidAssetID(_)
+        | APIError::InvalidAssignment
+        | APIError::InvalidAttachments(_)
+        | APIError::InvalidBackupPath
+        | APIError::InvalidBiscuitToken
         | APIError::InvalidChannelID
+        | APIError::InvalidDetails(_)
+        | APIError::InvalidEstimationBlocks
+        | APIError::InvalidFeeRate(_)
         | APIError::InvalidInvoice(_)
+        | APIError::InvalidMediaDigest
+        | APIError::InvalidMnemonic(_)
+        | APIError::InvalidName(_)
+        | APIError::InvalidNodeIds(_)
+        | APIError::InvalidOnionData(_)
         | APIError::InvalidPaymentHash(_)
+        | APIError::InvalidPaymentSecret
+        | APIError::InvalidPassword(_)
+        | APIError::InvalidPeerInfo(_)
+        | APIError::InvalidPrecision(_)
+        | APIError::InvalidPubkey
         | APIError::InvalidRecipientData(_)
         | APIError::InvalidRecipientID
         | APIError::InvalidRecipientNetwork
+        | APIError::InvalidRequest(_)
+        | APIError::InvalidSwap(_)
+        | APIError::InvalidSwapString(_, _)
+        | APIError::InvalidTicker(_)
+        | APIError::InvalidTlvType(_)
         | APIError::InvalidTransportEndpoint(_)
         | APIError::InvalidTransportEndpoints(_)
-        | APIError::IncompleteRGBInfo => RlnError::InvalidRequest,
+        | APIError::MediaFileEmpty
+        | APIError::MediaFileNotProvided
+        | APIError::MissingSwapPaymentPreimage
+        | APIError::OutputBelowDustLimit
+        | APIError::WrongPassword
+        | APIError::UnsupportedBackupVersion { .. } => RlnError::InvalidRequest,
+        APIError::Network(_) | APIError::NoValidTransportEndpoint => RlnError::Conflict,
         _ => RlnError::Internal,
     }
 }

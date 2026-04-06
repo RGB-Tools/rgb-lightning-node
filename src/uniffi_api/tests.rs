@@ -206,9 +206,50 @@ mod uniffi_smoke_tests {
         ));
         assert!(matches!(
             super::super::state::map_api_error(crate::error::APIError::IO(std::io::Error::other(
-                "boom"
+                "invalid"
             ))),
             RlnError::Internal
         ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::InvalidPeerInfo(
+                "invalid peer".to_string()
+            )),
+            RlnError::InvalidRequest
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::NoAvailableUtxos),
+            RlnError::Conflict
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::NoValidTransportEndpoint),
+            RlnError::Conflict
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::WrongPassword),
+            RlnError::InvalidRequest
+        ));
+    }
+
+    #[test]
+    fn map_payment_data_preserves_preimage() {
+        let payment_hash_hex = [7u8; 32].as_hex().to_string();
+        let expected_preimage = Some("11".repeat(32));
+        let data = crate::sdk::PaymentData {
+            amt_msat: Some(1000),
+            asset_amount: None,
+            asset_id: None,
+            payment_hash: payment_hash_hex.clone(),
+            inbound: false,
+            status: crate::sdk::HtlcStatus::Succeeded,
+            created_at: 1,
+            updated_at: 2,
+            payee_pubkey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+                .to_string(),
+            preimage: expected_preimage.clone(),
+        };
+
+        let mapped = map_payment_data(data).expect("payment mapping should succeed");
+        assert_eq!(mapped.payment_hash.0, [7u8; 32]);
+        assert_eq!(mapped.preimage, expected_preimage);
     }
 }

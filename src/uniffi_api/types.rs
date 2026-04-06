@@ -91,6 +91,7 @@ pub struct Payment {
     pub created_at: u64,
     pub updated_at: u64,
     pub payee_pubkey: PublicKey,
+    pub preimage: Option<String>,
 }
 
 pub enum HtlcStatus {

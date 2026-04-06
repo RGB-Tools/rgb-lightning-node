@@ -123,6 +123,7 @@ fn map_payment_data(data: crate::sdk::PaymentData) -> Result<Payment, RlnError> 
         created_at: data.created_at,
         updated_at: data.updated_at,
         payee_pubkey,
+        preimage: data.preimage,
     })
 }
 
