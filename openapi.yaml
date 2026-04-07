@@ -1369,6 +1369,7 @@ components:
         - Testnet
         - Testnet4
         - Signet
+        - SignetCustom
         - Regtest
     BlockTime:
       type: object
