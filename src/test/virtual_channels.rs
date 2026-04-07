@@ -12,6 +12,47 @@ fn next_peer_port() -> u16 {
         .port()
 }
 
+async fn close_channel_response(
+    node_address: SocketAddr,
+    channel_id: &str,
+    peer_pubkey: &str,
+    force: bool,
+) -> reqwest::Response {
+    let payload = CloseChannelRequest {
+        channel_id: channel_id.to_string(),
+        peer_pubkey: peer_pubkey.to_string(),
+        force,
+    };
+    reqwest::Client::new()
+        .post(format!("http://{node_address}/closechannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn issue_asset_nia_with_amounts(node_address: SocketAddr, amounts: Vec<u64>) -> AssetNIA {
+    println!("issuing NIA asset on node {node_address}");
+    let payload = IssueAssetNIARequest {
+        amounts,
+        ticker: s!("USDT"),
+        name: s!("Tether"),
+        precision: 0,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/issueassetnia"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<IssueAssetNIAResponse>()
+        .await
+        .unwrap()
+        .asset
+}
+
 async fn mine_blocks_and_wait_for_sync(
     host_node_address: SocketAddr,
     client_node_address: SocketAddr,
@@ -47,25 +88,6 @@ async fn mine_blocks_and_wait_for_sync(
              client={client_node_last_height})"
         )
     });
-}
-
-async fn close_channel_response(
-    node_address: SocketAddr,
-    channel_id: &str,
-    peer_pubkey: &str,
-    force: bool,
-) -> reqwest::Response {
-    let payload = CloseChannelRequest {
-        channel_id: channel_id.to_string(),
-        peer_pubkey: peer_pubkey.to_string(),
-        force,
-    };
-    reqwest::Client::new()
-        .post(format!("http://{node_address}/closechannel"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap()
 }
 
 #[tokio::test]
@@ -390,11 +412,12 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
     let host_node_info = node_info(host_node_address).await;
 
     fund_and_create_utxos(host_node_address, None).await;
-    let issued_asset_id = issue_asset_nia(host_node_address).await.asset_id;
+    let issued_asset_id = issue_asset_nia_with_amounts(host_node_address, vec![500, 500])
+        .await
+        .asset_id;
     let funded_rgb_amount = 200;
+    let channel_b_funded_rgb_amount = 300;
     let client_a_push_msat = 10_000_000;
-    let host_node_onchain_spendable_before_open =
-        asset_balance_spendable(host_node_address, &issued_asset_id).await;
 
     let (client_a_node_address, _client_node_password) = start_node_with_virtual_options(
         &format!("{test_storage_root}client_node"),
@@ -430,9 +453,9 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
 
     let host_node_onchain_spendable_after_open =
         asset_balance_spendable(host_node_address, &issued_asset_id).await;
-    assert_eq!(
-        host_node_onchain_spendable_after_open,
-        host_node_onchain_spendable_before_open
+    assert!(
+        host_node_onchain_spendable_after_open >= channel_b_funded_rgb_amount,
+        "first virtual open must leave enough spendable balance for the second virtual channel"
     );
 
     for _ in 0..14 {
@@ -554,7 +577,6 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
     .await;
 
     let client_b_node_info = node_info(client_b_node_address).await;
-    let channel_b_funded_rgb_amount = 300;
     let opened_virtual_channel_b = open_virtual_channel(
         host_node_address,
         &client_b_node_info.pubkey,

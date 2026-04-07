@@ -1,5 +1,5 @@
 [submodule "rust-lightning"]
 	path = rust-lightning
 	url = https://github.com/utexo-protocol/rust-lightning.git
-	branch = dev
+	branch = rln
 	shallow = true

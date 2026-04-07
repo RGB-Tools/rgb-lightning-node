@@ -72,11 +72,11 @@ use rgb_lib::{
     utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
-        DatabaseType, Recipient, TransportEndpoint, Wallet as RgbLibWallet, WalletData,
-        WitnessData,
+        DatabaseType, Recipient, SinglesigKeys, TransportEndpoint, Wallet as RgbLibWallet,
+        WalletData, WitnessData,
     },
-    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, FileContent, RgbTransfer,
-    RgbTxid, WitnessOrd,
+    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Fascia, FileContent,
+    RgbTransfer, RgbTxid, WitnessOrd,
 };
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -128,7 +128,7 @@ pub(crate) fn virtual_channel_synthetic_outpoint(
         BitcoinNetwork::Testnet => b"testnet".as_slice(),
         BitcoinNetwork::Testnet4 => b"testnet4".as_slice(),
         BitcoinNetwork::Regtest => b"regtest".as_slice(),
-        BitcoinNetwork::Signet => b"signet".as_slice(),
+        BitcoinNetwork::Signet | BitcoinNetwork::SignetCustom => b"signet".as_slice(),
     };
 
     let mut preimage = Vec::with_capacity(
@@ -144,6 +144,17 @@ pub(crate) fn virtual_channel_synthetic_outpoint(
     );
     OutPoint { txid, index: 0 }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InvoiceType {
+    AutoClaim,
+    Hodl,
+}
+
+impl_writeable_tlv_based_enum!(InvoiceType,
+    (0, AutoClaim) => {},
+    (1, Hodl) => {},
+);
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -162,6 +173,8 @@ pub(crate) struct PaymentInfo {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: PublicKey,
     pub(crate) expires_at: Option<u64>,
+    pub(crate) claim_deadline_height: Option<u32>,
+    pub(crate) invoice_type: Option<InvoiceType>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -173,6 +186,8 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (10, updated_at, required),
     (12, payee_pubkey, required),
     (14, expires_at, option),
+    (16, claim_deadline_height, option),
+    (18, invoice_type, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -371,6 +386,24 @@ impl UnlockedAppState {
         Ok(())
     }
 
+    pub(crate) fn fail_htlc_backwards_and_update_inbound_payment(
+        &self,
+        payment_hash: PaymentHash,
+        status: HTLCStatus,
+    ) {
+        self.channel_manager.fail_htlc_backwards(&payment_hash);
+        self.upsert_inbound_payment(
+            payment_hash,
+            status,
+            None,
+            None,
+            None,
+            self.channel_manager.get_our_node_id(),
+            None,
+            None,
+        );
+    }
+
     fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {
         let mut outbound = self.get_outbound_payments();
         let mut failed = false;
@@ -392,26 +425,68 @@ impl UnlockedAppState {
 
     pub(crate) fn list_updated_inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
         let now = get_current_timestamp();
+        let height = self.channel_manager.current_best_block().height;
         let mut inbound = self.get_inbound_payments();
         let mut failed = false;
-        for (_, payment_info) in inbound
-            .payments
-            .iter_mut()
-            .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
-        {
-            if let Some(expires_at) = payment_info.expires_at {
-                if now > expires_at {
-                    payment_info.status = HTLCStatus::Failed;
-                    payment_info.updated_at = now;
-                    failed = true;
+        let mut claimables_to_fail = vec![];
+        for (payment_hash, payment_info) in inbound.payments.iter_mut() {
+            match payment_info.status {
+                HTLCStatus::Pending => {
+                    if let Some(expires_at) = payment_info.expires_at {
+                        if now > expires_at {
+                            payment_info.status = HTLCStatus::Failed;
+                            payment_info.updated_at = now;
+                            failed = true;
+                        }
+                    }
                 }
+                HTLCStatus::Claimable => {
+                    let deadline_passed = payment_info
+                        .claim_deadline_height
+                        .map(|h| height >= h)
+                        .unwrap_or(false);
+                    let invoice_expired = payment_info
+                        .expires_at
+                        .map(|expires_at| now >= expires_at)
+                        .unwrap_or(false);
+
+                    if deadline_passed || invoice_expired {
+                        claimables_to_fail.push((
+                            *payment_hash,
+                            payment_info.claim_deadline_height,
+                            payment_info.expires_at,
+                        ));
+                    }
+                }
+                _ => {}
             }
         }
-        let payments = inbound.payments.clone();
+
+        if claimables_to_fail.is_empty() {
+            let payments = inbound.payments.clone();
+            if failed {
+                self.save_inbound_payments(inbound);
+            }
+            return payments;
+        }
+
         if failed {
             self.save_inbound_payments(inbound);
+        } else {
+            drop(inbound);
         }
-        payments
+
+        for (payment_hash, claim_deadline_height, expires_at) in claimables_to_fail {
+            tracing::info!(
+                "Expiring claimable payment {:?} (deadline: {:?}, expiry: {:?})",
+                payment_hash,
+                claim_deadline_height,
+                expires_at
+            );
+            self.fail_htlc_backwards_and_update_inbound_payment(payment_hash, HTLCStatus::Failed);
+        }
+
+        self.inbound_payments()
     }
 
     pub(crate) fn inbound_payments(&self) -> LdkHashMap<PaymentHash, PaymentInfo> {
@@ -422,7 +497,7 @@ impl UnlockedAppState {
         self.get_outbound_payments().payments.clone()
     }
 
-    fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
+    pub(crate) fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
         self.fs_store
             .write("", "", INBOUND_PAYMENTS_FNAME, inbound.encode())
             .unwrap();
@@ -434,7 +509,8 @@ impl UnlockedAppState {
             .unwrap();
     }
 
-    fn upsert_inbound_payment(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upsert_inbound_payment(
         &self,
         payment_hash: PaymentHash,
         status: HTLCStatus,
@@ -442,6 +518,8 @@ impl UnlockedAppState {
         secret: Option<PaymentSecret>,
         amt_msat: Option<u64>,
         payee_pubkey: PublicKey,
+        claim_deadline_height: Option<u32>,
+        invoice_type: Option<InvoiceType>,
     ) {
         let mut inbound = self.get_inbound_payments();
         match inbound.payments.entry(payment_hash) {
@@ -454,6 +532,9 @@ impl UnlockedAppState {
                     payment_info.amt_msat = amt_msat;
                 }
                 payment_info.updated_at = get_current_timestamp();
+                if claim_deadline_height.is_some() {
+                    payment_info.claim_deadline_height = claim_deadline_height;
+                }
             }
             Entry::Vacant(e) => {
                 let created_at = get_current_timestamp();
@@ -466,6 +547,8 @@ impl UnlockedAppState {
                     updated_at: created_at,
                     payee_pubkey,
                     expires_at: None,
+                    claim_deadline_height,
+                    invoice_type,
                 });
             }
         }
@@ -1055,7 +1138,9 @@ async fn handle_ldk_events(
                         bitcoin_bech32::constants::Network::Testnet
                     }
                     BitcoinNetwork::Regtest => bitcoin_bech32::constants::Network::Regtest,
-                    BitcoinNetwork::Signet => bitcoin_bech32::constants::Network::Signet,
+                    BitcoinNetwork::Signet | BitcoinNetwork::SignetCustom => {
+                        bitcoin_bech32::constants::Network::Signet
+                    }
                 },
             )
             .expect("Lightning funding tx should always be to a SegWit output");
@@ -1123,8 +1208,21 @@ async fn handle_ldk_events(
                             transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
                     }]};
                     let unlocked_state_copy = unlocked_state.clone();
-                    let res = tokio::task::spawn_blocking(move || {
-                        unlocked_state_copy.rgb_send_begin(recipient_map, true, FEE_RATE, 0)
+                    let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                        let res = unlocked_state_copy
+                            .rgb_send_begin(recipient_map, true, FEE_RATE, 0, None, false)
+                            .map_err(|e| e.to_string())?;
+                        let fascia_str = fs::read_to_string(&res.details.fascia_path)
+                            .map_err(|e| e.to_string())?;
+                        let fascia: Fascia =
+                            serde_json::from_str(&fascia_str).map_err(|e| e.to_string())?;
+                        unlocked_state_copy
+                            .rgb_consume_fascia(fascia, None)
+                            .map_err(|e| e.to_string())?;
+                        unlocked_state_copy
+                            .rgb_create_consignments(res.psbt.clone())
+                            .map_err(|e| e.to_string())?;
+                        Ok(res.psbt)
                     })
                     .await
                     .unwrap();
@@ -1299,9 +1397,10 @@ async fn handle_ldk_events(
                 let channel_rgb_amount = rgb_info.local_rgb_amount + rgb_info.remote_rgb_amount;
                 let asset_id = rgb_info.contract_id.to_string();
                 let assignment = match rgb_info.schema {
-                    AssetSchema::Nia | AssetSchema::Cfa => Assignment::Fungible(channel_rgb_amount),
+                    AssetSchema::Nia | AssetSchema::Cfa | AssetSchema::Ifa => {
+                        Assignment::Fungible(channel_rgb_amount)
+                    }
                     AssetSchema::Uda => Assignment::NonFungible,
-                    AssetSchema::Ifa => todo!(),
                 };
 
                 let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
@@ -1318,13 +1417,38 @@ async fn handle_ldk_events(
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
-                let unsigned_psbt = tokio::task::spawn_blocking(move || {
+                let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                    let res = unlocked_state_copy
+                        .rgb_send_begin(
+                            recipient_map,
+                            true,
+                            FEE_RATE,
+                            MIN_CHANNEL_CONFIRMATIONS,
+                            None,
+                            false,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let fascia_str =
+                        fs::read_to_string(&res.details.fascia_path).map_err(|e| e.to_string())?;
+                    let fascia: Fascia =
+                        serde_json::from_str(&fascia_str).map_err(|e| e.to_string())?;
                     unlocked_state_copy
-                        .rgb_send_begin(recipient_map, true, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS)
-                        .unwrap()
+                        .rgb_consume_fascia(fascia, None)
+                        .map_err(|e| e.to_string())?;
+                    unlocked_state_copy
+                        .rgb_create_consignments(res.psbt.clone())
+                        .map_err(|e| e.to_string())?;
+                    Ok(res.psbt)
                 })
                 .await
                 .unwrap();
+                let unsigned_psbt = match res {
+                    Ok(psbt) => psbt,
+                    Err(e) => {
+                        tracing::error!("cannot prepare channel funding transfer: {e}");
+                        return Err(ReplayEvent());
+                    }
+                };
                 (unsigned_psbt, Some(asset_id))
             } else {
                 let unsigned_psbt = unlocked_state
@@ -1413,7 +1537,7 @@ async fn handle_ldk_events(
             purpose,
             amount_msat,
             receiver_node_id: _,
-            claim_deadline: _,
+            claim_deadline,
             onion_fields: _,
             counterparty_skimmed_fee_msat: _,
             receiving_channel_ids: _,
@@ -1424,21 +1548,93 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
-            let payment_preimage = match purpose {
+
+            let (payment_preimage, payment_secret, invoice) = match purpose {
+                PaymentPurpose::SpontaneousPayment(preimage) => {
+                    unlocked_state.channel_manager.claim_funds(preimage);
+                    return Ok(());
+                }
                 PaymentPurpose::Bolt11InvoicePayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12OfferPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12RefundPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12OfferPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12RefundPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => {
+                    let Some(invoice) = unlocked_state
+                        .get_inbound_payments()
+                        .payments
+                        .get(&payment_hash)
+                        .cloned()
+                    else {
+                        tracing::error!(
+                            "Missing inbound payment state for claimable payment {:?}",
+                            payment_hash
+                        );
+                        return Err(ReplayEvent());
+                    };
+
+                    (payment_preimage, Some(payment_secret), invoice)
+                }
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            let now_ts = get_current_timestamp();
+            if let Some(expiry) = invoice.expires_at {
+                if now_ts >= expiry {
+                    tracing::warn!(
+                        "Received HTLC for expired invoice {payment_hash:?} (expiry {expiry})"
+                    );
+                    unlocked_state.fail_htlc_backwards_and_update_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                    );
+                    return Ok(());
+                }
+            }
+
+            if let Some(expected) = invoice.amt_msat {
+                if amount_msat < expected {
+                    tracing::warn!(
+                        "Received {} msat for invoice {} but expected at least {} msat",
+                        amount_msat,
+                        payment_hash,
+                        expected
+                    );
+                    unlocked_state.fail_htlc_backwards_and_update_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                    );
+                    return Ok(());
+                }
+            }
+
+            match invoice.invoice_type.unwrap_or(InvoiceType::AutoClaim) {
+                InvoiceType::AutoClaim => {
+                    unlocked_state
+                        .channel_manager
+                        .claim_funds(payment_preimage.unwrap());
+                }
+                InvoiceType::Hodl => {
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Claimable,
+                        payment_preimage,
+                        payment_secret,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                        claim_deadline,
+                        None,
+                    );
+                }
+            }
         }
         Event::PaymentClaimed {
             payment_hash,
@@ -1505,6 +1701,8 @@ async fn handle_ldk_events(
                     payment_secret,
                     Some(amount_msat),
                     receiver_node_id.unwrap(),
+                    None,
+                    None,
                 );
             }
         }
@@ -1942,6 +2140,8 @@ async fn handle_ldk_events(
                 reason
             );
 
+            *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+
             let former_temporary_channel_id = unlocked_state.delete_channel_id(channel_id);
             let virtual_draft_temporary_channel_id = if unlocked_state
                 .virtual_channel_draft_get(&channel_id)
@@ -1984,8 +2184,6 @@ async fn handle_ldk_events(
                 "EVENT: Discarded funding for channel with ID {}",
                 channel_id
             );
-
-            *unlocked_state.rgb_send_lock.lock().unwrap() = false;
 
             unlocked_state.delete_channel_id(channel_id);
             let channel_marker_path = get_virtual_channel_marker_path(
@@ -2419,7 +2617,7 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Testnet => "test",
             BitcoinNetwork::Testnet4 => "testnet4",
             BitcoinNetwork::Regtest => "regtest",
-            BitcoinNetwork::Signet => "signet",
+            BitcoinNetwork::Signet | BitcoinNetwork::SignetCustom => "signet",
         }
     {
         return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
@@ -2441,6 +2639,11 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
             BitcoinNetwork::Testnet4 => ELECTRUM_URL_TESTNET4,
             BitcoinNetwork::Mainnet => ELECTRUM_URL_MAINNET,
+            BitcoinNetwork::SignetCustom => {
+                return Err(APIError::InvalidIndexer(s!(
+                    "with custom signet indexer must be provided"
+                )))
+            }
         }
     };
     let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
@@ -2451,6 +2654,7 @@ pub(crate) async fn start_ldk(
         tracing::info!("Using the default proxy");
         match bitcoin_network {
             BitcoinNetwork::Signet
+            | BitcoinNetwork::SignetCustom
             | BitcoinNetwork::Testnet
             | BitcoinNetwork::Testnet4
             | BitcoinNetwork::Mainnet => PROXY_ENDPOINT_PUBLIC,
@@ -2623,27 +2827,37 @@ pub(crate) async fn start_ldk(
     // Prepare the RGB wallet
     let mnemonic_str = mnemonic.to_string();
     let (_, account_xpub_vanilla, _) =
-        get_account_data(bitcoin_network, &mnemonic_str, false).unwrap();
+        get_account_data(&bitcoin_network, &mnemonic_str, false).unwrap();
     let (_, account_xpub_colored, master_fingerprint) =
-        get_account_data(bitcoin_network, &mnemonic_str, true).unwrap();
+        get_account_data(&bitcoin_network, &mnemonic_str, true).unwrap();
     let data_dir = static_state
         .storage_dir_path
         .clone()
         .to_string_lossy()
         .to_string();
+    let keys = SinglesigKeys {
+        account_xpub_vanilla: account_xpub_vanilla.to_string(),
+        account_xpub_colored: account_xpub_colored.to_string(),
+        vanilla_keychain: None,
+        master_fingerprint: master_fingerprint.to_string(),
+        mnemonic: Some(mnemonic.to_string()),
+    };
     let mut rgb_wallet = tokio::task::spawn_blocking(move || {
-        RgbLibWallet::new(WalletData {
-            data_dir,
-            bitcoin_network,
-            database_type: DatabaseType::Sqlite,
-            max_allocations_per_utxo: 1,
-            account_xpub_vanilla: account_xpub_vanilla.to_string(),
-            account_xpub_colored: account_xpub_colored.to_string(),
-            master_fingerprint: master_fingerprint.to_string(),
-            mnemonic: Some(mnemonic.to_string()),
-            vanilla_keychain: None,
-            supported_schemas: vec![AssetSchema::Nia, AssetSchema::Cfa, AssetSchema::Uda],
-        })
+        RgbLibWallet::new(
+            WalletData {
+                data_dir,
+                bitcoin_network,
+                database_type: DatabaseType::Sqlite,
+                max_allocations_per_utxo: 1,
+                supported_schemas: vec![
+                    AssetSchema::Nia,
+                    AssetSchema::Cfa,
+                    AssetSchema::Uda,
+                    AssetSchema::Ifa,
+                ],
+            },
+            keys,
+        )
         .expect("valid rgb-lib wallet")
     })
     .await
@@ -2678,7 +2892,7 @@ pub(crate) async fn start_ldk(
 
     let rgb_wallet_wrapper = Arc::new(RgbLibWalletWrapper::new(
         Arc::new(Mutex::new(rgb_wallet)),
-        rgb_online.clone(),
+        rgb_online,
     ));
 
     // Initialize the OutputSweeper.

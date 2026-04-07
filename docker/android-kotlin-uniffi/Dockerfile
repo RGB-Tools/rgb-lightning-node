@@ -1,4 +1,4 @@
-FROM rust:1.85-bookworm
+FROM rust:1.88-bookworm
 
 ARG CMDLINE_TOOLS_ZIP=commandlinetools-linux-11076708_latest.zip
 ARG NDK_VERSION=26.3.11579264
@@ -35,8 +35,6 @@ RUN yes | sdkmanager --licenses \
       "build-tools;${BUILD_TOOLS_VERSION}" \
       "ndk;${NDK_VERSION}"
 
-# rust:1.85 image cannot install latest cargo-ndk (requires rustc >=1.86),
-# so pin to a compatible release.
 RUN cargo install cargo-ndk --version 3.5.4 --locked
 RUN cargo install bindgen-cli --version 0.71.1 --locked
 

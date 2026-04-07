@@ -49,6 +49,8 @@ interface SdkNode {
     [Throws=RlnError]
     AssetCfa issueassetcfa(SdkIssueAssetCfaRequest request);
     [Throws=RlnError]
+    AssetIfa issueassetifa(SdkIssueAssetIfaRequest request);
+    [Throws=RlnError]
     AssetUda issueassetuda(SdkIssueAssetUdaRequest request);
     [Throws=RlnError]
     SdkPostAssetMediaResponse postassetmedia(SdkPostAssetMediaRequest request);
@@ -183,7 +185,10 @@ dictionary Payment {
 
 enum HtlcStatus {
     "Pending",
+    "Claimable",
+    "Claiming",
     "Succeeded",
+    "Cancelled",
     "Failed",
 };
 
@@ -371,10 +376,27 @@ dictionary AssetCfa {
     Media? media;
 };
 
+dictionary AssetIfa {
+    ContractId asset_id;
+    string ticker;
+    string name;
+    string? details;
+    u8 precision;
+    u64 initial_supply;
+    u64 max_supply;
+    u64 known_circulating_supply;
+    i64 timestamp;
+    i64 added_at;
+    AssetBalanceInfo balance;
+    Media? media;
+    string? reject_list_url;
+};
+
 dictionary ListAssetsResponse {
     sequence<AssetNia>? nia;
     sequence<AssetUda>? uda;
     sequence<AssetCfa>? cfa;
+    sequence<AssetIfa>? ifa;
 };
 
 dictionary DecodeLnInvoiceResponse {
@@ -402,7 +424,10 @@ dictionary DecodeRgbInvoiceResponse {
 
 enum InvoiceStatus {
     "Pending",
+    "Claimable",
+    "Claiming",
     "Succeeded",
+    "Cancelled",
     "Failed",
     "Expired",
 };
@@ -543,6 +568,15 @@ dictionary SdkIssueAssetCfaRequest {
     string? details;
     u8 precision;
     string? file_digest;
+};
+
+dictionary SdkIssueAssetIfaRequest {
+    sequence<u64> amounts;
+    sequence<u64> inflation_amounts;
+    string ticker;
+    string name;
+    u8 precision;
+    string? reject_list_url;
 };
 
 dictionary SdkIssueAssetUdaRequest {
