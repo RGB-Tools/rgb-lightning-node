@@ -313,7 +313,7 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     let pending_before: Vec<_> = payments_before
         .iter()
         .filter(|p| {
-            p.inbound
+            p.payment_type == PaymentType::InboundAutoClaim
                 && matches!(p.status, HTLCStatus::Pending)
                 && [
                     decoded1.payment_hash.as_str(),
@@ -365,7 +365,7 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     let still_pending: Vec<_> = payments_after
         .iter()
         .filter(|p| {
-            p.inbound
+            p.payment_type == PaymentType::InboundAutoClaim
                 && matches!(p.status, HTLCStatus::Pending)
                 && [
                     decoded1.payment_hash.as_str(),

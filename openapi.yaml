@@ -115,6 +115,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BtcBalanceResponse'
+  /cancelhodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Cancel a HODL invoice
+      description: Cancel a held HTLC for a HODL invoice. Rejects cancellation if a settlement is already in progress.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceCancelRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
   /changepassword:
     post:
       tags:
@@ -169,6 +187,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /claimhodlinvoice:
+    post:
+      tags:
+        - Invoices
+      summary: Claim a HODL invoice
+      description: Claim a held HTLC for a HODL invoice
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimHodlInvoiceRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimHodlInvoiceResponse'
   /closechannel:
     post:
       tags:
@@ -674,7 +710,7 @@ paths:
       tags:
         - Invoices
       summary: Get a LN invoice
-      description: Get a LN invoice to receive a payment
+      description: Get a LN invoice to receive a payment. Provide `payment_hash` to create a HODL invoice.
       requestBody:
         content:
           application/json:
@@ -1417,6 +1453,14 @@ components:
           $ref: '#/components/schemas/BtcBalance'
         colored:
           $ref: '#/components/schemas/BtcBalance'
+    CancelHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+      properties:
+        payment_hash:
+          type: string
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     ChangePasswordRequest:
       type: object
       required:
@@ -1539,6 +1583,24 @@ components:
         proxy_endpoint:
           type: string
           example: rpc://127.0.0.1:3000/json-rpc
+    ClaimHodlInvoiceRequest:
+      type: object
+      required:
+        - payment_hash
+        - payment_preimage
+      properties:
+        payment_hash:
+          type: string
+          example: b4cb2da889477082a2e47f37a07e646e60ef6f97ffa7a4d88c823efd673da94b
+        payment_preimage:
+          type: string
+          example: eade701c7b23b8799465f4284ad84710fc16a776fbc6483001291149122695a8
+    ClaimHodlInvoiceResponse:
+      type: object
+      properties:
+        changed:
+          type: boolean
+          example: true
     CloseChannelRequest:
       type: object
       required:
@@ -1820,7 +1882,10 @@ components:
       type: string
       enum:
         - Pending
+        - Claimable
+        - Claiming
         - Succeeded
+        - Cancelled
         - Failed
     IndexerProtocol:
       type: string
@@ -1883,7 +1948,10 @@ components:
       type: string
       enum:
         - Pending
+        - Claimable
+        - Claiming
         - Succeeded
+        - Cancelled
         - Failed
         - Expired
     InvoiceStatusRequest:
@@ -2239,6 +2307,10 @@ components:
             - integer
             - 'null'
           example: 42
+        payment_hash:
+          type: string
+          description: Optional. When provided, the invoice is created as HODL.
+          example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
     LNInvoiceResponse:
       type: object
       required:
@@ -2468,11 +2540,17 @@ components:
         temporary_channel_id:
           type: string
           example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
+    PaymentType:
+      type: string
+      enum:
+        - Outbound
+        - InboundAutoClaim
+        - InboundHodl
     Payment:
       type: object
       required:
         - payment_hash
-        - inbound
+        - payment_type
         - status
         - created_at
         - updated_at
@@ -2496,9 +2574,8 @@ components:
         payment_hash:
           type: string
           example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
-        inbound:
-          type: boolean
-          example: true
+        payment_type:
+          $ref: '#/components/schemas/PaymentType'
         status:
           $ref: '#/components/schemas/HTLCStatus'
         created_at:
