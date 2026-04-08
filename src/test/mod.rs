@@ -10,6 +10,8 @@ use once_cell::sync::Lazy;
 use reqwest::Response;
 use rgb_lib::BitcoinNetwork;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,6 +22,7 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tracing_test::traced_test;
 
+use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
 use crate::ldk::FEE_RATE;
 use crate::routes::{
@@ -44,7 +47,7 @@ use crate::routes::{
     SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, SwapStatus, TakerRequest,
     Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
-use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, PROXY_ENDPOINT_LOCAL};
+use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
 
 use super::*;
 
@@ -73,6 +76,38 @@ impl Default for UserArgs {
             max_media_upload_size_mb: 3,
             root_public_key: None,
         }
+    }
+}
+
+struct ElectrsRestartGuard;
+
+impl ElectrsRestartGuard {
+    fn stop_electrs(&self) {
+        let status = Command::new("docker")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .arg("compose")
+            .arg("stop")
+            .arg("electrs")
+            .status()
+            .expect("failed to stop electrs");
+        assert!(status.success(), "failed to stop electrs");
+    }
+}
+
+impl Drop for ElectrsRestartGuard {
+    fn drop(&mut self) {
+        let status = Command::new("docker")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .arg("compose")
+            .arg("start")
+            .arg("electrs")
+            .status()
+            .expect("failed to stop electrs");
+        assert!(status.success(), "failed to stop electrs");
     }
 }
 
@@ -1162,7 +1197,7 @@ async fn open_channel_with_retry(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let result = open_channel_raw(
+        let result = open_channel_funded_raw(
             node_address,
             dest_peer_pubkey,
             dest_peer_port,
@@ -1198,7 +1233,7 @@ async fn open_channel_with_retry(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn open_channel_raw(
+async fn open_channel_funded_raw(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
     dest_peer_port: Option<u16>,
@@ -1212,55 +1247,21 @@ async fn open_channel_raw(
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
 ) -> Result<Channel, reqwest::StatusCode> {
-    println!(
-        "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
-              to {dest_peer_pubkey}"
-    );
-
-    let blockcount = get_block_count();
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        let net_info = network_info(node_address).await;
-        if net_info.height == blockcount {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("height is not syncing");
-        }
-    }
-
-    let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
-        format!("{dest_peer_pubkey}@127.0.0.1:{p}")
-    } else {
-        dest_peer_pubkey.to_string()
-    };
-    let payload = OpenChannelRequest {
-        peer_pubkey_and_opt_addr,
-        capacity_sat: capacity_sat.unwrap_or(100_000),
-        push_msat: push_msat.unwrap_or(0),
+    open_channel_raw(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        capacity_sat,
+        push_msat,
         asset_amount,
-        asset_id: asset_id.map(|a| a.to_string()),
+        asset_id,
         push_asset_amount,
-        public: true,
-        with_anchors,
         fee_base_msat,
         fee_proportional_millionths,
-        temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node_address}/openchannel"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-
-    let status = res.status();
-    if !status.is_success() {
-        return Err(status);
-    }
-
-    res.json::<OpenChannelResponse>().await.unwrap();
+        temporary_channel_id,
+        with_anchors,
+    )
+    .await?;
 
     let t_0 = OffsetDateTime::now_utc();
     let mut channel_id = None;
@@ -1316,6 +1317,72 @@ async fn open_channel_raw(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn open_channel_raw(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
+    fee_base_msat: Option<u32>,
+    fee_proportional_millionths: Option<u32>,
+    temporary_channel_id: Option<&str>,
+    with_anchors: bool,
+) -> Result<OpenChannelResponse, reqwest::StatusCode> {
+    println!(
+        "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
+              to {dest_peer_pubkey}"
+    );
+
+    let blockcount = get_block_count();
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let net_info = network_info(node_address).await;
+        if net_info.height == blockcount {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("height is not syncing");
+        }
+    }
+
+    let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
+        format!("{dest_peer_pubkey}@127.0.0.1:{p}")
+    } else {
+        dest_peer_pubkey.to_string()
+    };
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr,
+        capacity_sat: capacity_sat.unwrap_or(100_000),
+        push_msat: push_msat.unwrap_or(0),
+        asset_amount,
+        asset_id: asset_id.map(|a| a.to_string()),
+        push_asset_amount,
+        public: true,
+        with_anchors,
+        fee_base_msat,
+        fee_proportional_millionths,
+        temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/openchannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(status);
+    }
+
+    Ok(res.json::<OpenChannelResponse>().await.unwrap())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn open_channel_with_custom_data(
     node_address: SocketAddr,
     dest_peer_pubkey: &str,
@@ -1330,7 +1397,7 @@ async fn open_channel_with_custom_data(
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
 ) -> Channel {
-    open_channel_raw(
+    open_channel_funded_raw(
         node_address,
         dest_peer_pubkey,
         dest_peer_port,
@@ -1947,6 +2014,7 @@ mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
 mod openchannel_fail;
+mod openchannel_no_indexer;
 mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
 mod payment;
