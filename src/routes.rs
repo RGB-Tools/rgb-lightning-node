@@ -360,6 +360,7 @@ pub(crate) enum BitcoinNetwork {
     Testnet,
     Testnet4,
     Signet,
+    SignetCustom,
     Regtest,
 }
 
@@ -383,7 +384,7 @@ impl From<RgbLibNetwork> for BitcoinNetwork {
             RgbLibNetwork::Testnet4 => Self::Testnet4,
             RgbLibNetwork::Regtest => Self::Regtest,
             RgbLibNetwork::Signet => Self::Signet,
-            RgbLibNetwork::SignetCustom => todo!("fix when adding support to custom signet"),
+            RgbLibNetwork::SignetCustom => Self::SignetCustom,
         }
     }
 }
