@@ -15,6 +15,7 @@ axum-extra = "0.9.4"
 # axum-macros = "0.4.2"  # uncomment to use debug_handler
 baid58 = "0.4.4"
 base64 = "0.22.1"
+bincode = "1"
 biscuit-auth = "6.0.0"
 bitcoin = "0.32"
 bitcoin-bech32 = "0.13"
@@ -39,6 +40,12 @@ regex = { version = "1.11", default-features = false }
 rgb-lib = { version = "0.3.0-beta.5", features = [
     "electrum",
     "esplora",
+] }
+rln-migration = { path = "migration" }
+sea-orm = { version = "1.1.19", default-features = false, features = [
+    "macros",
+    "runtime-tokio-rustls",
+    "sqlx-sqlite",
 ] }
 scrypt = "0.11.0"
 serde = { version = "^1.0", features = ["derive"] }
