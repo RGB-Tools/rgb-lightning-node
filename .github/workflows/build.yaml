@@ -27,7 +27,7 @@ jobs:
             os: macos-latest
     steps:
       - uses: ilammy/setup-nasm@v1
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
