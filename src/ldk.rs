@@ -743,9 +743,32 @@ async fn handle_ldk_events(
                 } => payment_preimage,
                 PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            let preimage_to_use = match payment_preimage {
+                Some(preimage) => Some(preimage),
+                None => {
+                    let inbound_payments = unlocked_state.inbound_payments();
+                    match inbound_payments.get(&payment_hash) {
+                        Some(payment_info) => payment_info.preimage,
+                        None => {
+                            tracing::error!(
+                                "EVENT: No payment info found for payment hash {}",
+                                payment_hash
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+            };
+
+            if let Some(preimage) = preimage_to_use {
+                unlocked_state.channel_manager.claim_funds(preimage);
+            } else {
+                tracing::info!(
+                    "EVENT: Holding inbound payment with hash {} (no preimage yet, waiting for claim)",
+                    payment_hash
+                );
+            }
         }
         Event::PaymentClaimed {
             payment_hash,
@@ -849,6 +872,24 @@ async fn handle_ldk_events(
                     payment_hash,
                     payment_preimage
                 );
+            }
+
+            // Auto-claim pending inbound HODL payment with the same payment_hash
+            {
+                let inbound_payments = unlocked_state.inbound_payments();
+                if let Some(inbound) = inbound_payments.get(&payment_hash) {
+                    if inbound.status == HTLCStatus::Pending {
+                        drop(inbound_payments);
+                        tracing::info!(
+                            "EVENT: auto-claiming inbound HODL payment with hash {} using preimage {}",
+                            payment_hash,
+                            payment_preimage
+                        );
+                        unlocked_state
+                            .channel_manager
+                            .claim_funds(payment_preimage);
+                    }
+                }
             }
         }
         Event::OpenChannelRequest {

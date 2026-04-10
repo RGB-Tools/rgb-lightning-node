@@ -819,6 +819,7 @@ pub(crate) struct LNInvoiceRequest {
     pub(crate) expiry_sec: u32,
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_amount: Option<u64>,
+    pub(crate) payment_hash: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2691,20 +2692,48 @@ pub(crate) async fn ln_invoice(
             )));
         }
 
-        let invoice_params = Bolt11InvoiceParameters {
-            amount_msats: payload.amt_msat,
-            invoice_expiry_delta_secs: Some(payload.expiry_sec),
-            contract_id,
-            asset_amount: payload.asset_amount,
-            ..Default::default()
-        };
+        let (invoice, preimage_opt) = if let Some(ref hash_hex) = payload.payment_hash {
+            let hash_bytes: [u8; 32] = hex_str_to_vec(hash_hex)
+                .and_then(|data| data.try_into().ok())
+                .ok_or_else(|| {
+                    APIError::InvalidPaymentHash("invalid payment hash hex".to_string())
+                })?;
+            let payment_hash = PaymentHash(hash_bytes);
 
-        let invoice = match unlocked_state
-            .channel_manager
-            .create_bolt11_invoice(invoice_params)
-        {
-            Ok(inv) => inv,
-            Err(e) => return Err(APIError::FailedInvoiceCreation(e.to_string())),
+            let invoice_params = Bolt11InvoiceParameters {
+                amount_msats: payload.amt_msat,
+                invoice_expiry_delta_secs: Some(payload.expiry_sec),
+                payment_hash: Some(payment_hash),
+                contract_id,
+                asset_amount: payload.asset_amount,
+                ..Default::default()
+            };
+
+            let invoice = match unlocked_state
+                .channel_manager
+                .create_bolt11_invoice(invoice_params)
+            {
+                Ok(inv) => inv,
+                Err(e) => return Err(APIError::FailedInvoiceCreation(e.to_string())),
+            };
+            (invoice, None)
+        } else {
+            let invoice_params = Bolt11InvoiceParameters {
+                amount_msats: payload.amt_msat,
+                invoice_expiry_delta_secs: Some(payload.expiry_sec),
+                contract_id,
+                asset_amount: payload.asset_amount,
+                ..Default::default()
+            };
+
+            let invoice = match unlocked_state
+                .channel_manager
+                .create_bolt11_invoice(invoice_params)
+            {
+                Ok(inv) => inv,
+                Err(e) => return Err(APIError::FailedInvoiceCreation(e.to_string())),
+            };
+            (invoice, None)
         };
 
         let payment_hash = PaymentHash((*invoice.payment_hash()).to_byte_array());
@@ -2712,7 +2741,7 @@ pub(crate) async fn ln_invoice(
         unlocked_state.add_inbound_payment(
             payment_hash,
             PaymentInfo {
-                preimage: None,
+                preimage: preimage_opt,
                 secret: Some(*invoice.payment_secret()),
                 status: HTLCStatus::Pending,
                 amt_msat: payload.amt_msat,
