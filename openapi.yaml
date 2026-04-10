@@ -2239,6 +2239,12 @@ components:
             - integer
             - 'null'
           example: 42
+        payment_hash:
+          type:
+            - string
+            - 'null'
+          description: Optional payment hash (hex string, 32 bytes) for HODL invoices.
+          example: "229a76310b22a588271adcabc93362239c538103ebe2a8dea1822f9cde6c6040"
     LNInvoiceResponse:
       type: object
       required:
