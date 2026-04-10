@@ -86,12 +86,18 @@ pub struct Payment {
     pub asset_amount: Option<u64>,
     pub asset_id: Option<ContractId>,
     pub payment_hash: PaymentHash,
-    pub inbound: bool,
+    pub payment_type: PaymentType,
     pub status: HtlcStatus,
     pub created_at: u64,
     pub updated_at: u64,
     pub payee_pubkey: PublicKey,
     pub preimage: Option<String>,
+}
+
+pub enum PaymentType {
+    Outbound,
+    InboundAutoClaim,
+    InboundHodl,
 }
 
 pub enum HtlcStatus {
@@ -387,6 +393,31 @@ pub struct LnInvoiceRequest {
     pub expiry_sec: u32,
     pub asset_id: Option<ContractId>,
     pub asset_amount: Option<u64>,
+    pub payment_hash: Option<PaymentHash>,
+}
+
+pub struct CancelHodlInvoiceRequest {
+    pub payment_hash: PaymentHash,
+}
+
+pub struct ClaimHodlInvoiceRequest {
+    pub payment_hash: PaymentHash,
+    pub payment_preimage: String,
+}
+
+pub struct ClaimHodlInvoiceResponse {
+    pub changed: bool,
+}
+
+pub struct InflateRequest {
+    pub asset_id: ContractId,
+    pub inflation_amounts: Vec<u64>,
+    pub fee_rate: u64,
+    pub min_confirmations: u8,
+}
+
+pub struct InflateResponse {
+    pub txid: Txid,
 }
 
 pub struct SdkUnlockRequest {

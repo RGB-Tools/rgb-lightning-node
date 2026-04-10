@@ -105,6 +105,12 @@ interface SdkNode {
     [Throws=RlnError]
     LnInvoiceResponse ln_invoice(LnInvoiceRequest request);
     [Throws=RlnError]
+    void cancelhodlinvoice(CancelHodlInvoiceRequest request);
+    [Throws=RlnError]
+    ClaimHodlInvoiceResponse claimhodlinvoice(ClaimHodlInvoiceRequest request);
+    [Throws=RlnError]
+    InflateResponse inflate(InflateRequest request);
+    [Throws=RlnError]
     SendRgbResponse send_rgb(SendRgbRequest request);
 };
 
@@ -175,12 +181,18 @@ dictionary Payment {
     u64? asset_amount;
     ContractId? asset_id;
     PaymentHash payment_hash;
-    boolean inbound;
+    PaymentType payment_type;
     HtlcStatus status;
     u64 created_at;
     u64 updated_at;
     PublicKey payee_pubkey;
     string? preimage;
+};
+
+enum PaymentType {
+    "Outbound",
+    "InboundAutoClaim",
+    "InboundHodl",
 };
 
 enum HtlcStatus {
@@ -476,10 +488,35 @@ dictionary LnInvoiceRequest {
     u32 expiry_sec;
     ContractId? asset_id;
     u64? asset_amount;
+    PaymentHash? payment_hash;
 };
 
 dictionary LnInvoiceResponse {
     Bolt11Invoice invoice;
+};
+
+dictionary CancelHodlInvoiceRequest {
+    PaymentHash payment_hash;
+};
+
+dictionary ClaimHodlInvoiceRequest {
+    PaymentHash payment_hash;
+    string payment_preimage;
+};
+
+dictionary ClaimHodlInvoiceResponse {
+    boolean changed;
+};
+
+dictionary InflateRequest {
+    ContractId asset_id;
+    sequence<u64> inflation_amounts;
+    u64 fee_rate;
+    u8 min_confirmations;
+};
+
+dictionary InflateResponse {
+    Txid txid;
 };
 
 dictionary SdkInitRequest {

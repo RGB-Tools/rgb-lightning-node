@@ -33,8 +33,31 @@ mod uniffi_smoke_tests {
             expiry_sec: 3600,
             asset_id: None,
             asset_amount: None,
+            payment_hash: None,
         });
         assert!(matches!(invoice, Err(RlnError::NotInitialized)));
+
+        let hodl_hash = lightning::types::payment::PaymentHash([3u8; 32]);
+        let cancel_hodl = sdk_cancelhodlinvoice(CancelHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+        });
+        assert!(matches!(cancel_hodl, Err(RlnError::NotInitialized)));
+
+        let claim_hodl = sdk_claimhodlinvoice(ClaimHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+            payment_preimage: "11".repeat(32),
+        });
+        assert!(matches!(claim_hodl, Err(RlnError::NotInitialized)));
+
+        let inflate_asset_id =
+            ContractId::from_str("rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8").unwrap();
+        let inflate = sdk_inflate(InflateRequest {
+            asset_id: inflate_asset_id,
+            inflation_amounts: vec![1],
+            fee_rate: 1,
+            min_confirmations: 1,
+        });
+        assert!(matches!(inflate, Err(RlnError::NotInitialized)));
 
         let send_rgb = sdk_send_rgb(SendRgbRequest {
             donation: false,
@@ -80,6 +103,16 @@ mod uniffi_smoke_tests {
         assert!(matches!(node_info, Err(RlnError::NotInitialized)));
         let channel_id = sdk_get_channel_id(lightning::ln::types::ChannelId([0u8; 32]));
         assert!(matches!(channel_id, Err(RlnError::NotInitialized)));
+        let hodl_hash = lightning::types::payment::PaymentHash([4u8; 32]);
+        let cancel_hodl = sdk_cancelhodlinvoice(CancelHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+        });
+        assert!(matches!(cancel_hodl, Err(RlnError::NotInitialized)));
+        let claim_hodl = sdk_claimhodlinvoice(ClaimHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+            payment_preimage: "22".repeat(32),
+        });
+        assert!(matches!(claim_hodl, Err(RlnError::NotInitialized)));
 
         let send_rgb = sdk_send_rgb(SendRgbRequest {
             donation: false,
@@ -103,6 +136,16 @@ mod uniffi_smoke_tests {
         };
         let node_info = node.node_info();
         assert!(matches!(node_info, Err(RlnError::NotInitialized)));
+        let hodl_hash = lightning::types::payment::PaymentHash([5u8; 32]);
+        let cancel_hodl = node.cancelhodlinvoice(CancelHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+        });
+        assert!(matches!(cancel_hodl, Err(RlnError::NotInitialized)));
+        let claim_hodl = node.claimhodlinvoice(ClaimHodlInvoiceRequest {
+            payment_hash: hodl_hash,
+            payment_preimage: "33".repeat(32),
+        });
+        assert!(matches!(claim_hodl, Err(RlnError::NotInitialized)));
 
         let send_rgb = node.send_rgb(SendRgbRequest {
             donation: false,
@@ -239,7 +282,7 @@ mod uniffi_smoke_tests {
             asset_amount: None,
             asset_id: None,
             payment_hash: payment_hash_hex.clone(),
-            inbound: false,
+            payment_type: crate::sdk::PaymentType::InboundHodl,
             status: crate::sdk::HtlcStatus::Succeeded,
             created_at: 1,
             updated_at: 2,
@@ -251,5 +294,6 @@ mod uniffi_smoke_tests {
         let mapped = map_payment_data(data).expect("payment mapping should succeed");
         assert_eq!(mapped.payment_hash.0, [7u8; 32]);
         assert_eq!(mapped.preimage, expected_preimage);
+        assert!(matches!(mapped.payment_type, PaymentType::InboundHodl));
     }
 }

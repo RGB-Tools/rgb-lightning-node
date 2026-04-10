@@ -5,7 +5,8 @@ use std::str::FromStr;
 
 use crate::sdk;
 use crate::{NodeConfig, NodeHandle};
-
+use bitcoin::hex::DisplayHex;
+use bitcoin::hex::FromHex;
 use state::{
     block_on_app, block_on_sdk, clear_uniffi_node_handle, get_uniffi_app_state,
     is_uniffi_app_state_initialized, set_uniffi_node_handle,
@@ -107,6 +108,11 @@ fn map_payment_data(data: crate::sdk::PaymentData) -> Result<Payment, RlnError> 
     };
     let payment_hash = <PaymentHash as UniffiCustomTypeConverter>::into_custom(data.payment_hash)
         .map_err(|_| RlnError::Internal)?;
+    let payment_type = match data.payment_type {
+        crate::sdk::PaymentType::Outbound => PaymentType::Outbound,
+        crate::sdk::PaymentType::InboundAutoClaim => PaymentType::InboundAutoClaim,
+        crate::sdk::PaymentType::InboundHodl => PaymentType::InboundHodl,
+    };
     let status = match data.status {
         crate::sdk::HtlcStatus::Pending => HtlcStatus::Pending,
         crate::sdk::HtlcStatus::Claimable => HtlcStatus::Claimable,
@@ -121,7 +127,7 @@ fn map_payment_data(data: crate::sdk::PaymentData) -> Result<Payment, RlnError> 
         asset_amount: data.asset_amount,
         asset_id,
         payment_hash,
-        inbound: data.inbound,
+        payment_type,
         status,
         created_at: data.created_at,
         updated_at: data.updated_at,
@@ -274,8 +280,6 @@ impl SdkNode {
     }
 
     pub fn closechannel(&self, request: SdkCloseChannelRequest) -> Result<(), RlnError> {
-        use bitcoin::hex::DisplayHex;
-
         let state = self.handle.app_state();
         block_on_sdk(sdk::close_channel(
             state,
@@ -586,9 +590,6 @@ impl SdkNode {
         &self,
         request: SdkOpenChannelRequest,
     ) -> Result<SdkOpenChannelResponse, RlnError> {
-        use bitcoin::hex::DisplayHex;
-        use bitcoin::hex::FromHex;
-
         let state = self.handle.app_state();
         let response = block_on_sdk(sdk::open_channel(
             state,
@@ -721,9 +722,6 @@ impl SdkNode {
     }
 
     pub fn get_channel_id(&self, temporary_channel_id: ChannelId) -> Result<ChannelId, RlnError> {
-        use bitcoin::hex::DisplayHex;
-        use bitcoin::hex::FromHex;
-
         let state = self.handle.app_state();
         let data = block_on_sdk(sdk::get_channel_id(
             state,
@@ -739,8 +737,6 @@ impl SdkNode {
     }
 
     pub fn get_payment(&self, payment_hash: PaymentHash) -> Result<Payment, RlnError> {
-        use bitcoin::hex::DisplayHex;
-
         let state = self.handle.app_state();
         let data = block_on_sdk(sdk::get_payment(state, payment_hash.0.as_hex().to_string()))?;
         map_payment_data(data)
@@ -753,8 +749,6 @@ impl SdkNode {
     }
 
     pub fn get_swap(&self, payment_hash: PaymentHash, taker: bool) -> Result<Swap, RlnError> {
-        use bitcoin::hex::DisplayHex;
-
         let state = self.handle.app_state();
         let data = block_on_sdk(sdk::get_swap(
             state,
@@ -781,8 +775,6 @@ impl SdkNode {
     }
 
     pub fn list_channels(&self) -> Result<Vec<Channel>, RlnError> {
-        use bitcoin::hex::FromHex;
-
         let state = self.handle.app_state();
         let channels = block_on_sdk(sdk::list_channels(state))?;
         channels
@@ -1235,15 +1227,60 @@ impl SdkNode {
     pub fn ln_invoice(&self, request: LnInvoiceRequest) -> Result<LnInvoiceResponse, RlnError> {
         let state = self.handle.app_state();
         let asset_id = request.asset_id.map(|a| a.to_string());
+        let payment_hash = request.payment_hash.map(|h| h.0.as_hex().to_string());
         let data = block_on_sdk(sdk::create_ln_invoice(
             state,
             request.amt_msat,
             request.expiry_sec,
             asset_id,
             request.asset_amount,
+            payment_hash,
         ))?;
         let invoice = Bolt11Invoice::from_str(&data.invoice).map_err(|_| RlnError::Internal)?;
         Ok(LnInvoiceResponse { invoice })
+    }
+
+    pub fn cancelhodlinvoice(&self, request: CancelHodlInvoiceRequest) -> Result<(), RlnError> {
+        let state = self.handle.app_state();
+        block_on_sdk(sdk::cancel_hodl_invoice(
+            state,
+            sdk::CancelHodlInvoiceRequestData {
+                payment_hash: request.payment_hash.0.as_hex().to_string(),
+            },
+        ))?;
+        Ok(())
+    }
+
+    pub fn claimhodlinvoice(
+        &self,
+        request: ClaimHodlInvoiceRequest,
+    ) -> Result<ClaimHodlInvoiceResponse, RlnError> {
+        let state = self.handle.app_state();
+        let response = block_on_sdk(sdk::claim_hodl_invoice(
+            state,
+            sdk::ClaimHodlInvoiceRequestData {
+                payment_hash: request.payment_hash.0.as_hex().to_string(),
+                payment_preimage: request.payment_preimage,
+            },
+        ))?;
+        Ok(ClaimHodlInvoiceResponse {
+            changed: response.changed,
+        })
+    }
+
+    pub fn inflate(&self, request: InflateRequest) -> Result<InflateResponse, RlnError> {
+        let state = self.handle.app_state();
+        let response = block_on_sdk(sdk::inflate(
+            state,
+            sdk::InflateRequestData {
+                asset_id: request.asset_id.to_string(),
+                inflation_amounts: request.inflation_amounts,
+                fee_rate: request.fee_rate,
+                min_confirmations: request.min_confirmations,
+            },
+        ))?;
+        let txid = Txid::from_str(&response.txid).map_err(|_| RlnError::Internal)?;
+        Ok(InflateResponse { txid })
     }
 
     pub fn send_rgb(&self, request: SendRgbRequest) -> Result<SendRgbResponse, RlnError> {
@@ -1397,6 +1434,23 @@ pub fn sdk_list_unspents(skip_sync: bool) -> Result<Vec<Unspent>, RlnError> {
 pub fn sdk_ln_invoice(request: LnInvoiceRequest) -> Result<LnInvoiceResponse, RlnError> {
     let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
     SdkNode { handle }.ln_invoice(request)
+}
+
+pub fn sdk_cancelhodlinvoice(request: CancelHodlInvoiceRequest) -> Result<(), RlnError> {
+    let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
+    SdkNode { handle }.cancelhodlinvoice(request)
+}
+
+pub fn sdk_claimhodlinvoice(
+    request: ClaimHodlInvoiceRequest,
+) -> Result<ClaimHodlInvoiceResponse, RlnError> {
+    let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
+    SdkNode { handle }.claimhodlinvoice(request)
+}
+
+pub fn sdk_inflate(request: InflateRequest) -> Result<InflateResponse, RlnError> {
+    let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
+    SdkNode { handle }.inflate(request)
 }
 
 pub fn sdk_send_rgb(request: SendRgbRequest) -> Result<SendRgbResponse, RlnError> {

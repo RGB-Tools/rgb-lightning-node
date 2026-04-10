@@ -11,7 +11,8 @@ use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     connect_peer_if_necessary, encrypt_and_save_mnemonic, get_current_timestamp,
     get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str, hex_str_to_vec,
-    parse_peer_info, AppState, UserOnionMessageContents,
+    parse_peer_info, validate_and_parse_payment_hash, validate_and_parse_payment_preimage,
+    AppState, UserOnionMessageContents,
 };
 use amplify::{map, s};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -538,12 +539,36 @@ pub(crate) struct PaymentData {
     pub(crate) asset_amount: Option<u64>,
     pub(crate) asset_id: Option<String>,
     pub(crate) payment_hash: String,
-    pub(crate) inbound: bool,
+    pub(crate) payment_type: PaymentType,
     pub(crate) status: HtlcStatus,
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: String,
     pub(crate) preimage: Option<String>,
+}
+
+pub(crate) struct CancelHodlInvoiceRequestData {
+    pub(crate) payment_hash: String,
+}
+
+pub(crate) struct ClaimHodlInvoiceRequestData {
+    pub(crate) payment_hash: String,
+    pub(crate) payment_preimage: String,
+}
+
+pub(crate) struct ClaimHodlInvoiceResponseData {
+    pub(crate) changed: bool,
+}
+
+pub(crate) struct InflateRequestData {
+    pub(crate) asset_id: String,
+    pub(crate) inflation_amounts: Vec<u64>,
+    pub(crate) fee_rate: u64,
+    pub(crate) min_confirmations: u8,
+}
+
+pub(crate) struct InflateResponseData {
+    pub(crate) txid: String,
 }
 
 pub(crate) struct ChannelData {
@@ -647,6 +672,13 @@ pub(crate) enum ChannelStatus {
 }
 
 pub(crate) type HtlcStatus = crate::core_types::HTLCStatus;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PaymentType {
+    Outbound,
+    InboundAutoClaim,
+    InboundHodl,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum InvoiceStatus {
@@ -3096,6 +3128,7 @@ pub(crate) async fn create_ln_invoice(
     expiry_sec: u32,
     asset_id: Option<String>,
     asset_amount: Option<u64>,
+    payment_hash: Option<String>,
 ) -> Result<LnInvoiceData, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
@@ -3113,9 +3146,25 @@ pub(crate) async fn create_ln_invoice(
         )));
     }
 
+    let created_at = get_current_timestamp();
+    let requested_payment_hash = match payment_hash {
+        Some(payment_hash) => {
+            let payment_hash = validate_and_parse_payment_hash(&payment_hash)?;
+            if unlocked_state
+                .inbound_payments()
+                .contains_key(&payment_hash)
+            {
+                return Err(APIError::PaymentHashAlreadyUsed);
+            }
+            Some(payment_hash)
+        }
+        None => None,
+    };
+
     let invoice_params = Bolt11InvoiceParameters {
         amount_msats: amt_msat,
         invoice_expiry_delta_secs: Some(expiry_sec),
+        payment_hash: requested_payment_hash,
         contract_id,
         asset_amount,
         ..Default::default()
@@ -3129,8 +3178,13 @@ pub(crate) async fn create_ln_invoice(
         Err(e) => return Err(APIError::FailedInvoiceCreation(e.to_string())),
     };
 
-    let payment_hash = PaymentHash((*invoice.payment_hash()).to_byte_array());
-    let created_at = get_current_timestamp();
+    let (payment_hash, invoice_type) = match requested_payment_hash {
+        Some(payment_hash) => (payment_hash, InvoiceType::Hodl),
+        None => (
+            PaymentHash((*invoice.payment_hash()).to_byte_array()),
+            InvoiceType::AutoClaim,
+        ),
+    };
     unlocked_state.add_inbound_payment(
         payment_hash,
         PaymentInfo {
@@ -3143,13 +3197,20 @@ pub(crate) async fn create_ln_invoice(
             updated_at: created_at,
             payee_pubkey: unlocked_state.channel_manager.get_our_node_id(),
             expires_at: Some(created_at + expiry_sec as u64),
-            invoice_type: Some(InvoiceType::AutoClaim),
+            invoice_type: Some(invoice_type),
         },
     );
 
     Ok(LnInvoiceData {
         invoice: invoice.to_string(),
     })
+}
+
+fn payment_type_from_invoice(invoice_type: Option<InvoiceType>) -> PaymentType {
+    match invoice_type.unwrap_or(InvoiceType::AutoClaim) {
+        InvoiceType::AutoClaim => PaymentType::InboundAutoClaim,
+        InvoiceType::Hodl => PaymentType::InboundHodl,
+    }
 }
 
 pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentData>, APIError> {
@@ -3177,7 +3238,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             asset_amount,
             asset_id,
             payment_hash: hex_str(&payment_hash.0),
-            inbound: true,
+            payment_type: payment_type_from_invoice(payment_info.invoice_type),
             status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
@@ -3204,7 +3265,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             asset_amount,
             asset_id,
             payment_hash: hex_str(&payment_hash.0),
-            inbound: false,
+            payment_type: PaymentType::Outbound,
             status: payment_info.status,
             created_at: payment_info.created_at,
             updated_at: payment_info.updated_at,
@@ -3250,7 +3311,7 @@ pub(crate) async fn get_payment(
                 asset_amount,
                 asset_id,
                 payment_hash: hex_str(&payment_hash.0),
-                inbound: true,
+                payment_type: payment_type_from_invoice(payment_info.invoice_type),
                 status: payment_info.status,
                 created_at: payment_info.created_at,
                 updated_at: payment_info.updated_at,
@@ -3278,7 +3339,7 @@ pub(crate) async fn get_payment(
                 asset_amount,
                 asset_id,
                 payment_hash: hex_str(&payment_hash.0),
-                inbound: false,
+                payment_type: PaymentType::Outbound,
                 status: payment_info.status,
                 created_at: payment_info.created_at,
                 updated_at: payment_info.updated_at,
@@ -3289,6 +3350,125 @@ pub(crate) async fn get_payment(
     }
 
     Err(APIError::PaymentNotFound(payment_hash_hex))
+}
+
+pub(crate) async fn cancel_hodl_invoice(
+    state: Arc<AppState>,
+    request: CancelHodlInvoiceRequestData,
+) -> Result<(), APIError> {
+    let guard = check_unlocked(&state).await?;
+    let unlocked_state = guard.as_ref().unwrap();
+
+    let payment_hash = validate_and_parse_payment_hash(&request.payment_hash)?;
+    let payment_info = unlocked_state
+        .get_inbound_payments()
+        .payments
+        .get(&payment_hash)
+        .cloned()
+        .ok_or(APIError::UnknownLNInvoice)?;
+    if !matches!(payment_info.invoice_type, Some(InvoiceType::Hodl)) {
+        return Err(APIError::InvoiceNotHodl);
+    }
+    match payment_info.status {
+        HtlcStatus::Succeeded => return Err(APIError::InvoiceAlreadyClaimed),
+        HtlcStatus::Claimable => {}
+        HtlcStatus::Claiming => return Err(APIError::InvoiceSettlingInProgress),
+        _ => return Err(APIError::InvoiceNotClaimable),
+    }
+
+    unlocked_state
+        .fail_htlc_backwards_and_update_inbound_payment(payment_hash, HtlcStatus::Cancelled);
+    Ok(())
+}
+
+pub(crate) async fn claim_hodl_invoice(
+    state: Arc<AppState>,
+    request: ClaimHodlInvoiceRequestData,
+) -> Result<ClaimHodlInvoiceResponseData, APIError> {
+    let guard = check_unlocked(&state).await?;
+    let unlocked_state = guard.as_ref().unwrap();
+
+    let payment_hash = validate_and_parse_payment_hash(&request.payment_hash)?;
+    let preimage = validate_and_parse_payment_preimage(&request.payment_preimage, &payment_hash)?;
+
+    {
+        let mut inbound = unlocked_state.get_inbound_payments();
+        let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
+            return Err(APIError::UnknownLNInvoice);
+        };
+
+        if !matches!(existing_payment_mut.invoice_type, Some(InvoiceType::Hodl)) {
+            return Err(APIError::InvoiceNotHodl);
+        }
+
+        match existing_payment_mut.status {
+            HtlcStatus::Succeeded => {
+                let computed_hash = PaymentHash(Sha256::hash(&preimage.0).to_byte_array());
+                if computed_hash != payment_hash {
+                    return Err(APIError::InvalidPaymentPreimage);
+                }
+                if let Some(stored_preimage) = existing_payment_mut.preimage {
+                    if stored_preimage != preimage {
+                        return Err(APIError::InvalidPaymentPreimage);
+                    }
+                }
+                return Ok(ClaimHodlInvoiceResponseData { changed: false });
+            }
+            HtlcStatus::Claiming => return Err(APIError::InvoiceSettlingInProgress),
+            HtlcStatus::Claimable => {}
+            _ => return Err(APIError::InvoiceNotClaimable),
+        }
+
+        let current_height = unlocked_state.channel_manager.current_best_block().height;
+        let now_ts = get_current_timestamp();
+
+        if let Some(deadline_height) = existing_payment_mut.claim_deadline_height {
+            if current_height >= deadline_height {
+                return Err(APIError::ClaimDeadlineExceeded);
+            }
+        }
+
+        if let Some(expiry) = existing_payment_mut.expires_at {
+            if now_ts >= expiry {
+                return Err(APIError::InvoiceExpired);
+            }
+        }
+
+        existing_payment_mut.status = HtlcStatus::Claiming;
+        existing_payment_mut.updated_at = now_ts;
+        unlocked_state.save_inbound_payments(inbound);
+    }
+
+    unlocked_state.channel_manager.claim_funds(preimage);
+    Ok(ClaimHodlInvoiceResponseData { changed: true })
+}
+
+pub(crate) async fn inflate(
+    state: Arc<AppState>,
+    request: InflateRequestData,
+) -> Result<InflateResponseData, APIError> {
+    let guard = check_unlocked(&state).await?;
+    let unlocked_state = guard.as_ref().unwrap();
+
+    if *unlocked_state.rgb_send_lock.lock().unwrap() {
+        return Err(APIError::OpenChannelInProgress);
+    }
+
+    let unlocked_state_copy = unlocked_state.clone();
+    let inflate_result = tokio::task::spawn_blocking(move || {
+        unlocked_state_copy.rgb_inflate(
+            request.asset_id,
+            request.inflation_amounts,
+            request.fee_rate,
+            request.min_confirmations,
+        )
+    })
+    .await
+    .unwrap()?;
+
+    Ok(InflateResponseData {
+        txid: inflate_result.txid,
+    })
 }
 
 fn map_swap(
