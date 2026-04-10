@@ -21,4 +21,4 @@ RUN curl -fsSL -o /tmp/kotlin-compiler.zip "https://github.com/JetBrains/kotlin/
 
 WORKDIR /work
 
-CMD ["bash", "-lc", "./scripts/kotlin_uniffi_smoke.sh"]
+CMD ["bash", "-lc", "./scripts/kotlin_uniffi_e2e.sh"]

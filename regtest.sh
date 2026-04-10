@@ -87,7 +87,7 @@ _start_services() {
 
 _stop_services() {
     $COMPOSE down -v --remove-orphans
-    rm -rf data{core,index,ldk0,ldk1,ldk2}
+    rm -rf data{core,index,ldk0,ldk1,ldk2} 2>/dev/null || sudo rm -rf data{core,index,ldk0,ldk1,ldk2}
 }
 
 _mine() {

@@ -178,7 +178,7 @@ rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
 
 When unlocking testnet3 nodes you can use the following services:
 - bitcoind_rpc_username: user
-- bitcoind_rpc_username: password
+- bitcoind_rpc_password: password
 - bitcoind_rpc_host: electrum.iriswallet.com
 - bitcoind_rpc_port: 18332
 - indexer_url: ssl://electrum.iriswallet.com:50013

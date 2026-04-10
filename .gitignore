@@ -19,6 +19,8 @@
 # MacOS files
 .DS_Store
 *.swp
+**/__pycache__/
+*.pyc
 
 /bindings/uniffi-bindgen/target
 /target/uniffi
@@ -30,3 +32,4 @@
 /bindings/python/rgb_lightning_node.py
 /artifacts
 /bindings/python/build
+/sdkdata_py

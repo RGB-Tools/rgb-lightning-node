@@ -232,12 +232,32 @@ def wait_for_channel_funding_tx(
             )
 
         if opening is not None:
-            return
+            print(f"channel funding tx found: {opening.funding_txid}")
+            return str(opening.funding_txid)
 
         print("waiting for channel funding tx broadcast...")
         time.sleep(1)
 
     raise RuntimeError(f"No funding tx after {timeout_sec}s. last={last}")
+
+
+def mine_until_tx_confirmed(
+    node: rln.SdkNode,
+    txid: str,
+    timeout_sec: int = 180,
+):
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        node.sync()
+        transactions = node.list_transactions(False)
+        tx = next((t for t in transactions if str(t.txid) == str(txid)), None)
+        if tx is not None and tx.confirmation_time is not None:
+            print(f"funding tx confirmed in block: {txid}")
+            return
+        print("waiting for funding tx to be included in a block...")
+        run_regtest("mine", "1")
+        time.sleep(1)
+    raise RuntimeError(f"funding tx was not confirmed before timeout: txid={txid}")
 
 
 def wait_payment_final(node_b: rln.SdkNode, invoice: str, timeout_sec: int = 60):
@@ -308,17 +328,21 @@ def main():
                 temporary_channel_id=None,
                 asset_id=asset_id,
                 asset_amount=OPEN_CHANNEL_ASSET_AMOUNT,
+                push_asset_amount=None,
+                virtual_open_mode=None,
             )
             open_resp = node_a.openchannel(open_req)
             print("openchannel temporary_channel_id:", open_resp.temporary_channel_id)
 
-            wait_for_channel_funding_tx(
+            funding_txid = wait_for_channel_funding_tx(
                 node_a,
                 node_b,
                 asset_id=asset_id,
                 timeout_sec=120,
             )
 
+            print("Mining blocks one by one until funding tx is confirmed...")
+            mine_until_tx_confirmed(node_a, funding_txid, 180)
             print(f"Mining {OPEN_CHANNEL_CONFIRM_BLOCKS} blocks for channel confirmations...")
             run_regtest("mine", str(OPEN_CHANNEL_CONFIRM_BLOCKS))
 

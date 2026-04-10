@@ -1,0 +1,411 @@
+name: SDK E2E
+
+on:
+  push:
+    branches: ["master", "dev", "stage"]
+  pull_request:
+    branches: ["master", "dev", "stage"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  python-build:
+    name: Python E2E Build
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Python UniFFI library
+        run: cargo build --release --features uniffi --lib
+
+      - name: Generate Python bindings
+        run: ./scripts/ci/uniffi_generate_python.sh
+
+      - name: Upload Python UniFFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-uniffi-linux
+          if-no-files-found: error
+          path: |
+            target/release/librgb_lightning_node.so
+            target/uniffi/python/**
+
+  python-e2e:
+    name: Python E2E (${{ matrix.scenario }})
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 45
+    needs: python-build
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - payment
+          - openchannel_push_asset_amount
+          - getchannelid_fail
+          - openchannel_fail_no_utxos
+          - openchannel_fail_unknown_asset
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download Python UniFFI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-uniffi-linux
+          path: python-artifacts
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run Python UniFFI scenario
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python-artifacts/uniffi/python
+          LD_LIBRARY_PATH: ${{ github.workspace }}/python-artifacts/release
+          RESET_DATA: "1"
+          PYTHON_E2E_SCENARIO: ${{ matrix.scenario }}
+        run: python3 test/python-e2e/PythonUniffiE2e.py
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  kotlin-build:
+    name: Kotlin E2E Build
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Kotlin build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjna-java unzip
+
+      - name: Setup Kotlin compiler
+        run: |
+          KOTLIN_VERSION=1.9.24
+          curl -L -o /tmp/kotlin-compiler.zip "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip"
+          unzip -q /tmp/kotlin-compiler.zip -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
+          kotlinc -version
+
+      - name: Build Kotlin UniFFI E2E artifacts
+        env:
+          JNA_JAR: /usr/share/java/jna.jar
+        run: ./scripts/ci/build_kotlin_e2e.sh
+
+      - name: Upload Kotlin UniFFI E2E artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-uniffi-linux
+          if-no-files-found: error
+          path: |
+            target/release/librgb_lightning_node.so
+            target/uniffi/kotlin-e2e/e2e.jar
+
+  kotlin-e2e:
+    name: Kotlin E2E (${{ matrix.scenario }})
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 45
+    needs: kotlin-build
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - payment
+          - openchannel_push_asset_amount
+          - close_coop_vanilla_with_anchors
+          - close_coop_vanilla_without_anchors
+          - openchannel_optional_addr_forward
+          - openchannel_optional_addr_reverse
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Kotlin runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjna-java
+
+      - name: Download Kotlin UniFFI E2E artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kotlin-uniffi-linux
+          path: kotlin-artifacts
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run Kotlin UniFFI scenario
+        env:
+          JNA_JAR: /usr/share/java/jna.jar
+          KOTLIN_E2E_JAR: ${{ github.workspace }}/kotlin-artifacts/uniffi/kotlin-e2e/e2e.jar
+          KOTLIN_E2E_LIB_DIR: ${{ github.workspace }}/kotlin-artifacts/release
+          RESET_DATA: "1"
+          KOTLIN_E2E_SCENARIO: ${{ matrix.scenario }}
+        run: ./scripts/ci/run_kotlin_e2e.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  android-build:
+    name: Android E2E Build
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 45
+    env:
+      ANDROID_NDK_VERSION: 27.3.13750724
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-34" "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Export Android NDK environment
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/.android/sdk}}"
+          NDK_PATH="${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "AWS_LC_SYS_ANDROID_NDK_ROOT=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "AWS_LC_SYS_ANDROID_NDK=${NDK_PATH}" >> "$GITHUB_ENV"
+
+      - name: Add Android target
+        run: rustup target add x86_64-linux-android
+
+      - name: Install Android native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build make clang pkg-config build-essential
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Install bindgen-cli
+        run: |
+          cargo install --force --locked bindgen-cli
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          bindgen --version
+
+      - name: Generate Kotlin Android bindings
+        run: ./scripts/ci/uniffi_generate_kotlin_android.sh
+
+      - name: Build Android JNI libs
+        env:
+          AWS_LC_SYS_EXTERNAL_BINDGEN: "1"
+          CMAKE: /usr/bin/cmake
+        run: |
+          export BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android="--sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          ./scripts/ci/build_android_jni_x86_64.sh
+
+      - name: Upload Android UniFFI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-uniffi-x86_64
+          if-no-files-found: error
+          path: target/uniffi/kotlin-android
+
+  android-e2e:
+    name: Android E2E (${{ matrix.test_class }})
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    needs: android-build
+    strategy:
+      fail-fast: false
+      matrix:
+        test_class:
+          # Temporarily excluded from blocking Android CI:
+          # - PaymentTest: transfer expiration metadata is intermittently missing in CI
+          # - ConcurrentBtcPaymentsTest: intermittent PoisonError in sync/channel flow
+          # - SwapRoundtripBuyTest: intermittent PoisonError while waiting for the second channel to become ready
+          # Re-enable after separate Android/UniFFI stabilization work.
+          - org.rgblightningnode.RestartTest
+          - org.rgblightningnode.MultiOpenCloseTest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Download Android UniFFI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-uniffi-x86_64
+          path: target/uniffi/kotlin-android
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run Android instrumented test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: android-e2e
+          script: |
+            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=${{ matrix.test_class }}
+            TEST_EXIT=$?
+            adb logcat -d > logcat.txt
+            exit $TEST_EXIT
+
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports-${{ matrix.test_class }}
+          if-no-files-found: ignore
+          path: |
+            android-e2e/app/build/outputs/androidTest-results/
+            android-e2e/app/build/reports/androidTests/connected/
+            android-e2e/logcat.txt
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  # [TEST: Linux runner] Testing Swift E2E on ubuntu — Docker available natively.
+  # Original macOS config (getmac / self-hosted):
+  #   runs-on: getmac
+  #   (no Setup Swift step needed — Swift is pre-installed on macOS)
+  swift-e2e:
+    name: Swift E2E Smoke
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run Swift UniFFI smoke test
+        env:
+          BITCOIND_RPC_USERNAME: user
+          BITCOIND_RPC_PASSWORD: password
+          BITCOIND_RPC_HOST: 127.0.0.1
+          BITCOIND_RPC_PORT: "18443"
+          INDEXER_URL: 127.0.0.1:50001
+          PROXY_ENDPOINT: rpc://127.0.0.1:3000/json-rpc
+        run: ./scripts/swift_uniffi_e2e.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop

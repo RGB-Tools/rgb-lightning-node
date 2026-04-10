@@ -28,6 +28,15 @@ Important notes:
 - `ldk::start_ldk` now accepts `core_types::UnlockRequest` and SDK unlock uses `sdk::UnlockRequest`, so unlock flow is not typed against route-layer DTOs.
 - A small `routes` diff remains for shared `AppState` transition helpers (`pub(crate)` visibility), used by SDK unlock lifecycle handling.
 
+## E2E and parity harnesses
+
+Harness-specific runbooks live in:
+- `test/python-e2e/README.md`
+- `test/kotlin-e2e/README.md`
+- `android-e2e/README.md`
+- `test/swift-e2e/README.md`
+- `src/test/lib_sdk/README.md`
+
 ## Route parity status (`routes.rs` -> SDK/UniFFI)
 
 Implemented mappings:
@@ -123,6 +132,7 @@ UniFFI support adds a required manual sync checklist when upstream changes:
    - `./scripts/ci/uniffi_generate_all.sh`
 4. Ensure CI workflows pass:
    - `.github/workflows/test.yaml`
+   - `.github/workflows/sdk-e2e.yaml`
    - `.github/workflows/uniffi-artifacts.yaml`
 
 ## Main code changes in `uniffi_api/mod.rs`

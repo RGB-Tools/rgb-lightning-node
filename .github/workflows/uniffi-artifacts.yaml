@@ -13,7 +13,7 @@ env:
 jobs:
   library-core-tests:
     name: Library Core Tests
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-16x
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -32,7 +32,7 @@ jobs:
 
   kotlin-jvm:
     name: Kotlin JVM (Linux host)
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-16x
     timeout-minutes: 45
     steps:
       - name: Checkout repository
@@ -66,7 +66,7 @@ jobs:
 
   kotlin-android:
     name: Kotlin Android (JNI)
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-16x
     timeout-minutes: 75
     steps:
       - name: Checkout repository
@@ -154,7 +154,7 @@ jobs:
 
   swift:
     name: Swift iOS XCFramework
-    runs-on: macos-latest
+    runs-on: warp-macos-latest-arm64-6x
     timeout-minutes: 75
     steps:
       - name: Checkout repository

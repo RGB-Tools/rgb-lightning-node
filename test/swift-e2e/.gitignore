@@ -1,0 +1,4 @@
+Sources/RGBLightningNode/RGBLightningNode.swift
+FFI/RGBLightningNodeFFI.h
+FFI/module.modulemap
+Libraries/macos/librgb_lightning_node.a
