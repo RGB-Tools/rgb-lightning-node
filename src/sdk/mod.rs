@@ -11,8 +11,8 @@ use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     connect_peer_if_necessary, encrypt_and_save_mnemonic, get_current_timestamp,
     get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str, hex_str_to_vec,
-    parse_peer_info, validate_and_parse_payment_hash, validate_and_parse_payment_preimage,
-    AppState, UserOnionMessageContents,
+    parse_peer_info, validate_and_parse_description_hash, validate_and_parse_payment_hash,
+    validate_and_parse_payment_preimage, AppState, UserOnionMessageContents,
 };
 use amplify::{map, s};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -49,7 +49,7 @@ use lightning::util::IS_SWAP_SCID;
 use lightning::{
     onion_message::messenger::Destination, onion_message::messenger::MessageSendInstructions,
 };
-use lightning_invoice::{Bolt11Invoice, PaymentSecret};
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description, PaymentSecret};
 use regex::Regex;
 use rgb_lib::utils::recipient_id_from_script_buf;
 use rgb_lib::wallet::rust_only::check_indexer_url as rgb_lib_check_indexer_url;
@@ -3129,6 +3129,7 @@ pub(crate) async fn create_ln_invoice(
     asset_id: Option<String>,
     asset_amount: Option<u64>,
     payment_hash: Option<String>,
+    description_hash: Option<String>,
 ) -> Result<LnInvoiceData, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
@@ -3160,9 +3161,16 @@ pub(crate) async fn create_ln_invoice(
         }
         None => None,
     };
+    let description = match description_hash {
+        Some(description_hash) => {
+            Bolt11InvoiceDescription::Hash(validate_and_parse_description_hash(&description_hash)?)
+        }
+        None => Bolt11InvoiceDescription::Direct(Description::empty()),
+    };
 
     let invoice_params = Bolt11InvoiceParameters {
         amount_msats: amt_msat,
+        description,
         invoice_expiry_delta_secs: Some(expiry_sec),
         payment_hash: requested_payment_hash,
         contract_id,

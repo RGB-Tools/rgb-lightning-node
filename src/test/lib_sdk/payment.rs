@@ -132,6 +132,7 @@ fn success() {
                 asset_id: Some(asset_id.clone()),
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
+                description_hash: None,
             })
             .expect("node B ln_invoice")
             .invoice;
@@ -197,6 +198,7 @@ fn success() {
                 asset_id: Some(asset_id.clone()),
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
+                description_hash: None,
             })
             .expect("node A ln_invoice second")
             .invoice;
@@ -231,6 +233,7 @@ fn success() {
                 asset_id: Some(asset_id.clone()),
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
+                description_hash: None,
             })
             .expect("node B ln_invoice third")
             .invoice;
@@ -263,6 +266,7 @@ fn success() {
                 asset_id: Some(asset_id.clone()),
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
+                description_hash: None,
             })
             .expect("node A ln_invoice fourth")
             .invoice;

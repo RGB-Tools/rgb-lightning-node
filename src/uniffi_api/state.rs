@@ -160,6 +160,7 @@ pub(crate) fn map_api_error(err: APIError) -> RlnError {
         | APIError::InvalidBackupPath
         | APIError::InvalidBiscuitToken
         | APIError::InvalidChannelID
+        | APIError::InvalidDescriptionHash(_)
         | APIError::InvalidDetails(_)
         | APIError::InvalidEstimationBlocks
         | APIError::InvalidFeeRate(_)

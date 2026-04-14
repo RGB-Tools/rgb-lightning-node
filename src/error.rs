@@ -131,6 +131,9 @@ pub enum APIError {
     #[error("Invalid channel ID")]
     InvalidChannelID,
 
+    #[error("Invalid description hash: {0}")]
+    InvalidDescriptionHash(String),
+
     #[error("Invalid details: {0}")]
     InvalidDetails(String),
 
@@ -479,6 +482,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidBackupPath
             | APIError::InvalidBiscuitToken
             | APIError::InvalidChannelID
+            | APIError::InvalidDescriptionHash(_)
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
             | APIError::InvalidExpiration

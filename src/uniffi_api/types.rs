@@ -394,6 +394,7 @@ pub struct LnInvoiceRequest {
     pub asset_id: Option<ContractId>,
     pub asset_amount: Option<u64>,
     pub payment_hash: Option<PaymentHash>,
+    pub description_hash: Option<String>,
 }
 
 pub struct CancelHodlInvoiceRequest {

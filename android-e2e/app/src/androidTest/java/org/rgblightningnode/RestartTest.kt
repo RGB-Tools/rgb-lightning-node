@@ -486,6 +486,7 @@ class RestartTest {
                     expirySec = 900u,
                     assetId = assetId,
                     assetAmount = 100u,
+                    descriptionHash = null,
                     paymentHash = null,
                 )
             ).invoice

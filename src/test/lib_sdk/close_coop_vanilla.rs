@@ -195,6 +195,7 @@ fn run_close_coop_vanilla(name: &str, port_offset: u16, with_anchors: bool) {
                 asset_id: None,
                 asset_amount: None,
                 payment_hash: None,
+                description_hash: None,
             })
             .expect("node A vanilla ln_invoice")
             .invoice;

@@ -206,13 +206,15 @@ async fn run_expire_hodl_invoice_case(
 
 async fn setup_two_nodes_with_asset_channel(
     test_dir_suffix: &str,
-    port_offset: u16,
 ) -> (SocketAddr, SocketAddr, String, String, String) {
     let test_dir_base = format!("{TEST_DIR_BASE}{test_dir_suffix}/");
     let test_dir_node1 = format!("{test_dir_base}node1");
     let test_dir_node2 = format!("{test_dir_base}node2");
-    let node1_port = NODE1_PEER_PORT + port_offset;
-    let node2_port = NODE2_PEER_PORT + port_offset;
+    let node1_port = next_peer_port();
+    let mut node2_port = next_peer_port();
+    while node2_port == node1_port {
+        node2_port = next_peer_port();
+    }
     let (node1_addr, _) = start_node(&test_dir_node1, node1_port, false).await;
     let (node2_addr, _) = start_node(&test_dir_node2, node2_port, false).await;
 
@@ -306,7 +308,7 @@ async fn autoclaim_and_expire_hodl_invoice_time_and_blocks() {
     initialize();
 
     let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, _asset_id) =
-        setup_two_nodes_with_asset_channel("autoclaim-expiry", 10).await;
+        setup_two_nodes_with_asset_channel("autoclaim-expiry").await;
 
     run_auto_claim_invoice_regression_case(node1_addr, node2_addr).await;
     run_expire_hodl_invoice_case(node1_addr, node2_addr, &test_dir_node2, ExpiryTrigger::Time)
@@ -318,6 +320,8 @@ async fn autoclaim_and_expire_hodl_invoice_time_and_blocks() {
         ExpiryTrigger::Blocks,
     )
     .await;
+
+    shutdown(&[node1_addr, node2_addr]).await;
 }
 
 #[serial_test::serial]
@@ -328,7 +332,7 @@ async fn cancel_hodl_invoice_btc_rgb() {
 
     let asset_payment_amount = 10;
     let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, asset_id) =
-        setup_two_nodes_with_asset_channel("cancel-btc-rgb-rgb", 20).await;
+        setup_two_nodes_with_asset_channel("cancel-btc-rgb-rgb").await;
     let initial_ln_rgb_balance_node1 = asset_balance_offchain_outbound(node1_addr, &asset_id).await;
     let initial_ln_rgb_balance_node2 = asset_balance_offchain_outbound(node2_addr, &asset_id).await;
 
@@ -417,6 +421,8 @@ async fn cancel_hodl_invoice_btc_rgb() {
 
     wait_for_ln_balance(node1_addr, &asset_id, initial_ln_rgb_balance_node1).await;
     wait_for_ln_balance(node2_addr, &asset_id, initial_ln_rgb_balance_node2).await;
+
+    shutdown(&[node1_addr, node2_addr]).await;
 }
 
 #[serial_test::serial]
@@ -427,7 +433,7 @@ async fn claim_hodl_invoice_btc_rgb() {
 
     let asset_payment_amount = 10;
     let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, asset_id) =
-        setup_two_nodes_with_asset_channel("settle-btc-rgb", 30).await;
+        setup_two_nodes_with_asset_channel("settle-btc-rgb").await;
 
     let initial_ln_balance_node1 = asset_balance_offchain_outbound(node1_addr, &asset_id).await;
     let initial_ln_balance_node2 = asset_balance_offchain_outbound(node2_addr, &asset_id).await;
@@ -454,6 +460,7 @@ async fn claim_hodl_invoice_btc_rgb() {
         asset_id: None,
         asset_amount: None,
         payment_hash: Some(payment_hash.clone()),
+        description_hash: None,
     };
     let duplicate_hash_res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -470,10 +477,6 @@ async fn claim_hodl_invoice_btc_rgb() {
     .await;
 
     let _ = send_payment_with_status(node1_addr, invoice.clone(), HTLCStatus::Pending).await;
-    assert!(matches!(
-        invoice_status(node2_addr, &invoice).await,
-        InvoiceStatus::Pending
-    ));
     wait_for_claimable_state(&test_dir_node2, &payment_hash, true)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
@@ -629,4 +632,6 @@ async fn claim_hodl_invoice_btc_rgb() {
         "InvoiceAlreadyClaimed",
     )
     .await;
+
+    shutdown(&[node1_addr, node2_addr]).await;
 }

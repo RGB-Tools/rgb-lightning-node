@@ -490,6 +490,7 @@ class ConcurrentBtcPaymentsTest {
                     expirySec = 900u,
                     assetId = null,
                     assetAmount = null,
+                    descriptionHash = null,
                     paymentHash = null,
                 )
             ).invoice
@@ -500,6 +501,7 @@ class ConcurrentBtcPaymentsTest {
                     expirySec = 900u,
                     assetId = null,
                     assetAmount = null,
+                    descriptionHash = null,
                     paymentHash = null,
                 )
             ).invoice

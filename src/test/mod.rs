@@ -18,7 +18,7 @@ use std::str::FromStr;
 use std::sync::{Once, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tracing_test::traced_test;
 
 use crate::core_types::{HTLCStatus, SwapStatus, FEE_RATE, HTLC_MIN_MSAT};
@@ -68,6 +68,14 @@ const DURATION_SECONDS: u64 = 999;
 static INIT: Once = Once::new();
 
 static MINER: Lazy<RwLock<Miner>> = Lazy::new(|| RwLock::new(Miner { no_mine_count: 0 }));
+
+fn next_peer_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
 
 #[cfg(test)]
 impl Default for UserArgs {
@@ -286,6 +294,7 @@ async fn start_node_with_virtual_options(
     }
 
     unlock(node_address, &password).await;
+    wait_for_peer_port_ready(node_peer_port).await;
 
     println!("node on peer port {node_peer_port} started with address {node_address:?}");
     (node_address, password)
@@ -1104,6 +1113,7 @@ async fn ln_invoice_with_type(
         asset_id: asset_id.map(|a| a.to_string()),
         asset_amount,
         payment_hash,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/lninvoice"))
@@ -1937,6 +1947,25 @@ async fn wait_for_ln_payment(
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 40.0 {
             panic!("cannot find payment in status {expected_status}")
+        }
+    }
+}
+
+async fn wait_for_peer_port_ready(node_peer_port: u16) {
+    let sock_addr = SocketAddr::from(([127, 0, 0, 1], node_peer_port));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match TcpStream::connect(sock_addr).await {
+            Ok(stream) => {
+                drop(stream);
+                return;
+            }
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Err(err) => {
+                panic!("LDK peer port {node_peer_port} did not accept connections in time: {err}")
+            }
         }
     }
 }

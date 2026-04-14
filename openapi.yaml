@@ -710,7 +710,9 @@ paths:
       tags:
         - Invoices
       summary: Get a LN invoice
-      description: Get a LN invoice to receive a payment. Provide `payment_hash` to create a HODL invoice.
+      description: >-
+        Get a LN invoice to receive a payment. Provide `payment_hash` to create a HODL invoice.
+        Provide `description_hash` to include an out-of-band BOLT11 description hash.
       requestBody:
         content:
           application/json:
@@ -2313,6 +2315,10 @@ components:
           type: string
           description: Optional. When provided, the invoice is created as HODL.
           example: 3febfae1e68b190c15461f4c2a3290f9af1dae63fd7d620d2bd61601869026cd
+        description_hash:
+          type: string
+          description: Optional. When provided, the invoice includes a BOLT11 description hash.
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
     LNInvoiceResponse:
       type: object
       required:

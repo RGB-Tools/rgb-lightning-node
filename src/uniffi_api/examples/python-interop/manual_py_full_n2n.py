@@ -368,6 +368,7 @@ def main():
             expiry_sec=3600,
             asset_id=asset_id,
             asset_amount=PAYMENT_ASSET_AMOUNT,
+            description_hash=None,
         )
         invoice = node_b.ln_invoice(inv_req).invoice
         print("invoice:", invoice)

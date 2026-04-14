@@ -1228,6 +1228,7 @@ impl SdkNode {
         let state = self.handle.app_state();
         let asset_id = request.asset_id.map(|a| a.to_string());
         let payment_hash = request.payment_hash.map(|h| h.0.as_hex().to_string());
+        let description_hash = request.description_hash;
         let data = block_on_sdk(sdk::create_ln_invoice(
             state,
             request.amt_msat,
@@ -1235,6 +1236,7 @@ impl SdkNode {
             asset_id,
             request.asset_amount,
             payment_hash,
+            description_hash,
         ))?;
         let invoice = Bolt11Invoice::from_str(&data.invoice).map_err(|_| RlnError::Internal)?;
         Ok(LnInvoiceResponse { invoice })

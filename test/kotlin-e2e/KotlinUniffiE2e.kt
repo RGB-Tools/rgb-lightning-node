@@ -627,6 +627,7 @@ private fun paymentScenario() {
                 expirySec = 3600u,
                 assetId = assetId,
                 assetAmount = PAYMENT_ASSET_AMOUNT,
+                descriptionHash = null,
                 paymentHash = null,
             )
         ).invoice
@@ -966,6 +967,7 @@ private fun closeCoopVanillaScenario(name: String, portOffset: UInt, withAnchors
                 expirySec = 900u,
                 assetId = null,
                 assetAmount = null,
+                descriptionHash = null,
                 paymentHash = null,
             )
         ).invoice

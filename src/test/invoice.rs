@@ -1,4 +1,6 @@
 use super::*;
+use bitcoin::hashes::sha256::Hash as Sha256;
+use std::str::FromStr;
 
 const TEST_DIR_BASE: &str = "tmp/invoice/";
 
@@ -22,6 +24,7 @@ async fn invoice() {
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
         payment_hash: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -38,6 +41,7 @@ async fn invoice() {
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
         payment_hash: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -54,6 +58,7 @@ async fn invoice() {
         asset_id: None,
         asset_amount: None,
         payment_hash: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -64,6 +69,43 @@ async fn invoice() {
         .json::<LNInvoiceResponse>()
         .await;
     assert!(res.is_ok());
+}
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn description_hash_invoice() {
+    initialize();
+
+    let test_dir_node1 = format!("{TEST_DIR_BASE}description_hash/node1");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+
+    let description_hash = lightning_invoice::Sha256(Sha256::hash(b"out-of-band description"));
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        payment_hash: None,
+        description_hash: Some(description_hash.0.to_string()),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap();
+
+    let invoice = Bolt11Invoice::from_str(&res.invoice).unwrap();
+    assert!(matches!(
+        invoice.description(),
+        lightning_invoice::Bolt11InvoiceDescriptionRef::Hash(hash) if *hash == description_hash
+    ));
 }
 
 #[serial_test::serial]
@@ -103,6 +145,7 @@ async fn zero_amount_invoice() {
         asset_id: None,
         asset_amount: None,
         payment_hash: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -184,6 +227,7 @@ async fn zero_amount_invoice() {
         asset_id: Some(asset_id.clone()),
         asset_amount: None,
         payment_hash: None,
+        description_hash: None,
     };
     let invoice_without_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -207,6 +251,7 @@ async fn zero_amount_invoice() {
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(50),
         payment_hash: None,
+        description_hash: None,
     };
     let invoice_with_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))

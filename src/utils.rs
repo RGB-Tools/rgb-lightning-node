@@ -477,6 +477,15 @@ pub(crate) fn validate_and_parse_payment_hash(
     Ok(PaymentHash(payment_hash_vec.unwrap().try_into().unwrap()))
 }
 
+pub(crate) fn validate_and_parse_description_hash(
+    description_hash_str: &str,
+) -> Result<lightning_invoice::Sha256, APIError> {
+    Ok(lightning_invoice::Sha256(
+        Sha256::from_str(description_hash_str)
+            .map_err(|_| APIError::InvalidDescriptionHash(description_hash_str.to_string()))?,
+    ))
+}
+
 pub(crate) fn validate_and_parse_payment_preimage(
     payment_preimage_str: &str,
     payment_hash: &PaymentHash,

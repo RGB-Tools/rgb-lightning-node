@@ -40,7 +40,7 @@ use lightning::{
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
     util::{errors::APIError as LDKAPIError, IS_SWAP_SCID},
 };
-use lightning_invoice::{Bolt11Invoice, PaymentSecret};
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description, PaymentSecret};
 use regex::Regex;
 use rgb_lib::{
     bdk_wallet::keys::bip39::Mnemonic,
@@ -83,8 +83,9 @@ use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
-    hex_str_to_compressed_pubkey, hex_str_to_vec, validate_and_parse_payment_hash,
-    validate_and_parse_payment_preimage, UnlockedAppState, UserOnionMessageContents,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, validate_and_parse_description_hash,
+    validate_and_parse_payment_hash, validate_and_parse_payment_preimage, UnlockedAppState,
+    UserOnionMessageContents,
 };
 use crate::{
     backup::{do_backup, restore_backup},
@@ -828,6 +829,7 @@ pub(crate) struct LNInvoiceRequest {
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_amount: Option<u64>,
     pub(crate) payment_hash: Option<String>,
+    pub(crate) description_hash: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2950,9 +2952,16 @@ pub(crate) async fn ln_invoice(
             }
             None => None,
         };
+        let description = match &payload.description_hash {
+            Some(description_hash) => Bolt11InvoiceDescription::Hash(
+                validate_and_parse_description_hash(description_hash)?,
+            ),
+            None => Bolt11InvoiceDescription::Direct(Description::empty()),
+        };
 
         let invoice_params = Bolt11InvoiceParameters {
             amount_msats: payload.amt_msat,
+            description,
             invoice_expiry_delta_secs: Some(payload.expiry_sec),
             payment_hash: requested_payment_hash,
             contract_id,

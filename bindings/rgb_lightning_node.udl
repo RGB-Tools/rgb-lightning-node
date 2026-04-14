@@ -489,6 +489,7 @@ dictionary LnInvoiceRequest {
     ContractId? asset_id;
     u64? asset_amount;
     PaymentHash? payment_hash;
+    string? description_hash;
 };
 
 dictionary LnInvoiceResponse {

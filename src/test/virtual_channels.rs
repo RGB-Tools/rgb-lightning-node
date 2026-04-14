@@ -4,14 +4,6 @@ const TEST_DIR_BASE: &str = "tmp/openchannel_virtual/";
 const VIRTUAL_TIMEOUT_BOUNDARY_CHUNK_SIZE: u16 = 144;
 const VIRTUAL_TIMEOUT_BOUNDARY_SYNC_TIMEOUT_SECS: f32 = 30.0;
 
-fn next_peer_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
 async fn close_channel_response(
     node_address: SocketAddr,
     channel_id: &str,
