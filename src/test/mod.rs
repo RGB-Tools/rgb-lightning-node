@@ -2029,6 +2029,7 @@ mod swap_roundtrip_buy_same_channel;
 mod swap_roundtrip_fail_amount_maker;
 mod swap_roundtrip_fail_amount_taker;
 mod swap_roundtrip_fail_btc2btc;
+mod swap_roundtrip_fail_forward;
 mod swap_roundtrip_fail_invalid_asset_from;
 mod swap_roundtrip_fail_invalid_asset_to;
 mod swap_roundtrip_fail_same_asset;

@@ -111,6 +111,13 @@ pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
+#[cfg(test)]
+pub(crate) static FORCE_NEXT_INTERCEPTED_SWAP_RGB_FORWARD_FAILURE: AtomicBool =
+    AtomicBool::new(false);
+
+#[cfg(test)]
+const TEST_RGB_FORWARD_FAILURE_EXCESS_AMOUNT: u64 = 1;
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,
@@ -1276,6 +1283,23 @@ async fn handle_ldk_events(
             tracing::debug!("Swap is whitelisted, forwarding the htlc...");
             unlocked_state.update_taker_swap_status(&payment_hash, SwapStatus::Pending);
 
+            let outbound_rgb_payment = expected_outbound_rgb_payment;
+            #[cfg(test)]
+            let outbound_rgb_payment = {
+                let mut outbound_rgb_payment = outbound_rgb_payment;
+                if FORCE_NEXT_INTERCEPTED_SWAP_RGB_FORWARD_FAILURE.swap(false, Ordering::SeqCst) {
+                    if let (Some((contract_id, _)), Some((_, local_rgb_amount, _))) =
+                        (outbound_rgb_payment, outbound_rgb_info)
+                    {
+                        outbound_rgb_payment = Some((
+                            contract_id,
+                            local_rgb_amount.saturating_add(TEST_RGB_FORWARD_FAILURE_EXCESS_AMOUNT),
+                        ));
+                    }
+                }
+                outbound_rgb_payment
+            };
+
             unlocked_state
                 .channel_manager
                 .forward_intercepted_htlc(
@@ -1283,7 +1307,7 @@ async fn handle_ldk_events(
                     channelmanager::NextHopForward::ShortChannelId(requested_next_hop_scid),
                     outbound_channel.counterparty.node_id,
                     expected_outbound_amount_msat,
-                    expected_outbound_rgb_payment,
+                    outbound_rgb_payment,
                 )
                 .expect("Forward should be valid");
         }
