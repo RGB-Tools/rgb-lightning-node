@@ -111,6 +111,9 @@ pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 
+#[cfg(test)]
+pub(crate) static IGNORE_INBOUND_CHANNELS_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,
@@ -856,6 +859,20 @@ async fn handle_ldk_events(
             ref counterparty_node_id,
             ..
         } => {
+            #[cfg(test)]
+            if IGNORE_INBOUND_CHANNELS_ON_NODE
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|id| *id == unlocked_state.channel_manager.get_our_node_id())
+            {
+                tracing::info!(
+                    "TEST: ignoring inbound channel {} from {}",
+                    temporary_channel_id,
+                    hex_str(&counterparty_node_id.serialize()),
+                );
+                return Ok(());
+            }
             let mut random_bytes = [0u8; 16];
             random_bytes
                 .copy_from_slice(&unlocked_state.keys_manager.get_secure_random_bytes()[..16]);

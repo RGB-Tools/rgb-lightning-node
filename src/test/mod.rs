@@ -2,6 +2,7 @@ use amplify::s;
 use biscuit_auth::{builder::date, macros::*, KeyPair};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
+use bitcoin::secp256k1::PublicKey;
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
 use lazy_static::lazy_static;
@@ -24,7 +25,7 @@ use tracing_test::traced_test;
 
 use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
-use crate::ldk::FEE_RATE;
+use crate::ldk::{FEE_RATE, IGNORE_INBOUND_CHANNELS_ON_NODE};
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
@@ -2010,6 +2011,7 @@ mod init;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
+mod missing_acceptor;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
