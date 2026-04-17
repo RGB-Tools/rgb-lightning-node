@@ -3092,9 +3092,9 @@ pub(crate) async fn node_info(
     let pending_payments_map = |b| match b {
         &Balance::MaybeTimeoutClaimableHTLC {
             amount_satoshis,
-            outbound_payment,
+            outbound_payment: true,
             ..
-        } if outbound_payment => amount_satoshis,
+        } => amount_satoshis,
         _ => 0,
     };
     let pending_outbound_payments_sat = balances.iter().map(pending_payments_map).sum::<u64>();
