@@ -3094,13 +3094,7 @@ pub(crate) async fn node_info(
             amount_satoshis,
             outbound_payment,
             ..
-        } => {
-            if outbound_payment {
-                amount_satoshis
-            } else {
-                0
-            }
-        }
+        } if outbound_payment => amount_satoshis,
         _ => 0,
     };
     let pending_outbound_payments_sat = balances.iter().map(pending_payments_map).sum::<u64>();
