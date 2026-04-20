@@ -1,7 +1,8 @@
 use crate::helpers::*;
 use serial_test::serial;
 use std::fs;
-use std::time::Duration;
+
+const DURATION_SECONDS: u32 = 999;
 
 #[test]
 #[serial]
@@ -65,7 +66,7 @@ fn send_receive() {
                 asset_id: None,
                 assignment_kind: None,
                 assignment_amount: None,
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: false,
             })
@@ -112,7 +113,7 @@ fn send_receive() {
                 asset_id: None,
                 assignment_kind: None,
                 assignment_amount: None,
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: false,
             })
@@ -149,7 +150,7 @@ fn send_receive() {
                 asset_id: Some(asset_id.clone()),
                 assignment_kind: Some(AssignmentKind::Fungible),
                 assignment_amount: Some(200),
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: true,
             })
@@ -163,7 +164,7 @@ fn send_receive() {
                 asset_id: None,
                 assignment_kind: None,
                 assignment_amount: None,
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: true,
             })
@@ -174,7 +175,7 @@ fn send_receive() {
                 asset_id: Some(asset_id_2.clone()),
                 assignment_kind: Some(AssignmentKind::Fungible),
                 assignment_amount: Some(100),
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: false,
             })
@@ -243,11 +244,9 @@ fn send_receive() {
         assert_eq!(asset_balance_spendable(&node_a, &asset_id_2), 800);
         assert_eq!(asset_balance_spendable(&node_b, &asset_id_2), 200);
 
-        let decoded = wait_for_decoded_rgb_invoice_with_expiration(
-            &node_a,
-            &invoice,
-            Duration::from_secs(20),
-        );
+        let decoded = node_a
+            .decode_rgb_invoice(invoice.clone())
+            .expect("node A decode_rgb_invoice");
         assert_eq!(decoded.recipient_id, recipient_id_n1a_str);
         assert_eq!(decoded.asset_schema, Some("Nia".to_string()));
         assert_eq!(decoded.asset_id, Some(asset_id.clone()));
@@ -264,7 +263,7 @@ fn send_receive() {
                 asset_id: None,
                 assignment_kind: Some(AssignmentKind::Fungible),
                 assignment_amount: Some(100),
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: false,
             })
@@ -275,7 +274,7 @@ fn send_receive() {
                 asset_id: None,
                 assignment_kind: Some(AssignmentKind::Fungible),
                 assignment_amount: Some(150),
-                duration_seconds: None,
+                duration_seconds: Some(DURATION_SECONDS),
                 min_confirmations: 1,
                 witness: false,
             })

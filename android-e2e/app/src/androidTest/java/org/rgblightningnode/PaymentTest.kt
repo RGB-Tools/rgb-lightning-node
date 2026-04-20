@@ -204,26 +204,6 @@ class PaymentTest {
         error("spendable balance did not become expected=$expected actual=$lastBalance after ${timeoutSec}s")
     }
 
-    private fun waitForTransferWithExpiration(
-        node: SdkNode,
-        assetId: ContractId,
-        transferIdx: Int,
-        timeoutSec: Long,
-    ) = run {
-        val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
-        while (System.currentTimeMillis() < deadline) {
-            refreshTransfers(node)
-            val transfer = node.listTransfers(assetId).firstOrNull {
-                it.idx == transferIdx && it.expiration != null
-            }
-            if (transfer != null) {
-                return@run transfer
-            }
-            Thread.sleep(1_000L)
-        }
-        error("transfer expiration did not become available: idx=$transferIdx after ${timeoutSec}s")
-    }
-
     private fun waitForChannelFundingTx(nodeA: SdkNode, nodeB: SdkNode, assetId: ContractId, timeoutSec: Long): Txid {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
         while (System.currentTimeMillis() < deadline) {
@@ -726,7 +706,7 @@ class PaymentTest {
             assertNull(xfer1.expiration)
             assertTrue(xfer1.transportEndpoints.isEmpty())
 
-            val xfer2 = waitForTransferWithExpiration(nodeA, assetId, 2, 20L)
+            val xfer2 = transfers.first { it.idx == 2 }
             assertEquals("Settled", xfer2.status)
             assertEquals("Send", xfer2.kind)
             assertEquals("Fungible(600)", xfer2.requestedAssignment)
@@ -735,10 +715,10 @@ class PaymentTest {
             assertNotNull(xfer2.recipientId)
             assertNull(xfer2.receiveUtxo)
             assertNotNull(xfer2.changeUtxo)
-            assertNotNull(xfer2.expiration)
+            assertNull(xfer2.expiration)
             assertTrue(xfer2.transportEndpoints.isNotEmpty())
 
-            val xfer3 = waitForTransferWithExpiration(nodeA, assetId, 3, 20L)
+            val xfer3 = transfers.first { it.idx == 3 }
             assertEquals("Settled", xfer3.status)
             assertEquals("ReceiveWitness", xfer3.kind)
             assertEquals(listOf("Fungible(550)"), xfer3.assignments)
@@ -746,7 +726,7 @@ class PaymentTest {
             assertNotNull(xfer3.recipientId)
             assertNotNull(xfer3.receiveUtxo)
             assertNull(xfer3.changeUtxo)
-            assertNotNull(xfer3.expiration)
+            assertNull(xfer3.expiration)
             assertTrue(xfer3.transportEndpoints.isNotEmpty())
 
             log("SUCCESS: Android payment parity flow completed")

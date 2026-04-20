@@ -55,11 +55,7 @@ jobs:
       - name: Start regtest services
         run: ./regtest.sh start
       - name: Run lib_sdk tests
-        # Temporarily excluded from blocking CI until the persistence-related fix lands in dev:
-        # - payment::success
-        # - send_receive::send_receive
-        # Re-enable after PR #15 is merged into dev.
-        run: cargo test --features uniffi --test lib_sdk -- --test-threads=1 --skip payment::success --skip send_receive::send_receive
+        run: cargo test --features uniffi --test lib_sdk -- --test-threads=1
       - name: Stop regtest services
         if: always()
         run: ./regtest.sh stop

@@ -1,13 +1,12 @@
 use electrum_client::ElectrumApi;
 use once_cell::sync::Lazy;
 pub(crate) use rgb_lightning_node::{
-    AssetBalanceInfo, AssetRecipients, AssignmentKind, Channel, ContractId,
-    DecodeRgbInvoiceResponse, HtlcStatus, InvoiceStatus, LnInvoiceRequest, Payment, PaymentHash,
-    RecipientId, RgbRecipient, SdkCloseChannelRequest, SdkCreateUtxosRequest, SdkInitRequest,
-    SdkIssueAssetCfaRequest, SdkIssueAssetNiaRequest, SdkKeysendRequest, SdkNode,
-    SdkOpenChannelRequest, SdkRefreshTransfersRequest, SdkRgbInvoiceRequest, SdkSendBtcRequest,
-    SdkSendPaymentRequest, SdkUnlockRequest, SendRgbRequest, TransactionType, Transfer,
-    TransportEndpoint, WitnessData,
+    AssetBalanceInfo, AssetRecipients, AssignmentKind, Channel, ContractId, HtlcStatus,
+    InvoiceStatus, LnInvoiceRequest, Payment, PaymentHash, RecipientId, RgbRecipient,
+    SdkCloseChannelRequest, SdkCreateUtxosRequest, SdkInitRequest, SdkIssueAssetCfaRequest,
+    SdkIssueAssetNiaRequest, SdkKeysendRequest, SdkNode, SdkOpenChannelRequest,
+    SdkRefreshTransfersRequest, SdkRgbInvoiceRequest, SdkSendBtcRequest, SdkSendPaymentRequest,
+    SdkUnlockRequest, SendRgbRequest, TransactionType, TransportEndpoint, WitnessData,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -641,55 +640,6 @@ pub(crate) fn wait_for_succeeded_payment_in_list(
         assert!(
             Instant::now() < deadline,
             "payment did not become succeeded in list_payments"
-        );
-        sleep(Duration::from_secs(1));
-    }
-}
-
-pub(crate) fn wait_for_transfer_with_expiration(
-    node: &SdkNode,
-    asset_id: &ContractId,
-    transfer_idx: i32,
-    timeout: Duration,
-) -> Transfer {
-    let deadline = Instant::now() + timeout;
-    loop {
-        refresh_transfers(node);
-        let transfers = node
-            .list_transfers(asset_id.clone())
-            .expect("list_transfers while waiting for transfer expiration");
-        if let Some(transfer) = transfers
-            .into_iter()
-            .find(|transfer| transfer.idx == transfer_idx && transfer.expiration.is_some())
-        {
-            return transfer;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "transfer expiration did not become available: idx={transfer_idx}"
-        );
-        sleep(Duration::from_secs(1));
-    }
-}
-
-pub(crate) fn wait_for_decoded_rgb_invoice_with_expiration(
-    node: &SdkNode,
-    invoice: &str,
-    timeout: Duration,
-) -> DecodeRgbInvoiceResponse {
-    let deadline = Instant::now() + timeout;
-    loop {
-        node.sync()
-            .expect("node sync while waiting for decoded rgb invoice expiration");
-        let decoded = node
-            .decode_rgb_invoice(invoice.to_string())
-            .expect("decode_rgb_invoice while waiting for expiration");
-        if decoded.expiration_timestamp.is_some() {
-            return decoded;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "decoded rgb invoice expiration did not become available"
         );
         sleep(Duration::from_secs(1));
     }
