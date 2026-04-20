@@ -69,7 +69,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -90,7 +90,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NodeInfoResponse>()
         .await
@@ -101,7 +101,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NetworkInfoResponse>()
         .await
@@ -152,7 +152,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NodeInfoResponse>()
         .await
@@ -173,7 +173,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NodeInfoResponse>()
         .await
@@ -188,7 +188,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await

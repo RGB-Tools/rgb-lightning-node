@@ -525,7 +525,7 @@ pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
     Arc<RgbOutputSpender>,
 >;
 
-fn _update_rgb_channel_amount(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
+fn find_and_update_rgb_chan_amt(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
     let payment_hash_str = hex_str(&payment_hash.0);
     for entry in fs::read_dir(ldk_data_dir).unwrap() {
         let file = entry.unwrap();
@@ -801,7 +801,7 @@ async fn handle_ldk_events(
                 }
             }
 
-            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, true);
+            find_and_update_rgb_chan_amt(&static_state.ldk_data_dir, &payment_hash, true);
             if is_maker_swap {
                 unlocked_state.update_maker_swap_status(&payment_hash, SwapStatus::Succeeded);
             } else {
@@ -822,7 +822,7 @@ async fn handle_ldk_events(
             payment_id,
             ..
         } => {
-            _update_rgb_channel_amount(&static_state.ldk_data_dir, &payment_hash, false);
+            find_and_update_rgb_chan_amt(&static_state.ldk_data_dir, &payment_hash, false);
 
             if unlocked_state.is_maker_swap(&payment_hash) {
                 tracing::info!(
