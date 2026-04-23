@@ -162,10 +162,14 @@ def wait_payment_final(node: rln.SdkNode, payment_hash, timeout_sec: int = 60):
     last = None
     while time.time() < deadline:
         node.sync()
-        payment = node.get_payment(payment_hash)
-        last = payment.status
-        if payment.status != rln.HtlcStatus.PENDING:
-            return payment.status
+        payment = next(
+            (p for p in node.list_payments() if p.payment_hash == payment_hash),
+            None,
+        )
+        if payment is not None:
+            last = payment.status
+            if payment.status != rln.HtlcStatus.PENDING:
+                return payment.status
         time.sleep(1)
     raise RuntimeError(f"keysend did not finalize in time, last={last}")
 

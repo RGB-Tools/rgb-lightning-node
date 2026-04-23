@@ -1,6 +1,7 @@
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/hodl_invoice/";
+const RGB_PAYMENT_AMOUNT: u64 = 1;
 
 #[derive(Clone, Copy)]
 enum ExpiryTrigger {
@@ -162,7 +163,8 @@ async fn run_expire_hodl_invoice_case(
     wait_for_claimable_state(test_dir_node2, &payment_hash_hex, false)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to be removed: {err}"));
-    let payee_payment = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payee_payment =
+        get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
     assert!(matches!(
         invoice_status(node2_addr, &invoice).await,
         InvoiceStatus::Failed
@@ -178,7 +180,8 @@ async fn run_expire_hodl_invoice_case(
         payee_payment_from_list.payment_type,
         PaymentType::InboundHodl
     );
-    let payee_payment_again = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payee_payment_again =
+        get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
     assert_eq!(payee_payment_again.payment_type, PaymentType::InboundHodl);
     assert_eq!(payee_payment_again.status, HTLCStatus::Failed);
     wait_for_claimable_state(test_dir_node2, &payment_hash_hex, false)
@@ -243,6 +246,90 @@ async fn setup_two_nodes_with_asset_channel(
         node2_addr,
         test_dir_node1,
         test_dir_node2,
+        asset_id,
+    )
+}
+
+async fn setup_three_virtual_nodes_with_hub_channels(
+    test_dir_suffix: &str,
+) -> (SocketAddr, SocketAddr, SocketAddr, String, String, String) {
+    let test_dir_base = format!("{TEST_DIR_BASE}{test_dir_suffix}/");
+    let test_dir_lsp = format!("{test_dir_base}lsp");
+    let test_dir_payer_client = format!("{test_dir_base}payer_client");
+    let test_dir_recipient_client = format!("{test_dir_base}recipient_client");
+
+    let lsp_peer_port = next_peer_port();
+    let mut payer_client_peer_port = next_peer_port();
+    while payer_client_peer_port == lsp_peer_port {
+        payer_client_peer_port = next_peer_port();
+    }
+    let mut recipient_client_peer_port = next_peer_port();
+    while recipient_client_peer_port == lsp_peer_port
+        || recipient_client_peer_port == payer_client_peer_port
+    {
+        recipient_client_peer_port = next_peer_port();
+    }
+
+    let (lsp_addr, _) =
+        start_node_with_virtual_options(&test_dir_lsp, lsp_peer_port, false, true, vec![]).await;
+    fund_and_create_utxos(lsp_addr, None).await;
+    let asset_id = issue_asset_nia_with_amounts(lsp_addr, vec![500, 500])
+        .await
+        .asset_id;
+    fund_and_create_utxos(lsp_addr, None).await;
+
+    let lsp_pubkey = node_info(lsp_addr).await.pubkey;
+    let trusted_lsp_pubkey = bitcoin::secp256k1::PublicKey::from_str(&lsp_pubkey).unwrap();
+
+    let (payer_client_addr, _) = start_node_with_virtual_options(
+        &test_dir_payer_client,
+        payer_client_peer_port,
+        false,
+        true,
+        vec![trusted_lsp_pubkey],
+    )
+    .await;
+    let (recipient_client_addr, _) = start_node_with_virtual_options(
+        &test_dir_recipient_client,
+        recipient_client_peer_port,
+        false,
+        true,
+        vec![bitcoin::secp256k1::PublicKey::from_str(&lsp_pubkey).unwrap()],
+    )
+    .await;
+
+    let payer_client_pubkey = node_info(payer_client_addr).await.pubkey;
+    let recipient_client_pubkey = node_info(recipient_client_addr).await.pubkey;
+
+    open_virtual_channel(
+        lsp_addr,
+        &payer_client_pubkey,
+        Some(payer_client_peer_port),
+        Some(100_000),
+        Some(10_000_000),
+        Some(RGB_PAYMENT_AMOUNT * 3),
+        Some(&asset_id),
+        Some(RGB_PAYMENT_AMOUNT),
+    )
+    .await;
+    open_virtual_channel(
+        lsp_addr,
+        &recipient_client_pubkey,
+        Some(recipient_client_peer_port),
+        Some(100_000),
+        None,
+        Some(RGB_PAYMENT_AMOUNT * 3),
+        Some(&asset_id),
+        None,
+    )
+    .await;
+
+    (
+        lsp_addr,
+        payer_client_addr,
+        recipient_client_addr,
+        test_dir_lsp,
+        test_dir_recipient_client,
         asset_id,
     )
 }
@@ -634,4 +721,196 @@ async fn claim_hodl_invoice_btc_rgb() {
     .await;
 
     shutdown(&[node1_addr, node2_addr]).await;
+}
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn inbound_payment_blocks_outbound_btc_payment_with_same_hash() {
+    initialize();
+
+    let (
+        lsp_addr,
+        payer_client_addr,
+        recipient_client_addr,
+        test_dir_lsp,
+        _test_dir_recipient_client,
+        asset_id,
+    ) = setup_three_virtual_nodes_with_hub_channels("swap-hodl-btc").await;
+    let _initial_lsp_rgb_balance = asset_balance_offchain_outbound(lsp_addr, &asset_id).await;
+
+    let (_, payment_hash) = random_preimage_and_hash();
+    let LNInvoiceResponse {
+        invoice: inbound_invoice,
+    } = ln_invoice_hodl(
+        lsp_addr,
+        Some(HTLC_MIN_MSAT),
+        Some(&asset_id),
+        Some(RGB_PAYMENT_AMOUNT),
+        600,
+        Some(payment_hash.clone()),
+    )
+    .await;
+
+    let payer_payment = send_payment_with_status(
+        payer_client_addr,
+        inbound_invoice.clone(),
+        HTLCStatus::Pending,
+    )
+    .await;
+    assert_eq!(payer_payment.payment_type, PaymentType::Outbound);
+
+    wait_for_claimable_state(&test_dir_lsp, &payment_hash, true)
+        .await
+        .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
+    let lsp_claimable_payment =
+        wait_for_ln_payment(lsp_addr, &payment_hash, HTLCStatus::Claimable).await;
+    assert_eq!(lsp_claimable_payment.payment_type, PaymentType::InboundHodl);
+    assert!(matches!(
+        invoice_status(lsp_addr, &inbound_invoice).await,
+        InvoiceStatus::Claimable
+    ));
+
+    let LNInvoiceResponse {
+        invoice: outbound_invoice,
+    } = ln_invoice_hodl(
+        recipient_client_addr,
+        Some(HTLC_MIN_MSAT * 2),
+        None,
+        None,
+        300,
+        Some(payment_hash.clone()),
+    )
+    .await;
+
+    let send_payment_payload = SendPaymentRequest {
+        invoice: outbound_invoice.clone(),
+        amt_msat: None,
+        asset_id: None,
+        asset_amount: None,
+    };
+    let send_payment_result = reqwest::Client::new()
+        .post(format!("http://{lsp_addr}/sendpayment"))
+        .json(&send_payment_payload)
+        .send()
+        .await;
+    assert!(
+        send_payment_result.is_err(),
+        "expected outbound BTC payment request to fail"
+    );
+    assert!(matches!(
+        invoice_status(recipient_client_addr, &outbound_invoice).await,
+        InvoiceStatus::Pending
+    ));
+
+    shutdown(&[lsp_addr, payer_client_addr, recipient_client_addr]).await;
+}
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn inbound_payment_does_not_block_rgb_outbound_payment_with_same_hash() {
+    initialize();
+
+    let (
+        lsp_addr,
+        payer_client_addr,
+        recipient_client_addr,
+        test_dir_lsp,
+        test_dir_recipient_client,
+        asset_id,
+    ) = setup_three_virtual_nodes_with_hub_channels("swap-hodl-rgb").await;
+    let initial_lsp_rgb_balance = asset_balance_offchain_outbound(lsp_addr, &asset_id).await;
+
+    let (preimage, payment_hash) = random_preimage_and_hash();
+    let LNInvoiceResponse {
+        invoice: inbound_invoice,
+    } = ln_invoice_hodl(
+        lsp_addr,
+        Some(HTLC_MIN_MSAT),
+        Some(&asset_id),
+        Some(RGB_PAYMENT_AMOUNT),
+        600,
+        Some(payment_hash.clone()),
+    )
+    .await;
+
+    let payer_payment = send_payment_with_status(
+        payer_client_addr,
+        inbound_invoice.clone(),
+        HTLCStatus::Pending,
+    )
+    .await;
+    assert_eq!(payer_payment.payment_type, PaymentType::Outbound);
+
+    wait_for_claimable_state(&test_dir_lsp, &payment_hash, true)
+        .await
+        .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
+    let lsp_claimable_payment =
+        wait_for_ln_payment(lsp_addr, &payment_hash, HTLCStatus::Claimable).await;
+    assert_eq!(lsp_claimable_payment.payment_type, PaymentType::InboundHodl);
+    assert!(matches!(
+        invoice_status(lsp_addr, &inbound_invoice).await,
+        InvoiceStatus::Claimable
+    ));
+
+    let LNInvoiceResponse {
+        invoice: outbound_invoice,
+    } = ln_invoice_hodl(
+        recipient_client_addr,
+        Some(HTLC_MIN_MSAT * 2),
+        Some(&asset_id),
+        Some(RGB_PAYMENT_AMOUNT),
+        300,
+        Some(payment_hash.clone()),
+    )
+    .await;
+
+    let lsp_payment =
+        send_payment_with_status(lsp_addr, outbound_invoice.clone(), HTLCStatus::Pending).await;
+    assert_eq!(lsp_payment.payment_type, PaymentType::Outbound);
+
+    wait_for_claimable_state(&test_dir_recipient_client, &payment_hash, true)
+        .await
+        .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
+    let recipient_payment =
+        wait_for_ln_payment(recipient_client_addr, &payment_hash, HTLCStatus::Claimable).await;
+    assert_eq!(recipient_payment.payment_type, PaymentType::InboundHodl);
+
+    let recipient_claim_response = claim_hodl_invoice(
+        recipient_client_addr,
+        payment_hash.clone(),
+        preimage.clone(),
+    )
+    .await;
+    assert!(recipient_claim_response.changed);
+    wait_for_ln_balance(recipient_client_addr, &asset_id, RGB_PAYMENT_AMOUNT).await;
+    wait_for_ln_balance(
+        lsp_addr,
+        &asset_id,
+        initial_lsp_rgb_balance - RGB_PAYMENT_AMOUNT,
+    )
+    .await;
+
+    let lsp_outbound_payment = wait_for_ln_payment_by_type(
+        lsp_addr,
+        &payment_hash,
+        PaymentType::Outbound,
+        HTLCStatus::Succeeded,
+    )
+    .await;
+    check_preimage_matches_hash(&lsp_outbound_payment, &payment_hash);
+    let outbound_preimage = lsp_outbound_payment
+        .preimage
+        .clone()
+        .expect("outbound payment preimage");
+
+    let lsp_claim_response =
+        claim_hodl_invoice(lsp_addr, payment_hash.clone(), outbound_preimage.clone()).await;
+    assert!(lsp_claim_response.changed);
+
+    wait_for_ln_balance(payer_client_addr, &asset_id, 0).await;
+    wait_for_ln_balance(lsp_addr, &asset_id, initial_lsp_rgb_balance).await;
+
+    shutdown(&[lsp_addr, payer_client_addr, recipient_client_addr]).await;
 }

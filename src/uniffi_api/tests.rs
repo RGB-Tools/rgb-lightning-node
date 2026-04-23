@@ -23,7 +23,7 @@ mod uniffi_smoke_tests {
         let channel_id = sdk_get_channel_id(lightning::ln::types::ChannelId([0u8; 32]));
         assert!(matches!(channel_id, Err(RlnError::NotInitialized)));
         let payment_hash = lightning::types::payment::PaymentHash([0u8; 32]);
-        let payment = sdk_get_payment(payment_hash);
+        let payment = sdk_get_payment(payment_hash, PaymentType::Outbound);
         assert!(matches!(payment, Err(RlnError::NotInitialized)));
         let swap = sdk_get_swap(lightning::types::payment::PaymentHash([0u8; 32]), true);
         assert!(matches!(swap, Err(RlnError::NotInitialized)));

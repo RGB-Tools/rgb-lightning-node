@@ -541,10 +541,16 @@ pub(crate) fn wait_for_payment_status(
 ) -> Payment {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Ok(payment) = node.get_payment(*payment_hash) {
-            if matches!(payment.status, HtlcStatus::Succeeded) {
-                return payment;
-            }
+        if let Some(payment) = node
+            .list_payments()
+            .expect("list_payments while waiting for payment success")
+            .into_iter()
+            .find(|payment| {
+                payment.payment_hash == *payment_hash
+                    && matches!(payment.status, HtlcStatus::Succeeded)
+            })
+        {
+            return payment;
         }
 
         assert!(

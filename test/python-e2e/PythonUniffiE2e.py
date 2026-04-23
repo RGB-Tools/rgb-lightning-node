@@ -381,7 +381,9 @@ def wait_for_balance(node: rln.SdkNode, asset_id, expected: int, timeout_sec: in
         node.refreshtransfers(rln.SdkRefreshTransfersRequest(skip_sync=False))
         time.sleep(1)
     raise RuntimeError(
-        f"spendable balance did not become expected={expected} actual={last_balance} asset_id={asset_id} after {timeout_sec}s"
+        "spendable balance did not become "
+        f"expected={expected} actual={last_balance} "
+        f"asset_id={asset_id} after {timeout_sec}s"
     )
 
 
@@ -395,43 +397,65 @@ def wait_for_ln_balance(node: rln.SdkNode, asset_id, expected: int, timeout_sec:
             return
         time.sleep(1)
     raise RuntimeError(
-        f"offchain_outbound balance did not become expected={expected} actual={last_balance} asset_id={asset_id} after {timeout_sec}s"
+        "offchain_outbound balance did not become "
+        f"expected={expected} actual={last_balance} "
+        f"asset_id={asset_id} after {timeout_sec}s"
     )
 
 
 def wait_for_payment_status(
     node: rln.SdkNode,
     payment_hash,
+    payment_type,
     timeout_sec: int,
 ):
     deadline = time.time() + timeout_sec
     last_status = "not found"
     while time.time() < deadline:
-        try:
-            payment = node.get_payment(payment_hash)
+        payment = next(
+            (
+                p
+                for p in node.list_payments()
+                if p.payment_hash == payment_hash and p.payment_type == payment_type
+            ),
+            None,
+        )
+        if payment is not None:
             last_status = payment.status.name
             if payment.status == rln.HtlcStatus.SUCCEEDED:
                 return payment
-        except rln.RlnError.NotFound:
-            last_status = "not found"
         time.sleep(1)
     raise RuntimeError(
-        f"timeout waiting for payment success: payment_hash={payment_hash} last_status={last_status} after {timeout_sec}s"
+        f"timeout waiting for payment success: payment_hash={payment_hash} "
+        f"payment_type={payment_type.name} last_status={last_status} after {timeout_sec}s"
     )
 
 
-def wait_for_payment_present_in_list(node: rln.SdkNode, payment_hash, timeout_sec: int):
+def wait_for_payment_present_in_list(
+    node: rln.SdkNode,
+    payment_hash,
+    payment_type,
+    timeout_sec: int,
+):
     deadline = time.time() + timeout_sec
     last_count = 0
     while time.time() < deadline:
         payments = node.list_payments()
         last_count = len(payments)
-        payment = next((p for p in payments if p.payment_hash == payment_hash), None)
+        payment = next(
+            (
+                p
+                for p in payments
+                if p.payment_hash == payment_hash and p.payment_type == payment_type
+            ),
+            None,
+        )
         if payment is not None:
             return payment
         time.sleep(1)
     raise RuntimeError(
-        f"payment not found in list_payments: payment_hash={payment_hash} list_size={last_count} after {timeout_sec}s"
+        f"payment not found in list_payments: payment_hash={payment_hash} "
+        f"payment_type={payment_type.name} list_size={last_count} after {timeout_sec}s"
     )
 
 
@@ -484,7 +508,7 @@ def keysend(sender: rln.SdkNode, dest_pubkey: str, amt_msat, asset_id, asset_amo
     )
     if response.status not in (rln.HtlcStatus.PENDING, rln.HtlcStatus.SUCCEEDED):
         raise RuntimeError(f"unexpected keysend status: {response.status}")
-    wait_for_payment_status(sender, response.payment_hash, 60)
+    wait_for_payment_status(sender, response.payment_hash, rln.PaymentType.OUTBOUND, 60)
     return response.payment_hash
 
 
@@ -501,7 +525,7 @@ def keysend_with_ln_balance(
     payment_hash = keysend(sender, dest_pubkey, amt_msat, asset_id, asset_amount)
     wait_for_ln_balance(sender, asset_id, initial_sender_balance - asset_amount, 60)
     wait_for_ln_balance(receiver, asset_id, initial_receiver_balance + asset_amount, 60)
-    wait_for_payment_status(receiver, payment_hash, 60)
+    wait_for_payment_status(receiver, payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60)
 
 
 def close_channel(node: rln.SdkNode, channel_id: str, peer_pubkey: str, force: bool = False):
@@ -829,20 +853,24 @@ def payment_scenario():
             raise RuntimeError(f"Payment did not succeed (status={final_status})")
 
         decoded = node_a.decode_ln_invoice(invoice)
-        sender_payment = wait_for_payment_status(node_a, decoded.payment_hash, 60)
-        receiver_payment = wait_for_payment_status(node_b, decoded.payment_hash, 60)
+        sender_payment = wait_for_payment_status(
+            node_a, decoded.payment_hash, rln.PaymentType.OUTBOUND, 60
+        )
+        receiver_payment = wait_for_payment_status(
+            node_b, decoded.payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60
+        )
         check_preimage_matches_hash(sender_payment, decoded.payment_hash)
         check_preimage_matches_hash(receiver_payment, decoded.payment_hash)
 
         listed_sender_payment = wait_for_payment_present_in_list(
-            node_a, decoded.payment_hash, 60
+            node_a, decoded.payment_hash, rln.PaymentType.OUTBOUND, 60
         )
         if listed_sender_payment.payment_hash != decoded.payment_hash:
             raise RuntimeError("sender payment hash mismatch in list_payments")
         check_preimage_matches_hash(listed_sender_payment, decoded.payment_hash)
 
         listed_receiver_payment = wait_for_payment_present_in_list(
-            node_b, decoded.payment_hash, 60
+            node_b, decoded.payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60
         )
         if listed_receiver_payment.payment_hash != decoded.payment_hash:
             raise RuntimeError("receiver payment hash mismatch in list_payments")
@@ -932,7 +960,7 @@ def openchannel_push_asset_amount_scenario():
 
         keysend_with_ln_balance(node_a, node_b, node_b_pubkey, None, asset_id, 100, 350, 250)
         btc_payment_hash = keysend(node_a, node_b_pubkey, 10_000_000, None, None)
-        wait_for_payment_status(node_b, btc_payment_hash, 60)
+        wait_for_payment_status(node_b, btc_payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60)
         keysend_with_ln_balance(node_b, node_a, node_a_pubkey, None, asset_id, 50, 350, 250)
 
         node_a_partial_after = next(c for c in node_a.list_channels() if c.channel_id == partial_channel_id)
@@ -994,7 +1022,7 @@ def openchannel_push_asset_amount_scenario():
         assert node_b_full.asset_local_amount == 600 and node_b_full.asset_remote_amount == 0
 
         btc_payment_hash = keysend(node_a, node_b_pubkey, 10_000_000, None, None)
-        wait_for_payment_status(node_b, btc_payment_hash, 60)
+        wait_for_payment_status(node_b, btc_payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60)
         keysend_with_ln_balance(node_b, node_a, node_a_pubkey, None, asset_id, 100, 600, 0)
 
         node_a_full_after = next(c for c in node_a.list_channels() if c.channel_id == full_channel_id)

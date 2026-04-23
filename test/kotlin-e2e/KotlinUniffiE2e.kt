@@ -6,6 +6,7 @@ import org.utexo.rgblightningnode.InvoiceStatus
 import org.utexo.rgblightningnode.LnInvoiceRequest
 import org.utexo.rgblightningnode.Payment
 import org.utexo.rgblightningnode.PaymentHash
+import org.utexo.rgblightningnode.PaymentType
 import org.utexo.rgblightningnode.RgbRecipient
 import org.utexo.rgblightningnode.RlnException
 import org.utexo.rgblightningnode.SdkCloseChannelRequest
@@ -378,37 +379,55 @@ private fun waitForLnBalance(node: SdkNode, assetId: ContractId, expected: ULong
     error("offchain_outbound balance did not become expected=$expected actual=$lastBalance assetId=$assetId after ${timeoutSec}s")
 }
 
-private fun waitForPaymentStatus(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long): Payment {
+private fun waitForPaymentStatus(
+    node: SdkNode,
+    paymentHash: PaymentHash,
+    paymentType: PaymentType,
+    timeoutSec: Long,
+): Payment {
     val deadline = System.currentTimeMillis() + timeoutSec * 1000L
     var lastStatus: String = "not found"
     while (System.currentTimeMillis() < deadline) {
-        try {
-            val payment = node.getPayment(paymentHash)
+        val payment = node.listPayments().firstOrNull {
+            it.paymentHash == paymentHash && it.paymentType == paymentType
+        }
+        if (payment != null) {
             lastStatus = payment.status.name
             if (payment.status == HtlcStatus.SUCCEEDED) {
                 return payment
             }
-        } catch (_: RlnException.NotFound) {
-            lastStatus = "not found"
         }
         Thread.sleep(1000L)
     }
-    error("timeout waiting for payment success: paymentHash=$paymentHash last_status=$lastStatus after ${timeoutSec}s")
+    error(
+        "timeout waiting for payment success: paymentHash=$paymentHash paymentType=$paymentType " +
+            "last_status=$lastStatus after ${timeoutSec}s"
+    )
 }
 
-private fun waitForPaymentPresentInList(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long): Payment {
+private fun waitForPaymentPresentInList(
+    node: SdkNode,
+    paymentHash: PaymentHash,
+    paymentType: PaymentType,
+    timeoutSec: Long,
+): Payment {
     val deadline = System.currentTimeMillis() + timeoutSec * 1000L
     var lastCount = 0
     while (System.currentTimeMillis() < deadline) {
         val payments = node.listPayments()
         lastCount = payments.size
-        val payment = payments.firstOrNull { it.paymentHash == paymentHash }
+        val payment = payments.firstOrNull {
+            it.paymentHash == paymentHash && it.paymentType == paymentType
+        }
         if (payment != null) {
             return payment
         }
         Thread.sleep(1000L)
     }
-    error("payment not found in listPayments: paymentHash=$paymentHash list_size=$lastCount after ${timeoutSec}s")
+    error(
+        "payment not found in listPayments: paymentHash=$paymentHash paymentType=$paymentType " +
+            "list_size=$lastCount after ${timeoutSec}s"
+    )
 }
 
 private fun hexToBytes(value: String): ByteArray {
@@ -464,7 +483,12 @@ private fun keysend(
     check(response.status == HtlcStatus.PENDING || response.status == HtlcStatus.SUCCEEDED) {
         "unexpected keysend status: ${response.status}"
     }
-    waitForPaymentStatus(sender, response.paymentHash, PAYMENT_TIMEOUT_SEC)
+    waitForPaymentStatus(
+        sender,
+        response.paymentHash,
+        PaymentType.OUTBOUND,
+        PAYMENT_TIMEOUT_SEC,
+    )
     return response.paymentHash
 }
 
@@ -481,7 +505,12 @@ private fun keysendWithLnBalance(
     val paymentHash = keysend(sender, destPubkey, amtMsat, assetId, assetAmount)
     waitForLnBalance(sender, assetId, initialSenderBalance - assetAmount, BALANCE_TIMEOUT_SEC)
     waitForLnBalance(receiver, assetId, initialReceiverBalance + assetAmount, BALANCE_TIMEOUT_SEC)
-    waitForPaymentStatus(receiver, paymentHash, PAYMENT_TIMEOUT_SEC)
+    waitForPaymentStatus(
+        receiver,
+        paymentHash,
+        PaymentType.INBOUND_AUTO_CLAIM,
+        PAYMENT_TIMEOUT_SEC,
+    )
 }
 
 private fun closeChannel(node: SdkNode, channelId: String, peerPubkey: String, force: Boolean = false) {
@@ -651,16 +680,36 @@ private fun paymentScenario() {
         }
 
         val decoded = nodeA.decodeLnInvoice(invoice)
-        val senderPayment = waitForPaymentStatus(nodeA, decoded.paymentHash, PAYMENT_TIMEOUT_SEC)
-        val receiverPayment = waitForPaymentStatus(nodeB, decoded.paymentHash, PAYMENT_TIMEOUT_SEC)
+        val senderPayment = waitForPaymentStatus(
+            nodeA,
+            decoded.paymentHash,
+            PaymentType.OUTBOUND,
+            PAYMENT_TIMEOUT_SEC,
+        )
+        val receiverPayment = waitForPaymentStatus(
+            nodeB,
+            decoded.paymentHash,
+            PaymentType.INBOUND_AUTO_CLAIM,
+            PAYMENT_TIMEOUT_SEC,
+        )
         checkPreimageMatchesHash(senderPayment, decoded.paymentHash)
         checkPreimageMatchesHash(receiverPayment, decoded.paymentHash)
 
-        val listedSenderPayment = waitForPaymentPresentInList(nodeA, decoded.paymentHash, PAYMENT_TIMEOUT_SEC)
+        val listedSenderPayment = waitForPaymentPresentInList(
+            nodeA,
+            decoded.paymentHash,
+            PaymentType.OUTBOUND,
+            PAYMENT_TIMEOUT_SEC,
+        )
         check(listedSenderPayment.paymentHash == decoded.paymentHash)
         checkPreimageMatchesHash(listedSenderPayment, decoded.paymentHash)
 
-        val listedReceiverPayment = waitForPaymentPresentInList(nodeB, decoded.paymentHash, PAYMENT_TIMEOUT_SEC)
+        val listedReceiverPayment = waitForPaymentPresentInList(
+            nodeB,
+            decoded.paymentHash,
+            PaymentType.INBOUND_AUTO_CLAIM,
+            PAYMENT_TIMEOUT_SEC,
+        )
         check(listedReceiverPayment.paymentHash == decoded.paymentHash)
         checkPreimageMatchesHash(listedReceiverPayment, decoded.paymentHash)
 
@@ -980,8 +1029,18 @@ private fun closeCoopVanillaScenario(name: String, portOffset: UInt, withAnchors
             )
         )
         val paymentHash = requireNotNull(sendPayment.paymentHash) { "vanilla payment hash missing" }
-        waitForPaymentStatus(nodeB, paymentHash, PAYMENT_TIMEOUT_SEC)
-        waitForPaymentPresentInList(nodeA, paymentHash, PAYMENT_TIMEOUT_SEC)
+        waitForPaymentStatus(
+            nodeB,
+            paymentHash,
+            PaymentType.OUTBOUND,
+            PAYMENT_TIMEOUT_SEC,
+        )
+        waitForPaymentPresentInList(
+            nodeA,
+            paymentHash,
+            PaymentType.INBOUND_AUTO_CLAIM,
+            PAYMENT_TIMEOUT_SEC,
+        )
         check(nodeA.listPayments().size == 3) { "node A should have 3 payments after invoice payment" }
         check(nodeB.listPayments().size == 3) { "node B should have 3 payments after invoice payment" }
 

@@ -14,6 +14,7 @@ import org.utexo.rgblightningnode.ContractId
 import org.utexo.rgblightningnode.HtlcStatus
 import org.utexo.rgblightningnode.LnInvoiceRequest
 import org.utexo.rgblightningnode.PaymentHash
+import org.utexo.rgblightningnode.PaymentType
 import org.utexo.rgblightningnode.RgbRecipient
 import org.utexo.rgblightningnode.RlnException
 import org.utexo.rgblightningnode.SdkCloseChannelRequest
@@ -246,22 +247,27 @@ class MultiOpenCloseTest {
         error("channel not usable after ${timeoutSec}s")
     }
 
-    private fun waitForPaymentStatus(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long) {
+    private fun waitForPaymentStatus(
+        node: SdkNode,
+        paymentHash: PaymentHash,
+        paymentType: PaymentType,
+        timeoutSec: Long,
+    ) {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
         var last = "not found"
         while (System.currentTimeMillis() < deadline) {
-            try {
-                val payment = node.getPayment(paymentHash)
+            val payment = node.listPayments().firstOrNull {
+                it.paymentHash == paymentHash && it.paymentType == paymentType
+            }
+            if (payment != null) {
                 last = payment.status.name
                 if (payment.status == HtlcStatus.SUCCEEDED) {
                     return
                 }
-            } catch (_: RlnException.NotFound) {
-                last = "not found"
             }
             Thread.sleep(1_000L)
         }
-        error("payment did not succeed after ${timeoutSec}s, last=$last")
+        error("payment did not succeed after ${timeoutSec}s, paymentType=$paymentType, last=$last")
     }
 
     private fun keysend(
@@ -283,7 +289,7 @@ class MultiOpenCloseTest {
             "unexpected keysend status: ${response.status}",
             response.status == HtlcStatus.PENDING || response.status == HtlcStatus.SUCCEEDED
         )
-        waitForPaymentStatus(sender, response.paymentHash, 60L)
+        waitForPaymentStatus(sender, response.paymentHash, PaymentType.OUTBOUND, 60L)
         return response.paymentHash
     }
 

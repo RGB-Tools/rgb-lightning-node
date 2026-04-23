@@ -1852,10 +1852,13 @@ components:
       type: object
       required:
         - payment_hash
+        - payment_type
       properties:
         payment_hash:
           type: string
           example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
+        payment_type:
+          $ref: '#/components/schemas/PaymentType'
     GetPaymentResponse:
       type: object
       required:

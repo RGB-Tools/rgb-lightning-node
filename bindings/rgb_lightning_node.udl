@@ -11,7 +11,7 @@ interface SdkNode {
     [Throws=RlnError]
     ChannelId get_channel_id(ChannelId temporary_channel_id);
     [Throws=RlnError]
-    Payment get_payment(PaymentHash payment_hash);
+    Payment get_payment(PaymentHash payment_hash, PaymentType payment_type);
     [Throws=RlnError]
     sequence<Payment> list_payments();
     [Throws=RlnError]

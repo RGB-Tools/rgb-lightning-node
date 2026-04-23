@@ -23,28 +23,6 @@ async fn close_channel_response(
         .unwrap()
 }
 
-async fn issue_asset_nia_with_amounts(node_address: SocketAddr, amounts: Vec<u64>) -> AssetNIA {
-    println!("issuing NIA asset on node {node_address}");
-    let payload = IssueAssetNIARequest {
-        amounts,
-        ticker: s!("USDT"),
-        name: s!("Tether"),
-        precision: 0,
-    };
-    let res = reqwest::Client::new()
-        .post(format!("http://{node_address}/issueassetnia"))
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
-    _check_response_is_ok(res)
-        .await
-        .json::<IssueAssetNIAResponse>()
-        .await
-        .unwrap()
-        .asset
-}
-
 async fn mine_blocks_and_wait_for_sync(
     host_node_address: SocketAddr,
     client_node_address: SocketAddr,
@@ -429,6 +407,7 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
         Some(client_a_push_msat),
         Some(funded_rgb_amount),
         Some(&issued_asset_id),
+        None,
     )
     .await;
     assert_eq!(
@@ -577,6 +556,7 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
         Some(0),
         Some(channel_b_funded_rgb_amount),
         Some(&issued_asset_id),
+        None,
     )
     .await;
     assert_eq!(
@@ -705,6 +685,7 @@ async fn virtual_close_rejects_client_side_without_host_session() {
         Some(0),
         None,
         None,
+        None,
     )
     .await;
 
@@ -761,6 +742,7 @@ async fn virtual_close_rejects_force_true_on_host() {
         Some(client_node_peer_port),
         Some(100_000),
         Some(0),
+        None,
         None,
         None,
     )
@@ -822,6 +804,7 @@ async fn virtual_close_succeeds_without_remote_value_and_is_idempotent() {
         Some(0),
         Some(200),
         Some(&issued_asset_id),
+        None,
     )
     .await;
 
@@ -897,6 +880,7 @@ async fn virtual_close_rejects_after_rgb_round_trip_when_remote_btc_remains() {
         Some(0),
         None,
         None,
+        None,
     )
     .await;
 
@@ -931,6 +915,7 @@ async fn virtual_close_rejects_after_rgb_round_trip_when_remote_btc_remains() {
         Some(0),
         Some(funded_rgb_amount),
         Some(&issued_asset_id),
+        None,
     )
     .await;
 
@@ -1061,6 +1046,7 @@ async fn virtual_close_succeeds_after_client_returns_full_btc_and_rgb() {
         Some(0),
         Some(funded_rgb_amount),
         Some(&issued_asset_id),
+        None,
     )
     .await;
 

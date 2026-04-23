@@ -14,6 +14,7 @@ import org.utexo.rgblightningnode.InvoiceStatus
 import org.utexo.rgblightningnode.LnInvoiceRequest
 import org.utexo.rgblightningnode.Payment
 import org.utexo.rgblightningnode.PaymentHash
+import org.utexo.rgblightningnode.PaymentType
 import org.utexo.rgblightningnode.RlnException
 import org.utexo.rgblightningnode.SdkCreateUtxosRequest
 import org.utexo.rgblightningnode.SdkInitRequest
@@ -238,6 +239,7 @@ class ConcurrentBtcPaymentsTest {
     private fun waitForObservedPayments(
         node: SdkNode,
         paymentHashes: List<PaymentHash>,
+        paymentType: PaymentType,
         timeoutSec: Long,
     ): List<Payment> {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
@@ -246,7 +248,9 @@ class ConcurrentBtcPaymentsTest {
             node.sync()
             val payments = node.listPayments()
             lastPayments = payments
-            val observed = payments.filter { it.paymentHash in paymentHashes }
+            val observed = payments.filter {
+                it.paymentHash in paymentHashes && it.paymentType == paymentType
+            }
             if (observed.size == paymentHashes.size && observed.none { it.status == HtlcStatus.FAILED }) {
                 return observed
             }
@@ -259,22 +263,27 @@ class ConcurrentBtcPaymentsTest {
         )
     }
 
-    private fun waitForPaymentStatus(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long): Payment {
+    private fun waitForPaymentStatus(
+        node: SdkNode,
+        paymentHash: PaymentHash,
+        paymentType: PaymentType,
+        timeoutSec: Long,
+    ): Payment {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
         var last = "not found"
         while (System.currentTimeMillis() < deadline) {
-            try {
-                val payment = node.getPayment(paymentHash)
+            val payment = node.listPayments().firstOrNull {
+                it.paymentHash == paymentHash && it.paymentType == paymentType
+            }
+            if (payment != null) {
                 last = payment.status.name
                 if (payment.status == HtlcStatus.SUCCEEDED) {
                     return payment
                 }
-            } catch (_: RlnException.NotFound) {
-                last = "not found"
             }
             Thread.sleep(1_000L)
         }
-        error("payment did not succeed after ${timeoutSec}s, last=$last")
+        error("payment did not succeed after ${timeoutSec}s, paymentType=$paymentType, last=$last")
     }
 
     private fun waitForInvoiceStatus(
@@ -536,6 +545,7 @@ class ConcurrentBtcPaymentsTest {
             val receiverPayments = waitForObservedPayments(
                 nodeA,
                 listOf(decoded1.paymentHash, decoded2.paymentHash),
+                PaymentType.INBOUND_AUTO_CLAIM,
                 30L,
             )
             dumpNodeState(nodeA, "node A after receiver observation")
@@ -543,8 +553,10 @@ class ConcurrentBtcPaymentsTest {
             assertTrue(receiverPayments.none { it.status == HtlcStatus.FAILED })
 
             log("waiting for sender-side payment success")
-            val payment1Sender = waitForPaymentStatus(nodeC, response1.paymentHash!!, 60L)
-            val payment2Sender = waitForPaymentStatus(nodeD, response2.paymentHash!!, 60L)
+            val payment1Sender =
+                waitForPaymentStatus(nodeC, response1.paymentHash!!, PaymentType.OUTBOUND, 60L)
+            val payment2Sender =
+                waitForPaymentStatus(nodeD, response2.paymentHash!!, PaymentType.OUTBOUND, 60L)
             dumpNodeState(nodeC, "node C after sender success")
             dumpNodeState(nodeD, "node D after sender success")
             assertEquals(HtlcStatus.SUCCEEDED, payment1Sender.status)

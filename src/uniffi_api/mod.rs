@@ -736,9 +736,22 @@ impl SdkNode {
         Ok(lightning::ln::types::ChannelId(arr))
     }
 
-    pub fn get_payment(&self, payment_hash: PaymentHash) -> Result<Payment, RlnError> {
+    pub fn get_payment(
+        &self,
+        payment_hash: PaymentHash,
+        payment_type: PaymentType,
+    ) -> Result<Payment, RlnError> {
         let state = self.handle.app_state();
-        let data = block_on_sdk(sdk::get_payment(state, payment_hash.0.as_hex().to_string()))?;
+        let sdk_payment_type = match payment_type {
+            PaymentType::Outbound => crate::sdk::PaymentType::Outbound,
+            PaymentType::InboundAutoClaim => crate::sdk::PaymentType::InboundAutoClaim,
+            PaymentType::InboundHodl => crate::sdk::PaymentType::InboundHodl,
+        };
+        let data = block_on_sdk(sdk::get_payment(
+            state,
+            payment_hash.0.as_hex().to_string(),
+            sdk_payment_type,
+        ))?;
         map_payment_data(data)
     }
 
@@ -1318,9 +1331,12 @@ pub fn sdk_get_channel_id(temporary_channel_id: ChannelId) -> Result<ChannelId, 
     SdkNode { handle }.get_channel_id(temporary_channel_id)
 }
 
-pub fn sdk_get_payment(payment_hash: PaymentHash) -> Result<Payment, RlnError> {
+pub fn sdk_get_payment(
+    payment_hash: PaymentHash,
+    payment_type: PaymentType,
+) -> Result<Payment, RlnError> {
     let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
-    SdkNode { handle }.get_payment(payment_hash)
+    SdkNode { handle }.get_payment(payment_hash, payment_type)
 }
 
 pub fn sdk_list_payments() -> Result<Vec<Payment>, RlnError> {

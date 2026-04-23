@@ -15,6 +15,7 @@ import org.utexo.rgblightningnode.HtlcStatus
 import org.utexo.rgblightningnode.LnInvoiceRequest
 import org.utexo.rgblightningnode.Payment
 import org.utexo.rgblightningnode.PaymentHash
+import org.utexo.rgblightningnode.PaymentType
 import org.utexo.rgblightningnode.RgbRecipient
 import org.utexo.rgblightningnode.RlnException
 import org.utexo.rgblightningnode.SdkCloseChannelRequest
@@ -276,37 +277,52 @@ class RestartTest {
         error("usable channel count did not become expected=$expectedCount actual=$lastCount")
     }
 
-    private fun waitForPaymentStatus(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long): Payment {
+    private fun waitForPaymentStatus(
+        node: SdkNode,
+        paymentHash: PaymentHash,
+        paymentType: PaymentType,
+        timeoutSec: Long,
+    ): Payment {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
         var last = "not found"
         while (System.currentTimeMillis() < deadline) {
-            try {
-                val payment = node.getPayment(paymentHash)
+            val payment = node.listPayments().firstOrNull {
+                it.paymentHash == paymentHash && it.paymentType == paymentType
+            }
+            if (payment != null) {
                 last = payment.status.name
                 if (payment.status == HtlcStatus.SUCCEEDED) {
                     return payment
                 }
-            } catch (_: RlnException.NotFound) {
-                last = "not found"
             }
             Thread.sleep(1_000L)
         }
-        error("payment did not succeed after ${timeoutSec}s, last=$last")
+        error("payment did not succeed after ${timeoutSec}s, paymentType=$paymentType, last=$last")
     }
 
-    private fun waitForSucceededPaymentInList(node: SdkNode, paymentHash: PaymentHash, timeoutSec: Long) {
+    private fun waitForSucceededPaymentInList(
+        node: SdkNode,
+        paymentHash: PaymentHash,
+        paymentType: PaymentType,
+        timeoutSec: Long,
+    ) {
         val deadline = System.currentTimeMillis() + timeoutSec * 1_000L
         var lastCount = 0
         while (System.currentTimeMillis() < deadline) {
             val payments = node.listPayments()
             lastCount = payments.size
-            val payment = payments.firstOrNull { it.paymentHash == paymentHash }
+            val payment = payments.firstOrNull {
+                it.paymentHash == paymentHash && it.paymentType == paymentType
+            }
             if (payment != null && payment.status == HtlcStatus.SUCCEEDED) {
                 return
             }
             Thread.sleep(1_000L)
         }
-        error("succeeded payment not found in listPayments: paymentHash=$paymentHash list_size=$lastCount")
+        error(
+            "succeeded payment not found in listPayments: paymentHash=$paymentHash paymentType=$paymentType " +
+                "list_size=$lastCount"
+        )
     }
 
     private fun closeChannel(node: SdkNode, channelId: String, peerPubkey: String, force: Boolean = false) {
@@ -499,7 +515,7 @@ class RestartTest {
                 )
             )
             val paymentHash = requireNotNull(sendPayment.paymentHash)
-            waitForPaymentStatus(requireNotNull(nodeA), paymentHash, 60L)
+            waitForPaymentStatus(requireNotNull(nodeA), paymentHash, PaymentType.OUTBOUND, 60L)
 
             safeShutdown(nodeA); safeShutdown(nodeB)
             pauseAfterShutdown()
@@ -513,8 +529,18 @@ class RestartTest {
             waitForChannelReady(requireNotNull(nodeA), channelId, 10L)
             waitForUsableChannels(requireNotNull(nodeA), 1, 60L)
             waitForUsableChannels(requireNotNull(nodeB), 1, 60L)
-            waitForSucceededPaymentInList(requireNotNull(nodeA), paymentHash, 30L)
-            waitForSucceededPaymentInList(requireNotNull(nodeB), paymentHash, 30L)
+            waitForSucceededPaymentInList(
+                requireNotNull(nodeA),
+                paymentHash,
+                PaymentType.OUTBOUND,
+                30L,
+            )
+            waitForSucceededPaymentInList(
+                requireNotNull(nodeB),
+                paymentHash,
+                PaymentType.INBOUND_AUTO_CLAIM,
+                30L,
+            )
 
             closeChannel(requireNotNull(nodeA), channelId, nodeBPubkey)
             waitForBalance(requireNotNull(nodeA), assetId, 900uL, 70L)

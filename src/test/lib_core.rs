@@ -8,7 +8,7 @@ use rgb_lightning_node::test_utils::{
 use rgb_lightning_node::{
     sdk_get_channel_id, sdk_get_payment, sdk_get_swap, sdk_ln_invoice, sdk_node_info, sdk_send_rgb,
     uniffi_is_initialized, Bolt11Invoice, ChannelId, ContractId, LnInvoiceRequest, PaymentHash,
-    PublicKey, RecipientId, RlnError, SendRgbRequest, TransportEndpoint, Txid,
+    PaymentType, PublicKey, RecipientId, RlnError, SendRgbRequest, TransportEndpoint, Txid,
     UniffiCustomTypeConverter,
 };
 
@@ -24,7 +24,10 @@ fn uniffi_entrypoints_require_initialized_state() {
         Err(RlnError::NotInitialized)
     ));
     assert!(matches!(
-        sdk_get_payment(lightning::types::payment::PaymentHash([0u8; 32])),
+        sdk_get_payment(
+            lightning::types::payment::PaymentHash([0u8; 32]),
+            PaymentType::Outbound
+        ),
         Err(RlnError::NotInitialized)
     ));
     assert!(matches!(
