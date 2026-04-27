@@ -3,7 +3,11 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::hex::{DisplayHex, FromHex};
 use serial_test::serial;
-use std::{fs, time::Duration};
+use std::{
+    fs,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 fn check_preimage_matches_hash(payment: &Payment, expected_payment_hash: &PaymentHash) {
     let payment_preimage = payment.preimage.as_ref().expect("payment preimage");
@@ -15,6 +19,41 @@ fn check_preimage_matches_hash(payment: &Payment, expected_payment_hash: &Paymen
         payment_preimage_hash,
         expected_payment_hash.0.to_lower_hex_string()
     );
+}
+
+fn wait_for_channel_state(
+    label: &str,
+    node: &SdkNode,
+    expected_local_balance_sat: u64,
+    expected_outbound_balance_msat: u64,
+    expected_inbound_balance_msat: u64,
+    expected_asset_local: Option<u64>,
+    expected_asset_remote: Option<u64>,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        node.sync()
+            .unwrap_or_else(|_| panic!("{label}: node sync while waiting for channel state"));
+        let channels = node
+            .list_channels()
+            .unwrap_or_else(|_| panic!("{label}: list_channels while waiting for channel state"));
+        assert_eq!(channels.len(), 1, "{label}: expected 1 channel");
+        let channel = &channels[0];
+        if channel.local_balance_sat == expected_local_balance_sat
+            && channel.outbound_balance_msat == expected_outbound_balance_msat
+            && channel.inbound_balance_msat == expected_inbound_balance_msat
+            && channel.asset_local_amount == expected_asset_local
+            && channel.asset_remote_amount == expected_asset_remote
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{label} did not reach expected channel state"
+        );
+        sleep(Duration::from_secs(1));
+    }
 }
 
 #[test]
@@ -111,7 +150,7 @@ fn success() {
         wait_for_channel_funding_tx(&node_a, &node_b, &asset_id, Duration::from_secs(120));
         mine(OPEN_CHANNEL_CONFIRM_BLOCKS);
         wait_for_usable_channel(&node_a, &node_b, &asset_id, Duration::from_secs(300));
-        assert_eq!(asset_balance_spendable(&node_a, &asset_id), 400);
+        wait_for_balance(&node_a, &asset_id, 400, Duration::from_secs(70));
 
         let channels_1_before = node_a.list_channels().expect("node A list_channels before");
         let channels_2_before = node_b.list_channels().expect("node B list_channels before");
@@ -292,12 +331,32 @@ fn success() {
         assert_eq!(payment.asset_amount, Some(asset_amount));
         check_preimage_matches_hash(&payment, &decoded.payment_hash);
 
+        wait_for_channel_state(
+            "node_a after payments",
+            &node_a,
+            chan_1_before.local_balance_sat,
+            chan_1_before.outbound_balance_msat,
+            chan_1_before.inbound_balance_msat,
+            Some(550),
+            Some(50),
+            Duration::from_secs(30),
+        );
+        wait_for_channel_state(
+            "node_b after payments",
+            &node_b,
+            chan_2_before.local_balance_sat,
+            chan_2_before.outbound_balance_msat,
+            chan_2_before.inbound_balance_msat,
+            Some(50),
+            Some(550),
+            Duration::from_secs(30),
+        );
         let channels_1 = node_a
             .list_channels()
-            .expect("node A list_channels after payments");
+            .expect("node A list_channels after channel state convergence");
         let channels_2 = node_b
             .list_channels()
-            .expect("node B list_channels after payments");
+            .expect("node B list_channels after channel state convergence");
         assert_eq!(channels_1.len(), 1);
         assert_eq!(channels_2.len(), 1);
         let chan_1 = &channels_1[0];

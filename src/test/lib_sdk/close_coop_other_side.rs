@@ -85,7 +85,7 @@ fn close_coop_other_side() {
         wait_for_channel_funding_tx(&node_a, &node_b, &asset_id, Duration::from_secs(120));
         mine(OPEN_CHANNEL_CONFIRM_BLOCKS);
         wait_for_usable_channel(&node_a, &node_b, &asset_id, Duration::from_secs(300));
-        assert_eq!(asset_balance_spendable(&node_a, &asset_id), 1400);
+        wait_for_balance(&node_a, &asset_id, 1400, Duration::from_secs(70));
 
         let channel_id = node_a
             .get_channel_id(open_channel.temporary_channel_id)
