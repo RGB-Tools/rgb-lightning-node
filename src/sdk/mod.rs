@@ -2,7 +2,7 @@
 // If route-level business logic changes, keep SDK equivalents in sync.
 
 use crate::core_types::{FEE_RATE, MIN_CHANNEL_CONFIRMATIONS};
-use crate::disk::{self, CHANNEL_PEER_DATA};
+use crate::disk;
 use crate::error::APIError;
 use crate::ldk::{start_ldk, InvoiceType, PaymentInfo, VirtualChannelSessionStatus};
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional};
@@ -10,8 +10,8 @@ use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     connect_peer_if_necessary, encrypt_and_save_mnemonic, get_current_timestamp,
-    get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str, hex_str_to_vec,
-    parse_peer_info, validate_and_parse_description_hash, validate_and_parse_payment_hash,
+    get_max_local_rgb_amount, get_route, hex_str, hex_str_to_vec, parse_peer_info,
+    validate_and_parse_description_hash, validate_and_parse_payment_hash,
     validate_and_parse_payment_preimage, AppState, UserOnionMessageContents,
 };
 use amplify::{map, s};
@@ -28,11 +28,7 @@ use lightning::ln::channelmanager::{
 };
 use lightning::ln::types::ChannelId;
 use lightning::offers::offer::{self, Offer};
-use lightning::rgb_utils::{
-    get_rgb_channel_info_path, get_rgb_payment_info_path, parse_rgb_channel_info,
-    parse_rgb_payment_info, write_rgb_channel_info, write_rgb_payment_info_file, RgbInfo,
-    STATIC_BLINDING,
-};
+use lightning::rgb_utils::{write_rgb_payment_info_file, RgbInfo, RgbKvStoreExt, STATIC_BLINDING};
 use lightning::routing::gossip::NodeId;
 use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{
@@ -45,6 +41,7 @@ use lightning::util::config::{
     ChannelConfig, ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig,
 };
 use lightning::util::errors::APIError as LDKAPIError;
+use lightning::util::persist::KVStoreSync;
 use lightning::util::IS_SWAP_SCID;
 use lightning::{
     onion_message::messenger::Destination, onion_message::messenger::MessageSendInstructions,
@@ -1224,13 +1221,11 @@ pub(crate) async fn list_channels(state: Arc<AppState>) -> Result<Vec<ChannelDat
 
         channel.short_channel_id = chan_info.short_channel_id;
 
-        let info_file_path = get_rgb_channel_info_path(
-            &chan_info.channel_id.0.as_hex().to_string(),
-            &state.static_state.ldk_data_dir,
-            false,
-        );
-        if info_file_path.exists() {
-            let rgb_info = parse_rgb_channel_info(&info_file_path);
+        let channel_id_str = chan_info.channel_id.0.as_hex().to_string();
+        if let Ok(rgb_info) = unlocked_state
+            .kv_store
+            .read_rgb_channel_info(&channel_id_str, false)
+        {
             channel.asset_id = Some(rgb_info.contract_id.to_string());
             channel.asset_local_amount = Some(rgb_info.local_rgb_amount);
             channel.asset_remote_amount = Some(rgb_info.remote_rgb_amount);
@@ -1270,15 +1265,14 @@ pub(crate) async fn asset_balance(
     let mut offchain_outbound = 0;
     let mut offchain_inbound = 0;
     for chan_info in unlocked_state.channel_manager.list_channels() {
-        let info_file_path = get_rgb_channel_info_path(
-            &chan_info.channel_id.0.as_hex().to_string(),
-            &state.static_state.ldk_data_dir,
-            false,
-        );
-        if !info_file_path.exists() {
-            continue;
-        }
-        let rgb_info = parse_rgb_channel_info(&info_file_path);
+        let channel_id_str = chan_info.channel_id.0.as_hex().to_string();
+        let rgb_info = match unlocked_state
+            .kv_store
+            .read_rgb_channel_info(&channel_id_str, false)
+        {
+            Ok(info) => info,
+            Err(_) => continue,
+        };
         if rgb_info.contract_id == contract_id {
             offchain_outbound += rgb_info.local_rgb_amount;
             offchain_inbound += rgb_info.remote_rgb_amount;
@@ -1354,15 +1348,14 @@ pub(crate) async fn list_assets(
 
     let mut offchain_balances = HashMap::new();
     for chan_info in unlocked_state.channel_manager.list_channels() {
-        let info_file_path = get_rgb_channel_info_path(
-            &chan_info.channel_id.0.as_hex().to_string(),
-            &state.static_state.ldk_data_dir,
-            false,
-        );
-        if !info_file_path.exists() {
-            continue;
-        }
-        let rgb_info = parse_rgb_channel_info(&info_file_path);
+        let channel_id_str = chan_info.channel_id.0.as_hex().to_string();
+        let rgb_info = match unlocked_state
+            .kv_store
+            .read_rgb_channel_info(&channel_id_str, false)
+        {
+            Ok(info) => info,
+            Err(_) => continue,
+        };
         offchain_balances
             .entry(rgb_info.contract_id.to_string())
             .and_modify(|(offchain_outbound, offchain_inbound)| {
@@ -1518,8 +1511,7 @@ pub(crate) async fn init(
     let _unlocked_state = check_locked(&state).await?;
 
     check_password_strength(password.clone())?;
-    let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
-    check_already_initialized(&mnemonic_path)?;
+    check_already_initialized(&state.static_state.database)?;
 
     let mnemonic = match mnemonic {
         Some(mnemonic) => Mnemonic::from_str(&mnemonic)
@@ -1528,7 +1520,7 @@ pub(crate) async fn init(
         None => generate_keys(state.static_state.network).mnemonic,
     };
 
-    encrypt_and_save_mnemonic(password, mnemonic.clone(), &mnemonic_path)?;
+    encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.static_state.database)?;
     Ok(InitData { mnemonic })
 }
 
@@ -1547,14 +1539,13 @@ pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Resu
         }
     }
 
-    let mnemonic =
-        match check_password_validity(&request.password, &state.static_state.storage_dir_path) {
-            Ok(mnemonic) => mnemonic,
-            Err(e) => {
-                update_changing_state(&state, false);
-                return Err(e);
-            }
-        };
+    let mnemonic = match check_password_validity(&request.password, &state.static_state.database) {
+        Ok(mnemonic) => mnemonic,
+        Err(e) => {
+            update_changing_state(&state, false);
+            return Err(e);
+        }
+    };
 
     tracing::debug!("Starting LDK...");
     let unlock_request = crate::core_types::UnlockRequest {
@@ -1596,11 +1587,9 @@ pub(crate) async fn connect_peer(
     if let Some(peer_addr) = peer_addr {
         connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
             .await?;
-        disk::persist_channel_peer(
-            &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
-            &peer_pubkey,
-            &peer_addr,
-        )?;
+        state
+            .get_db()
+            .persist_channel_peer(&peer_pubkey, &peer_addr)?;
     } else {
         return Err(APIError::InvalidPeerInfo(s!(
             "incorrectly formatted peer info. Should be formatted as: `pubkey@host:port`"
@@ -1628,10 +1617,7 @@ pub(crate) async fn disconnect_peer(
         }
     }
 
-    disk::delete_channel_peer(
-        &state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA),
-        request.peer_pubkey,
-    )?;
+    state.get_db().delete_channel_peer(&request.peer_pubkey)?;
 
     if unlocked_state
         .peer_manager
@@ -1750,7 +1736,7 @@ pub(crate) async fn close_channel(
             ));
         }
         unlocked_state
-            .virtual_channel_ensure_no_client_value(&chan_details, &state.static_state.ldk_data_dir)
+            .virtual_channel_ensure_no_client_value(&chan_details)
             .map_err(APIError::CannotCloseChannel)?;
 
         unlocked_state.virtual_channel_session_update_status(
@@ -2031,12 +2017,12 @@ pub(crate) async fn keysend(
     )?;
     if let Some((contract_id, rgb_amount)) = rgb_payment {
         write_rgb_payment_info_file(
-            &PathBuf::from(&state.static_state.ldk_data_dir),
             &payment_hash,
             contract_id,
             rgb_amount,
             false,
             false,
+            &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
         );
     }
 
@@ -2285,7 +2271,6 @@ pub(crate) async fn open_channel(
         None
     };
 
-    let peer_data_path = state.static_state.ldk_data_dir.join(CHANNEL_PEER_DATA);
     if peer_addr.is_none() {
         if let Some(peer) = unlocked_state.peer_manager.peer_by_node_id(&peer_pubkey) {
             if let Some(socket_address) = peer.socket_address {
@@ -2296,7 +2281,7 @@ pub(crate) async fn open_channel(
         }
     }
     if peer_addr.is_none() {
-        let peer_info = disk::read_channel_peer_data(&peer_data_path)?;
+        let peer_info = state.get_db().read_channel_peer_data()?;
         for (pubkey, addr) in peer_info {
             if pubkey == peer_pubkey {
                 peer_addr = Some(addr);
@@ -2307,7 +2292,9 @@ pub(crate) async fn open_channel(
     if let Some(peer_addr) = peer_addr {
         connect_peer_if_necessary(peer_pubkey, peer_addr, unlocked_state.peer_manager.clone())
             .await?;
-        disk::persist_channel_peer(&peer_data_path, &peer_pubkey, &peer_addr)?;
+        state
+            .get_db()
+            .persist_channel_peer(&peer_pubkey, &peer_addr)?;
     } else {
         return Err(APIError::InvalidPeerInfo(s!(
             "cannot find the address for the provided pubkey"
@@ -2454,22 +2441,12 @@ pub(crate) async fn open_channel(
             local_rgb_amount: *asset_amount - push_amount,
             remote_rgb_amount: push_amount,
         };
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(
-                &temporary_channel_id,
-                &state.static_state.ldk_data_dir,
-                true,
-            ),
-            &rgb_info,
-        );
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(
-                &temporary_channel_id,
-                &state.static_state.ldk_data_dir,
-                false,
-            ),
-            &rgb_info,
-        );
+        unlocked_state
+            .kv_store
+            .write_rgb_channel_info(&temporary_channel_id, &rgb_info, true);
+        unlocked_state
+            .kv_store
+            .write_rgb_channel_info(&temporary_channel_id, &rgb_info, false);
     }
 
     Ok(OpenChannelData {
@@ -2625,12 +2602,12 @@ pub(crate) async fn send_payment(
         let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());
         if let Some((contract_id, rgb_amount)) = rgb_payment {
             write_rgb_payment_info_file(
-                &PathBuf::from(&state.static_state.ldk_data_dir),
                 &payment_hash,
                 contract_id,
                 rgb_amount,
                 false,
                 false,
+                &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
             );
         }
 
@@ -2736,11 +2713,11 @@ pub(crate) async fn maker_execute(
         .filter(|details| {
             match get_rgb_channel_info_optional(
                 &details.channel_id,
-                &state.static_state.ldk_data_dir,
                 false,
+                unlocked_state.kv_store.as_ref(),
             ) {
                 _ if swap_info.is_from_btc() => true,
-                Some((rgb_info, _)) if Some(rgb_info.contract_id) == swap_info.from_asset => true,
+                Some(rgb_info) if Some(rgb_info.contract_id) == swap_info.from_asset => true,
                 _ => false,
             }
         })
@@ -2858,12 +2835,12 @@ pub(crate) async fn maker_execute(
 
     if swap_info.is_to_asset() {
         write_rgb_payment_info_file(
-            &state.static_state.ldk_data_dir,
             &swapstring.payment_hash,
             swap_info.to_asset.unwrap(),
             swap_info.qty_to,
             true,
             false,
+            &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
         );
     }
 
@@ -2931,8 +2908,8 @@ pub(crate) async fn maker_init(
     if let Some(to_asset) = to_asset {
         let max_balance = get_max_local_rgb_amount(
             to_asset,
-            &state.static_state.ldk_data_dir,
             unlocked_state.channel_manager.list_channels().iter(),
+            unlocked_state.kv_store.as_ref(),
         );
         if swap_info.qty_to > max_balance {
             return Err(APIError::InsufficientAssets);
@@ -2966,8 +2943,8 @@ pub(crate) async fn taker(state: Arc<AppState>, request: TakerRequestData) -> Re
     if let Some(from_asset) = swapstring.swap_info.from_asset {
         let max_balance = get_max_local_rgb_amount(
             from_asset,
-            &state.static_state.ldk_data_dir,
             unlocked_state.channel_manager.list_channels().iter(),
+            unlocked_state.kv_store.as_ref(),
         );
         if swapstring.swap_info.qty_from > max_balance {
             return Err(APIError::InsufficientAssets);
@@ -3225,15 +3202,12 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
     let mut payments = vec![];
 
     for (payment_hash, payment_info) in &inbound_payments {
-        let rgb_payment_info_path_inbound =
-            get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, true);
-
-        let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
-            let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
-            (Some(info.amount), Some(info.contract_id.to_string()))
-        } else {
-            (None, None)
-        };
+        let (asset_amount, asset_id) = unlocked_state
+            .kv_store
+            .read_rgb_payment_info(payment_hash, true)
+            .ok()
+            .map(|info| (Some(info.amount), Some(info.contract_id.to_string())))
+            .unwrap_or((None, None));
 
         payments.push(PaymentData {
             amt_msat: payment_info.amt_msat,
@@ -3252,15 +3226,12 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
     for (payment_id, payment_info) in &outbound_payments {
         let payment_hash = &PaymentHash(payment_id.0);
 
-        let rgb_payment_info_path_outbound =
-            get_rgb_payment_info_path(payment_hash, &state.static_state.ldk_data_dir, false);
-
-        let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
-            let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
-            (Some(info.amount), Some(info.contract_id.to_string()))
-        } else {
-            (None, None)
-        };
+        let (asset_amount, asset_id) = unlocked_state
+            .kv_store
+            .read_rgb_payment_info(payment_hash, false)
+            .ok()
+            .map(|info| (Some(info.amount), Some(info.contract_id.to_string())))
+            .unwrap_or((None, None));
 
         payments.push(PaymentData {
             amt_msat: payment_info.amt_msat,
@@ -3300,18 +3271,12 @@ pub(crate) async fn get_payment(
                 if payment_hash == &requested_ph
                     && payment_type_from_invoice(payment_info.invoice_type) == payment_type
                 {
-                    let rgb_payment_info_path_inbound = get_rgb_payment_info_path(
-                        payment_hash,
-                        &state.static_state.ldk_data_dir,
-                        true,
-                    );
-
-                    let (asset_amount, asset_id) = if rgb_payment_info_path_inbound.exists() {
-                        let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
-                        (Some(info.amount), Some(info.contract_id.to_string()))
-                    } else {
-                        (None, None)
-                    };
+                    let (asset_amount, asset_id) = unlocked_state
+                        .kv_store
+                        .read_rgb_payment_info(payment_hash, true)
+                        .ok()
+                        .map(|info| (Some(info.amount), Some(info.contract_id.to_string())))
+                        .unwrap_or((None, None));
 
                     return Ok(PaymentData {
                         amt_msat: payment_info.amt_msat,
@@ -3333,18 +3298,12 @@ pub(crate) async fn get_payment(
             for (payment_id, payment_info) in &outbound_payments {
                 let payment_hash = &PaymentHash(payment_id.0);
                 if payment_hash == &requested_ph {
-                    let rgb_payment_info_path_outbound = get_rgb_payment_info_path(
-                        payment_hash,
-                        &state.static_state.ldk_data_dir,
-                        false,
-                    );
-
-                    let (asset_amount, asset_id) = if rgb_payment_info_path_outbound.exists() {
-                        let info = parse_rgb_payment_info(&rgb_payment_info_path_outbound);
-                        (Some(info.amount), Some(info.contract_id.to_string()))
-                    } else {
-                        (None, None)
-                    };
+                    let (asset_amount, asset_id) = unlocked_state
+                        .kv_store
+                        .read_rgb_payment_info(payment_hash, false)
+                        .ok()
+                        .map(|info| (Some(info.amount), Some(info.contract_id.to_string())))
+                        .unwrap_or((None, None));
 
                     return Ok(PaymentData {
                         amt_msat: payment_info.amt_msat,

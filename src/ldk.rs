@@ -1,3 +1,4 @@
+use crate::kv_store::SeaOrmKvStore;
 use amplify::{map, s};
 use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::hashes::{sha256, Hash as BitcoinHash};
@@ -25,11 +26,9 @@ use lightning::onion_message::messenger::{
     DefaultMessageRouter, OnionMessenger as LdkOnionMessenger,
 };
 use lightning::rgb_utils::{
-    get_rgb_channel_info_path, get_rgb_channel_info_pending, get_rgb_payment_info_pending_path,
-    get_virtual_channel_marker_path, is_channel_rgb, parse_rgb_payment_info,
-    read_rgb_transfer_info, update_rgb_channel_amount, RgbInfo, BITCOIN_NETWORK_FNAME,
-    INDEXER_URL_FNAME, STATIC_BLINDING, WALLET_ACCOUNT_XPUB_COLORED_FNAME,
-    WALLET_ACCOUNT_XPUB_VANILLA_FNAME, WALLET_FINGERPRINT_FNAME, WALLET_MASTER_FINGERPRINT_FNAME,
+    get_rgb_channel_info_pending, is_channel_rgb, update_rgb_channel_amount, RgbKvStoreExt,
+    RgbPaymentInfo, RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS, RGB_PRIMARY_NS,
+    STATIC_BLINDING,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -42,12 +41,14 @@ use lightning::sign::{
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning::util::config::UserConfig;
 use lightning::util::hash_tables::hash_map::Entry;
-use lightning::util::hash_tables::HashMap as LdkHashMap;
+use lightning::util::hash_tables::{new_hash_map, HashMap as LdkHashMap};
 use lightning::util::persist::{
-    KVStoreSync, MonitorUpdatingPersister, OUTPUT_SWEEPER_PERSISTENCE_KEY,
-    OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+    KVStoreSync, KVStoreSyncWrapper, MonitorUpdatingPersister, CHANNEL_MANAGER_PERSISTENCE_KEY,
+    CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE, CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+    OUTPUT_SWEEPER_PERSISTENCE_KEY, OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
+    OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
 };
-use lightning::util::ser::{ReadableArgs, Writeable};
+use lightning::util::ser::{Readable, ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
 use lightning::{chain, impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
@@ -59,7 +60,6 @@ use lightning_block_sync::UnboundedCache;
 use lightning_dns_resolver::OMDomainResolver;
 use lightning_invoice::PaymentSecret;
 use lightning_net_tokio::SocketDescriptor;
-use lightning_persister::fs_store::FilesystemStore;
 use rand::RngCore;
 use rgb_lib::{
     bdk_wallet::keys::{bip39::Mnemonic, DerivableKey, ExtendedKey},
@@ -82,10 +82,9 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::BufReader;
 use std::net::ToSocketAddrs;
 use std::net::{SocketAddr, TcpListener};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -99,11 +98,24 @@ use crate::bitcoind::BitcoindClient;
 use crate::core_types::{
     HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS,
 };
-use crate::disk::{
-    self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
-    MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
-    VIRTUAL_CHANNEL_DRAFT_STORE_FNAME, VIRTUAL_CHANNEL_SESSION_STORE_FNAME,
-};
+use crate::database::RlnDatabase;
+use crate::disk::{self, FilesystemLogger};
+
+pub(crate) const INBOUND_PAYMENTS_KEY: &str = "inbound_payments";
+const OUTBOUND_PAYMENTS_KEY: &str = "outbound_payments";
+const CHANNEL_IDS_KEY: &str = "channel_ids";
+const MAKER_SWAPS_KEY: &str = "maker_swaps";
+const TAKER_SWAPS_KEY: &str = "taker_swaps";
+const OUTPUT_SPENDER_TXES_KEY: &str = "output_spender_txes";
+const PSBT_NAMESPACE: &str = "psbt";
+const CONFIG_INDEXER_URL: &str = "indexer_url";
+const CONFIG_BITCOIN_NETWORK: &str = "bitcoin_network";
+const CONFIG_WALLET_FINGERPRINT: &str = "wallet_fingerprint";
+const CONFIG_WALLET_ACCOUNT_XPUB_VANILLA: &str = "wallet_account_xpub_vanilla";
+const CONFIG_WALLET_ACCOUNT_XPUB_COLORED: &str = "wallet_account_xpub_colored";
+const CONFIG_WALLET_MASTER_FINGERPRINT: &str = "wallet_master_fingerprint";
+const VIRTUAL_CHANNEL_DRAFTS_KEY: &str = "virtual_channel_drafts";
+const VIRTUAL_CHANNEL_SESSIONS_KEY: &str = "virtual_channel_sessions";
 use crate::error::APIError;
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::swap::SwapData;
@@ -155,6 +167,42 @@ impl_writeable_tlv_based_enum!(InvoiceType,
     (0, AutoClaim) => {},
     (1, Hodl) => {},
 );
+
+/// Save config to database (source of truth) and sync to KVStore for rust-lightning.
+fn save_config(
+    database: &sea_orm::DatabaseConnection,
+    kv_store: &dyn KVStoreSync,
+    key: &str,
+    value: &str,
+) -> Result<(), APIError> {
+    let db = RlnDatabase::new(database.clone());
+    db.set_config(key, value)?;
+    kv_store.write_config(key, value);
+    Ok(())
+}
+
+/// Sync config from database to KVStore on startup.
+fn sync_config_to_kvstore(
+    database: &sea_orm::DatabaseConnection,
+    kv_store: &dyn KVStoreSync,
+) -> Result<(), APIError> {
+    let db = RlnDatabase::new(database.clone());
+
+    for key in [
+        CONFIG_INDEXER_URL,
+        CONFIG_BITCOIN_NETWORK,
+        CONFIG_WALLET_FINGERPRINT,
+        CONFIG_WALLET_ACCOUNT_XPUB_VANILLA,
+        CONFIG_WALLET_ACCOUNT_XPUB_COLORED,
+        CONFIG_WALLET_MASTER_FINGERPRINT,
+    ] {
+        if let Some(value) = db.get_config(key)? {
+            kv_store.write_config(key, &value);
+        }
+    }
+
+    Ok(())
+}
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -343,14 +391,14 @@ impl UnlockedAppState {
     }
 
     fn save_maker_swaps(&self, swaps: MutexGuard<SwapMap>) {
-        self.fs_store
-            .write("", "", MAKER_SWAPS_FNAME, swaps.encode())
+        self.kv_store
+            .write("", "", MAKER_SWAPS_KEY, swaps.encode())
             .unwrap();
     }
 
     fn save_taker_swaps(&self, swaps: MutexGuard<SwapMap>) {
-        self.fs_store
-            .write("", "", TAKER_SWAPS_FNAME, swaps.encode())
+        self.kv_store
+            .write("", "", TAKER_SWAPS_KEY, swaps.encode())
             .unwrap();
     }
 
@@ -498,14 +546,14 @@ impl UnlockedAppState {
     }
 
     pub(crate) fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
-        self.fs_store
-            .write("", "", INBOUND_PAYMENTS_FNAME, inbound.encode())
+        self.kv_store
+            .write("", "", INBOUND_PAYMENTS_KEY, inbound.encode())
             .unwrap();
     }
 
     fn save_outbound_payments(&self, outbound: MutexGuard<OutboundPaymentInfoStorage>) {
-        self.fs_store
-            .write("", "", OUTBOUND_PAYMENTS_FNAME, outbound.encode())
+        self.kv_store
+            .write("", "", OUTBOUND_PAYMENTS_KEY, outbound.encode())
             .unwrap();
     }
 
@@ -618,8 +666,8 @@ impl UnlockedAppState {
     }
 
     fn save_channel_ids_map(&self, channel_ids: MutexGuard<ChannelIdsMap>) {
-        self.fs_store
-            .write("", "", CHANNEL_IDS_FNAME, channel_ids.encode())
+        self.kv_store
+            .write("", "", CHANNEL_IDS_KEY, channel_ids.encode())
             .unwrap();
     }
 
@@ -705,40 +753,35 @@ impl UnlockedAppState {
     }
 
     fn virtual_channel_draft_store_save(&self, drafts: MutexGuard<VirtualChannelDraftStore>) {
-        self.fs_store
-            .write("", "", VIRTUAL_CHANNEL_DRAFT_STORE_FNAME, drafts.encode())
+        self.kv_store
+            .write("", "", VIRTUAL_CHANNEL_DRAFTS_KEY, drafts.encode())
             .unwrap();
     }
 
     pub(crate) fn virtual_channel_ensure_no_client_value(
         &self,
         chan_details: &ChannelDetails,
-        ldk_data_dir: &Path,
     ) -> Result<(), String> {
         if chan_details.has_inflight_htlcs {
             return Err("virtual cleanup is blocked while HTLCs are still in flight".to_string());
         }
         let channel_id_hex = chan_details.channel_id.0.as_hex().to_string();
-        let entries = fs::read_dir(ldk_data_dir)
-            .map_err(|_| "virtual cleanup could not inspect RGB temp artifacts".to_string())?;
-        for entry in entries {
-            let entry = entry
+        let kv = self.kv_store.as_ref();
+
+        for namespace in [RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS] {
+            let keys = kv
+                .list(RGB_PRIMARY_NS, namespace)
                 .map_err(|_| "virtual cleanup could not inspect RGB temp artifacts".to_string())?;
-            let path = entry.path();
-            let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-                continue;
-            };
-            if !matches!(extension, "inbound_pending" | "outbound_pending") {
-                continue;
-            }
-            let Some(file_stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            if file_stem.starts_with(&channel_id_hex) && file_stem.len() > channel_id_hex.len() {
-                return Err(
-                    "virtual cleanup is blocked while RGB payment temp artifacts remain"
-                        .to_string(),
-                );
+            for key in keys {
+                if key.starts_with(&channel_id_hex)
+                    && key.len() > channel_id_hex.len()
+                    && key.ends_with("_pending")
+                {
+                    return Err(
+                        "virtual cleanup is blocked while RGB payment temp artifacts remain"
+                            .to_string(),
+                    );
+                }
             }
         }
 
@@ -757,44 +800,20 @@ impl UnlockedAppState {
             }
         }
 
-        let final_rgb_state_path = get_rgb_channel_info_path(
-            &chan_details.channel_id.0.as_hex().to_string(),
-            ldk_data_dir,
-            false,
-        );
-        let pending_rgb_state_path = get_rgb_channel_info_path(
-            &chan_details.channel_id.0.as_hex().to_string(),
-            ldk_data_dir,
-            true,
-        );
-        let is_rgb_backed = final_rgb_state_path.exists() || pending_rgb_state_path.exists();
+        let final_rgb_state = kv.read_rgb_channel_info(&channel_id_hex, false);
+        let pending_rgb_state = kv.read_rgb_channel_info(&channel_id_hex, true);
+
+        let is_rgb_backed = final_rgb_state.is_ok() || pending_rgb_state.is_ok();
         if !is_rgb_backed {
             return Ok(());
         }
 
-        if !final_rgb_state_path.exists() || !pending_rgb_state_path.exists() {
-            return Err(
-                "virtual cleanup requires both final and pending RGB channel state".to_string(),
-            );
-        }
-
-        let read_rgb_info_strict = |path: &Path| -> Result<RgbInfo, String> {
-            let serialized = fs::read_to_string(path).map_err(|_| {
-                format!(
-                    "virtual cleanup requires readable RGB state at {}",
-                    path.display()
-                )
-            })?;
-            serde_json::from_str(&serialized).map_err(|_| {
-                format!(
-                    "virtual cleanup requires parseable RGB state at {}",
-                    path.display()
-                )
-            })
-        };
-
-        let final_rgb_state = read_rgb_info_strict(&final_rgb_state_path)?;
-        let pending_rgb_state = read_rgb_info_strict(&pending_rgb_state_path)?;
+        let final_rgb_state = final_rgb_state.map_err(|_| {
+            "virtual cleanup requires both final and pending RGB channel state".to_string()
+        })?;
+        let pending_rgb_state = pending_rgb_state.map_err(|_| {
+            "virtual cleanup requires both final and pending RGB channel state".to_string()
+        })?;
 
         if final_rgb_state.contract_id != pending_rgb_state.contract_id
             || final_rgb_state.schema != pending_rgb_state.schema
@@ -856,13 +875,8 @@ impl UnlockedAppState {
     }
 
     fn virtual_channel_session_store_save(&self, sessions: MutexGuard<VirtualChannelSessionStore>) {
-        self.fs_store
-            .write(
-                "",
-                "",
-                VIRTUAL_CHANNEL_SESSION_STORE_FNAME,
-                sessions.encode(),
-            )
+        self.kv_store
+            .write("", "", VIRTUAL_CHANNEL_SESSIONS_KEY, sessions.encode())
             .unwrap();
     }
 }
@@ -875,7 +889,7 @@ pub(crate) type ChainMonitor = chainmonitor::ChainMonitor<
     Arc<FilesystemLogger>,
     Arc<
         MonitorUpdatingPersister<
-            Arc<FilesystemStore>,
+            Arc<SeaOrmKvStore>,
             Arc<FilesystemLogger>,
             Arc<KeysManager>,
             Arc<KeysManager>,
@@ -944,7 +958,7 @@ pub(crate) struct RgbOutputSpender {
     static_state: Arc<StaticState>,
     rgb_wallet_wrapper: Arc<RgbLibWalletWrapper>,
     keys_manager: Arc<KeysManager>,
-    fs_store: Arc<FilesystemStore>,
+    kv_store: Arc<SeaOrmKvStore>,
     txes: Arc<Mutex<OutputSpenderTxes>>,
     proxy_endpoint: String,
 }
@@ -954,164 +968,142 @@ pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
     Arc<RgbLibWalletWrapper>,
     Arc<BitcoindClient>,
     Arc<dyn Filter + Send + Sync>,
-    Arc<FilesystemStore>,
+    KVStoreSyncWrapper<Arc<SeaOrmKvStore>>,
     Arc<FilesystemLogger>,
     Arc<RgbOutputSpender>,
 >;
-
-pub(crate) fn _clear_rgb_payment_pending_markers(ldk_data_dir: &Path, payment_hash: &PaymentHash) {
-    _clear_rgb_payment_raw_pending_markers(ldk_data_dir, payment_hash);
-    for attachment in _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash) {
-        let _ = fs::remove_file(attachment.path);
-    }
-}
-
-pub(crate) fn _clear_rgb_payment_raw_pending_markers(
-    ldk_data_dir: &Path,
-    payment_hash: &PaymentHash,
-) {
-    for inbound in [false, true] {
-        let _ = fs::remove_file(get_rgb_payment_info_pending_path(
-            payment_hash,
-            ldk_data_dir,
-            inbound,
-        ));
-    }
-}
-
-#[derive(Clone)]
-struct RgbChannelPaymentPendingAttachment {
-    channel_id: String,
-    path: PathBuf,
-}
-
-fn _collect_rgb_channel_payment_pending_attachments(
-    ldk_data_dir: &Path,
-    payment_hash: &PaymentHash,
-) -> Vec<RgbChannelPaymentPendingAttachment> {
-    let payment_hash_str = hex_str(&payment_hash.0);
-    let mut attachments = Vec::new();
-
-    let Ok(entries) = fs::read_dir(ldk_data_dir) else {
-        return Vec::new();
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-        if !matches!(extension, "inbound_pending" | "outbound_pending") {
-            continue;
-        }
-        let Some(file_stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        if file_stem == payment_hash_str || !file_stem.ends_with(&payment_hash_str) {
-            continue;
-        }
-        let channel_id = &file_stem[..file_stem.len() - payment_hash_str.len()];
-        if channel_id.len() != 64 {
-            continue;
-        }
-        attachments.push(RgbChannelPaymentPendingAttachment {
-            channel_id: channel_id.to_string(),
-            path,
-        });
-    }
-
-    attachments
-}
-
-fn _finalize_rgb_channel_payment(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
-    let mut applied_any = false;
-    let mut applied_attachment_paths = Vec::new();
-
-    for attachment in _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash) {
-        let rgb_payment_info = parse_rgb_payment_info(&attachment.path);
-        if rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
-            continue;
-        }
-
-        let (offered, received) = if receiver {
-            (0, rgb_payment_info.amount)
-        } else {
-            (rgb_payment_info.amount, 0)
-        };
-        if _safe_update_rgb_channel_amount(
-            &attachment.channel_id,
-            offered,
-            received,
-            ldk_data_dir,
-            false,
-        ) {
-            applied_any = true;
-            applied_attachment_paths.push(attachment.path);
-        }
-    }
-
-    if applied_any {
-        for attachment_path in applied_attachment_paths {
-            let _ = fs::remove_file(attachment_path);
-        }
-        if _collect_rgb_channel_payment_pending_attachments(ldk_data_dir, payment_hash).is_empty() {
-            _clear_rgb_payment_raw_pending_markers(ldk_data_dir, payment_hash);
-        }
-    }
-}
-
-fn _finalize_virtual_rgb_channel_info(
-    ldk_data_dir: &Path,
-    temporary_channel_id: &ChannelId,
-    channel_id: &ChannelId,
-) {
-    let tmp_id = temporary_channel_id.to_string();
-    let final_id = channel_id.to_string();
-    for pending in [false, true] {
-        let src = if pending {
-            ldk_data_dir.join(format!("{tmp_id}.pending"))
-        } else {
-            ldk_data_dir.join(&tmp_id)
-        };
-        if !src.exists() {
-            continue;
-        }
-        let dst = if pending {
-            ldk_data_dir.join(format!("{final_id}.pending"))
-        } else {
-            ldk_data_dir.join(&final_id)
-        };
-        if !dst.exists() {
-            fs::copy(&src, &dst).expect("able to persist virtual RGB channel info");
-        }
-        let _ = fs::remove_file(src);
-    }
-}
 
 fn _safe_update_rgb_channel_amount(
     channel_id: &str,
     rgb_offered_htlc: u64,
     rgb_received_htlc: u64,
-    ldk_data_dir: &Path,
-    pending: bool,
-) -> bool {
-    let info_file_path = get_rgb_channel_info_path(channel_id, ldk_data_dir, pending);
-    if !info_file_path.exists() {
-        tracing::warn!(
-            "Skipping RGB channel balance update for channel {} (pending={}) because channel RGB info file is missing",
-            channel_id,
-            pending
-        );
-        return false;
+    kv_store: &dyn KVStoreSync,
+) -> io::Result<bool> {
+    match kv_store.read_rgb_channel_info(channel_id, false) {
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            tracing::warn!(
+                "Skipping RGB channel balance update for channel {} because channel RGB info is missing",
+                channel_id
+            );
+            return Ok(false);
+        }
+        Err(e) => return Err(e),
     }
     update_rgb_channel_amount(
         channel_id,
         rgb_offered_htlc,
         rgb_received_htlc,
-        ldk_data_dir,
-        pending,
+        false,
+        kv_store,
     );
-    true
+    Ok(true)
+}
+
+fn _finalize_rgb_channel_payment(
+    payment_hash: &PaymentHash,
+    receiver: bool,
+    kv_store: &Arc<dyn KVStoreSync + Send + Sync>,
+) -> io::Result<()> {
+    let payment_hash_str = hex_str(&payment_hash.0);
+    let pending_suffix = format!("{payment_hash_str}_pending");
+    let mut applied_any = false;
+
+    for inbound in [true, false] {
+        let namespace = if inbound {
+            RGB_PAYMENT_INFO_INBOUND_NS
+        } else {
+            RGB_PAYMENT_INFO_OUTBOUND_NS
+        };
+
+        let keys = kv_store.list(RGB_PRIMARY_NS, namespace)?;
+
+        let mut applied_keys = Vec::new();
+
+        for key in &keys {
+            if !key.ends_with(&pending_suffix) || key.len() <= pending_suffix.len() {
+                continue;
+            }
+            let channel_id_str = &key[..key.len() - pending_suffix.len()];
+            if channel_id_str.len() != 64 {
+                continue;
+            }
+
+            let data = match kv_store.read(RGB_PRIMARY_NS, namespace, key) {
+                Ok(data) => data,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e),
+            };
+
+            let rgb_payment_info: RgbPaymentInfo = match bincode::deserialize(&data) {
+                Ok(info) => info,
+                Err(e) => {
+                    tracing::warn!("failed to parse payment info for key {key}: {e}");
+                    continue;
+                }
+            };
+
+            if rgb_payment_info.swap_payment && receiver != rgb_payment_info.inbound {
+                continue;
+            }
+
+            let (offered, received) = if receiver {
+                (0, rgb_payment_info.amount)
+            } else {
+                (rgb_payment_info.amount, 0)
+            };
+            if _safe_update_rgb_channel_amount(
+                channel_id_str,
+                offered,
+                received,
+                kv_store.as_ref(),
+            )? {
+                applied_keys.push(key.clone());
+                applied_any = true;
+            }
+        }
+
+        for key in &applied_keys {
+            let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, key, false);
+        }
+    }
+
+    if applied_any {
+        let raw_pending_key = format!("{payment_hash_str}_pending");
+        for namespace in [RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS] {
+            let keys = kv_store.list(RGB_PRIMARY_NS, namespace)?;
+            let remaining = keys
+                .iter()
+                .any(|k| k.ends_with(&pending_suffix) && k.len() > pending_suffix.len());
+            if !remaining {
+                let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &raw_pending_key, false);
+            }
+        }
+    } else {
+        tracing::warn!("no matching payment info found for payment_hash={payment_hash_str}");
+    }
+
+    Ok(())
+}
+
+fn _finalize_virtual_rgb_channel_info(
+    temporary_channel_id: &ChannelId,
+    channel_id: &ChannelId,
+    kv_store: &dyn KVStoreSync,
+) {
+    let tmp_id = temporary_channel_id.to_string();
+    let final_id = channel_id.to_string();
+    for pending in [false, true] {
+        match kv_store.read_rgb_channel_info(&tmp_id, pending) {
+            Ok(rgb_info) => {
+                if kv_store.read_rgb_channel_info(&final_id, pending).is_err() {
+                    kv_store.write_rgb_channel_info(&final_id, &rgb_info, pending);
+                }
+                let _ = kv_store.remove_rgb_channel_info(&tmp_id, pending);
+            }
+            Err(_) => continue,
+        }
+    }
 }
 
 async fn handle_ldk_events(
@@ -1127,8 +1119,8 @@ async fn handle_ldk_events(
             output_script,
             ..
         } => {
-            let ldk_data_dir = PathBuf::from(&static_state.ldk_data_dir);
-            let is_colored = is_channel_rgb(&temporary_channel_id, &ldk_data_dir);
+            let is_colored =
+                is_channel_rgb(&temporary_channel_id, unlocked_state.kv_store.as_ref());
 
             let addr = WitnessProgram::from_scriptpubkey(
                 output_script.as_bytes(),
@@ -1156,11 +1148,12 @@ async fn handle_ldk_events(
                         hex_str(&counterparty_node_id.serialize()),
                         reason,
                     );
-                    let temporary_marker_path = get_virtual_channel_marker_path(
-                        &temporary_channel_id.to_string(),
-                        &static_state.ldk_data_dir,
+                    let _ = unlocked_state.kv_store.remove(
+                        "",
+                        "",
+                        &format!("virtual_channel_{}", temporary_channel_id),
+                        false,
                     );
-                    let _ = fs::remove_file(temporary_marker_path);
                     unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
                     *unlocked_state.rgb_send_lock.lock().unwrap() = false;
                 };
@@ -1184,8 +1177,10 @@ async fn handle_ldk_events(
                 let mut channel_id = ChannelId::v1_from_funding_outpoint(virtual_funding_txo);
 
                 if is_colored {
-                    let (rgb_info, _) =
-                        get_rgb_channel_info_pending(&temporary_channel_id, &ldk_data_dir);
+                    let rgb_info = get_rgb_channel_info_pending(
+                        &temporary_channel_id,
+                        unlocked_state.kv_store.as_ref(),
+                    );
                     let channel_rgb_amount = rgb_info.local_rgb_amount;
                     let asset_id = rgb_info.contract_id.to_string();
                     let assignment = match rgb_info.schema {
@@ -1343,15 +1338,13 @@ async fn handle_ldk_events(
                     ) {
                     Ok(()) => {
                         _finalize_virtual_rgb_channel_info(
-                            &static_state.ldk_data_dir,
                             &temporary_channel_id,
                             &channel_id,
+                            unlocked_state.kv_store.as_ref(),
                         );
-                        let marker_path = get_virtual_channel_marker_path(
-                            &channel_id.to_string(),
-                            &static_state.ldk_data_dir,
-                        );
-                        fs::write(marker_path, b"")
+                        unlocked_state
+                            .kv_store
+                            .write("", "", &format!("virtual_channel_{}", channel_id), vec![])
                             .expect("able to persist virtual channel marker");
                         unlocked_state.virtual_channel_session_add(VirtualChannelSession {
                             channel_id,
@@ -1376,11 +1369,12 @@ async fn handle_ldk_events(
                             temporary_channel_id,
                             e,
                         );
-                        let temporary_marker_path = get_virtual_channel_marker_path(
-                            &temporary_channel_id.to_string(),
-                            &static_state.ldk_data_dir,
+                        let _ = unlocked_state.kv_store.remove(
+                            "",
+                            "",
+                            &format!("virtual_channel_{}", temporary_channel_id),
+                            false,
                         );
-                        let _ = fs::remove_file(temporary_marker_path);
                         unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
                         *unlocked_state.rgb_send_lock.lock().unwrap() = false;
                     }
@@ -1389,9 +1383,9 @@ async fn handle_ldk_events(
             }
 
             let (unsigned_psbt, asset_id) = if is_colored {
-                let (rgb_info, _) = get_rgb_channel_info_pending(
+                let rgb_info = get_rgb_channel_info_pending(
                     &temporary_channel_id,
-                    &PathBuf::from(&static_state.ldk_data_dir),
+                    unlocked_state.kv_store.as_ref(),
                 );
 
                 let channel_rgb_amount = rgb_info.local_rgb_amount + rgb_info.remote_rgb_amount;
@@ -1464,10 +1458,16 @@ async fn handle_ldk_events(
             let funding_txid = funding_tx.compute_txid().to_string();
             tracing::info!("Funding TXID: {funding_txid}");
 
-            let psbt_path = static_state
-                .ldk_data_dir
-                .join(format!("psbt_{funding_txid}"));
-            fs::write(psbt_path, psbt.to_string()).unwrap();
+            // Store PSBT in database for later use when channel is funded
+            unlocked_state
+                .kv_store
+                .write(
+                    PSBT_NAMESPACE,
+                    "",
+                    &funding_txid,
+                    psbt.to_string().into_bytes(),
+                )
+                .unwrap();
 
             if let Some(asset_id) = asset_id {
                 let unlocked_state_copy = unlocked_state.clone();
@@ -1540,7 +1540,7 @@ async fn handle_ldk_events(
             claim_deadline,
             onion_fields: _,
             counterparty_skimmed_fee_msat: _,
-            receiving_channel_ids: _,
+            receiving_channel_ids,
             payment_id: _,
         } => {
             tracing::info!(
@@ -1548,6 +1548,33 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
+
+            // `color_commitment` writes the authoritative per-HTLC record under
+            // `chan_id || payment_hash` but never under the bare `<payment_hash>` key — that would
+            // poison sibling channels in atomic RGB swaps. As the final hop we know exactly which
+            // receiving channel delivered this HTLC, so project that scoped record to the bare
+            // inbound key that `get_payment`/`list_payments` consume.
+            let kv_store = &unlocked_state.kv_store;
+            let htlc_payment_hash = hex_str(&payment_hash.0);
+            for (chan_id, _) in &receiving_channel_ids {
+                let chan_id_hex = hex_str(&chan_id.0);
+                let htlc_proxy_id = format!("{chan_id_hex}{htlc_payment_hash}");
+                if let Ok(data) =
+                    kv_store.read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &htlc_proxy_id)
+                {
+                    if kv_store
+                        .write(
+                            RGB_PRIMARY_NS,
+                            RGB_PAYMENT_INFO_INBOUND_NS,
+                            &htlc_payment_hash,
+                            data,
+                        )
+                        .is_ok()
+                    {
+                        break;
+                    }
+                }
+            }
 
             let (payment_preimage, payment_secret, invoice) = match purpose {
                 PaymentPurpose::SpontaneousPayment(preimage) => {
@@ -1690,7 +1717,15 @@ async fn handle_ldk_events(
                 }
             }
 
-            _finalize_rgb_channel_payment(&static_state.ldk_data_dir, &payment_hash, true);
+            let kv_store_dyn: Arc<dyn KVStoreSync + Send + Sync> =
+                Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>;
+            if let Err(e) = _finalize_rgb_channel_payment(&payment_hash, true, &kv_store_dyn) {
+                tracing::error!(
+                    "RGB balance update failed for claimed payment {}: {e}",
+                    hex_str(&payment_hash.0)
+                );
+                return Err(ReplayEvent());
+            }
             if is_maker_swap {
                 unlocked_state.update_maker_swap_status(&payment_hash, SwapStatus::Succeeded);
             } else {
@@ -1713,7 +1748,15 @@ async fn handle_ldk_events(
             payment_id,
             ..
         } => {
-            _finalize_rgb_channel_payment(&static_state.ldk_data_dir, &payment_hash, false);
+            let kv_store_dyn: Arc<dyn KVStoreSync + Send + Sync> =
+                Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>;
+            if let Err(e) = _finalize_rgb_channel_payment(&payment_hash, false, &kv_store_dyn) {
+                tracing::error!(
+                    "RGB balance update failed for sent payment {}: {e}",
+                    hex_str(&payment_hash.0)
+                );
+                return Err(ReplayEvent());
+            }
 
             if unlocked_state.is_maker_swap(&payment_hash) {
                 tracing::info!(
@@ -1853,7 +1896,7 @@ async fn handle_ldk_events(
             ..
         } => {
             if let Some(hash) = payment_hash {
-                _clear_rgb_payment_pending_markers(&static_state.ldk_data_dir, &hash);
+                clear_rgb_payment_pending(&hash, unlocked_state.kv_store.as_ref());
                 tracing::error!(
                     "EVENT: Failed to send payment to payment ID {}, payment hash {}: {:?}",
                     payment_id,
@@ -1900,32 +1943,42 @@ async fn handle_ldk_events(
             inbound_amount_forwarded_rgb,
             payment_hash,
         } => {
+            clear_rgb_payment_pending(&payment_hash, unlocked_state.kv_store.as_ref());
             let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
             let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
             if let Some(outbound_amount_forwarded_rgb) = outbound_amount_forwarded_rgb {
-                _safe_update_rgb_channel_amount(
+                if let Err(e) = _safe_update_rgb_channel_amount(
                     &next_channel_id_str,
                     outbound_amount_forwarded_rgb,
                     0,
-                    &static_state.ldk_data_dir,
-                    false,
-                );
+                    unlocked_state.kv_store.as_ref(),
+                ) {
+                    tracing::error!(
+                        "RGB outbound balance update failed for forwarded payment on channel {}: {e}",
+                        next_channel_id_str
+                    );
+                    return Err(ReplayEvent());
+                }
             }
             if let Some(inbound_amount_forwarded_rgb) = inbound_amount_forwarded_rgb {
-                _safe_update_rgb_channel_amount(
+                if let Err(e) = _safe_update_rgb_channel_amount(
                     &prev_channel_id_str,
                     0,
                     inbound_amount_forwarded_rgb,
-                    &static_state.ldk_data_dir,
-                    false,
-                );
+                    unlocked_state.kv_store.as_ref(),
+                ) {
+                    tracing::error!(
+                        "RGB inbound balance update failed for forwarded payment on channel {}: {e}",
+                        prev_channel_id_str
+                    );
+                    return Err(ReplayEvent());
+                }
             }
 
             if unlocked_state.is_taker_swap(&payment_hash) {
                 unlocked_state.update_taker_swap_status(&payment_hash, SwapStatus::Succeeded);
             }
-            _clear_rgb_payment_pending_markers(&static_state.ldk_data_dir, &payment_hash);
 
             let read_only_network_graph = unlocked_state.network_graph.read_only();
             let nodes = read_only_network_graph.nodes();
@@ -2034,72 +2087,67 @@ async fn handle_ldk_events(
             }
 
             let funding_txid = funding_txo.txid.to_string();
-            let psbt_path = static_state
-                .ldk_data_dir
-                .join(format!("psbt_{funding_txid}"));
 
-            if psbt_path.exists() {
-                let psbt_str = fs::read_to_string(psbt_path).unwrap();
+            // Check if we have a stored PSBT (initiator case)
+            match unlocked_state
+                .kv_store
+                .read(PSBT_NAMESPACE, "", &funding_txid)
+            {
+                Ok(psbt_bytes) => {
+                    let psbt_str = String::from_utf8(psbt_bytes).unwrap();
 
-                let state_copy = unlocked_state.clone();
-                let psbt_str_copy = psbt_str.clone();
+                    let state_copy = unlocked_state.clone();
+                    let psbt_str_copy = psbt_str.clone();
 
-                let is_chan_colored =
-                    is_channel_rgb(&channel_id, &PathBuf::from(&static_state.ldk_data_dir));
-                tracing::info!("Initiator of the channel (colored: {})", is_chan_colored);
+                    let is_chan_colored =
+                        is_channel_rgb(&channel_id, unlocked_state.kv_store.as_ref());
+                    tracing::info!("Initiator of the channel (colored: {})", is_chan_colored);
 
-                let finalize_result = match tokio::task::spawn_blocking(move || {
-                    if is_chan_colored {
-                        state_copy.rgb_send_end(psbt_str_copy).map(|r| r.txid)
-                    } else {
-                        state_copy.rgb_send_btc_end(psbt_str_copy)
+                    let join_result = tokio::task::spawn_blocking(move || {
+                        if is_chan_colored {
+                            state_copy.rgb_send_end(psbt_str_copy).map(|r| r.txid)
+                        } else {
+                            state_copy.rgb_send_btc_end(psbt_str_copy)
+                        }
+                    })
+                    .await;
+
+                    *unlocked_state.rgb_send_lock.lock().unwrap() = false;
+
+                    let finalize_result = join_result.map_err(|join_err| {
+                        tracing::error!("Channel opening finalization task failed: {join_err:?}");
+                        ReplayEvent()
+                    })?;
+
+                    let _txid = finalize_result.map_err(|e| {
+                        tracing::error!("Error completing channel opening: {e:?}");
+                        ReplayEvent()
+                    })?;
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    // acceptor — read consignment from KVStore
+                    let consignment_data =
+                        match unlocked_state.kv_store.read_rgb_consignment(&funding_txid) {
+                            Ok(data) => data,
+                            Err(_) => {
+                                // vanilla channel — no consignment
+                                return Ok(());
+                            }
+                        };
+                    let consignment =
+                        RgbTransfer::load(&mut std::io::Cursor::new(consignment_data))
+                            .expect("successful consignment load");
+                    unlocked_state
+                        .kv_store
+                        .remove_rgb_consignment(&funding_txid);
+
+                    match unlocked_state.rgb_save_new_asset(consignment, funding_txid) {
+                        Ok(_) => {}
+                        Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
+                        Err(e) => panic!("Failed saving asset: {e}"),
                     }
-                })
-                .await
-                {
-                    Ok(res) => res,
-                    Err(e) => {
-                        *unlocked_state.rgb_send_lock.lock().unwrap() = false;
-                        tracing::error!(
-                            ?e,
-                            ?channel_id,
-                            funding_txid,
-                            is_chan_colored,
-                            proxy_endpoint = %unlocked_state.proxy_endpoint,
-                            "Channel opening finalization task failed"
-                        );
-                        return Err(ReplayEvent());
-                    }
-                };
-                *unlocked_state.rgb_send_lock.lock().unwrap() = false;
-                if let Err(e) = finalize_result {
-                    tracing::error!(
-                        ?e,
-                        ?channel_id,
-                        funding_txid,
-                        is_chan_colored,
-                        proxy_endpoint = %unlocked_state.proxy_endpoint,
-                        "Error completing channel opening"
-                    );
-                    return Err(ReplayEvent());
                 }
-            } else {
-                // acceptor
-                let consignment_path = static_state
-                    .ldk_data_dir
-                    .join(format!("consignment_{funding_txid}"));
-                if !consignment_path.exists() {
-                    // vanilla channel
-                    return Ok(());
-                }
-                let consignment =
-                    RgbTransfer::load_file(consignment_path).expect("successful consignment load");
-
-                match unlocked_state.rgb_save_new_asset(consignment, funding_txid) {
-                    Ok(_) => {}
-                    Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
-                    Err(e) => panic!("Failed saving asset: {e}"),
-                }
+                Err(e) => panic!("Failed to read PSBT from KVStore: {e}"),
             }
         }
         Event::ChannelReady {
@@ -2158,16 +2206,18 @@ async fn handle_ldk_events(
 
             if let Some(temporary_channel_id) = virtual_draft_temporary_channel_id {
                 unlocked_state.virtual_channel_draft_delete(&temporary_channel_id);
-                let temporary_marker_path = get_virtual_channel_marker_path(
-                    &temporary_channel_id.to_string(),
-                    &static_state.ldk_data_dir,
+                let _ = unlocked_state.kv_store.remove(
+                    "",
+                    "",
+                    &format!("virtual_channel_{}", temporary_channel_id),
+                    false,
                 );
-                let _ = fs::remove_file(temporary_marker_path);
-                let channel_marker_path = get_virtual_channel_marker_path(
-                    &channel_id.to_string(),
-                    &static_state.ldk_data_dir,
+                let _ = unlocked_state.kv_store.remove(
+                    "",
+                    "",
+                    &format!("virtual_channel_{}", channel_id),
+                    false,
                 );
-                let _ = fs::remove_file(channel_marker_path);
                 *unlocked_state.rgb_send_lock.lock().unwrap() = false;
 
                 tracing::warn!(
@@ -2186,11 +2236,12 @@ async fn handle_ldk_events(
             );
 
             unlocked_state.delete_channel_id(channel_id);
-            let channel_marker_path = get_virtual_channel_marker_path(
-                &channel_id.to_string(),
-                &static_state.ldk_data_dir,
+            let _ = unlocked_state.kv_store.remove(
+                "",
+                "",
+                &format!("virtual_channel_{}", channel_id),
+                false,
             );
-            let _ = fs::remove_file(channel_marker_path);
         }
         Event::HTLCIntercepted {
             is_swap,
@@ -2213,18 +2264,14 @@ async fn handle_ldk_events(
             }
 
             let get_rgb_info = |channel_id| {
-                get_rgb_channel_info_optional(
-                    channel_id,
-                    &PathBuf::from(&static_state.ldk_data_dir),
-                    true,
-                )
-                .map(|(rgb_info, _)| {
-                    (
-                        rgb_info.contract_id,
-                        rgb_info.local_rgb_amount,
-                        rgb_info.remote_rgb_amount,
-                    )
-                })
+                get_rgb_channel_info_optional(channel_id, true, unlocked_state.kv_store.as_ref())
+                    .map(|rgb_info| {
+                        (
+                            rgb_info.contract_id,
+                            rgb_info.local_rgb_amount,
+                            rgb_info.remote_rgb_amount,
+                        )
+                    })
             };
 
             let inbound_channel = unlocked_state
@@ -2400,14 +2447,18 @@ impl OutputSpender for RgbOutputSpender {
             let txid = outpoint.txid;
             let txid_str = txid.to_string();
 
-            let transfer_info_path = self
-                .static_state
-                .ldk_data_dir
-                .join(format!("{txid_str}_transfer_info"));
-            if !transfer_info_path.exists() {
+            let transfer_info_exists = self
+                .kv_store
+                .read(
+                    RGB_PRIMARY_NS,
+                    lightning::rgb_utils::RGB_TRANSFER_INFO_NS,
+                    &txid_str,
+                )
+                .is_ok();
+            if !transfer_info_exists {
                 continue;
-            };
-            let transfer_info = read_rgb_transfer_info(&transfer_info_path);
+            }
+            let transfer_info = self.kv_store.read_rgb_transfer_info(&txid_str);
             if transfer_info.rgb_amount == 0 {
                 continue;
             }
@@ -2553,7 +2604,7 @@ impl OutputSpender for RgbOutputSpender {
             let rgb_wallet_wrapper_copy = self.rgb_wallet_wrapper.clone();
             let closing_txid_copy = closing_txid.clone();
             let consignment_path_copy = consignment_path.clone();
-            let res = futures::executor::block_on(tokio::task::spawn_blocking(move || {
+            let res = crate::runtime::block_on(tokio::task::spawn_blocking(move || {
                 rgb_wallet_wrapper_copy.post_consignment(
                     &proxy_url,
                     recipient_id,
@@ -2570,8 +2621,8 @@ impl OutputSpender for RgbOutputSpender {
         }
 
         txes.insert(descriptors_hash, spending_tx.clone());
-        self.fs_store
-            .write("", "", OUTPUT_SPENDER_TXES, txes.encode())
+        self.kv_store
+            .write("", "", OUTPUT_SPENDER_TXES_KEY, txes.encode())
             .unwrap();
 
         Ok(spending_tx)
@@ -2584,6 +2635,16 @@ pub(crate) async fn start_ldk(
     unlock_request: UnlockRequest,
 ) -> Result<(LdkBackgroundServices, Arc<UnlockedAppState>), APIError> {
     let static_state = &app_state.static_state;
+
+    // Initialize Persistence using shared database connection
+    let kv_store = Arc::new(SeaOrmKvStore::from_connection(Arc::clone(
+        &static_state.database,
+    )));
+    let kv_store_dyn: Arc<dyn KVStoreSync + Send + Sync> =
+        Arc::clone(&kv_store) as Arc<dyn KVStoreSync + Send + Sync>;
+
+    // Sync config from database to KVStore
+    sync_config_to_kvstore(&static_state.database, kv_store.as_ref())?;
 
     let ldk_data_dir = static_state.ldk_data_dir.clone();
     let ldk_data_dir_path = PathBuf::from(&ldk_data_dir);
@@ -2661,13 +2722,18 @@ pub(crate) async fn start_ldk(
             BitcoinNetwork::Regtest => PROXY_ENDPOINT_LOCAL,
         }
     };
-    let storage_dir_path = app_state.static_state.storage_dir_path.clone();
-    fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
-    fs::write(
-        storage_dir_path.join(BITCOIN_NETWORK_FNAME),
-        bitcoin_network.to_string(),
-    )
-    .expect("able to write");
+    save_config(
+        &app_state.static_state.database,
+        kv_store.as_ref(),
+        CONFIG_INDEXER_URL,
+        indexer_url,
+    )?;
+    save_config(
+        &app_state.static_state.database,
+        kv_store.as_ref(),
+        CONFIG_BITCOIN_NETWORK,
+        &bitcoin_network.to_string(),
+    )?;
 
     // Initialize the FeeEstimator
     // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
@@ -2695,18 +2761,18 @@ pub(crate) async fn start_ldk(
     let cur = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
+
     let keys_manager = Arc::new(KeysManager::new(
         &ldk_seed,
         cur.as_secs(),
         cur.subsec_nanos(),
         true,
         ldk_data_dir_path.clone(),
+        kv_store_dyn.clone(),
     ));
 
-    // Initialize Persistence
-    let fs_store = Arc::new(FilesystemStore::new(ldk_data_dir.clone()));
     let persister = Arc::new(MonitorUpdatingPersister::new(
-        Arc::clone(&fs_store),
+        Arc::clone(&kv_store),
         Arc::clone(&logger),
         1000,
         Arc::clone(&keys_manager),
@@ -2775,52 +2841,64 @@ pub(crate) async fn start_ldk(
     user_config.manually_accept_inbound_channels = true;
     let mut restarting_node = true;
     let (channel_manager_blockhash, channel_manager) = {
-        if let Ok(f) = fs::File::open(ldk_data_dir.join("manager")) {
-            let mut channel_monitor_references = Vec::new();
-            for (_, channel_monitor) in channelmonitors.iter() {
-                channel_monitor_references.push(channel_monitor);
+        match kv_store.read(
+            CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_KEY,
+        ) {
+            Ok(bytes) => {
+                let mut channel_monitor_references = Vec::new();
+                for (_, channel_monitor) in channelmonitors.iter() {
+                    channel_monitor_references.push(channel_monitor);
+                }
+                let read_args = ChannelManagerReadArgs::new(
+                    keys_manager.clone(),
+                    keys_manager.clone(),
+                    keys_manager.clone(),
+                    fee_estimator.clone(),
+                    chain_monitor.clone(),
+                    broadcaster.clone(),
+                    router.clone(),
+                    Arc::clone(&message_router),
+                    logger.clone(),
+                    user_config,
+                    channel_monitor_references,
+                    ldk_data_dir_path.clone(),
+                    Arc::clone(&kv_store) as Arc<dyn KVStoreSync + Send + Sync>,
+                );
+                <(BlockHash, ChannelManager)>::read(&mut &bytes[..], read_args).unwrap()
             }
-            let read_args = ChannelManagerReadArgs::new(
-                keys_manager.clone(),
-                keys_manager.clone(),
-                keys_manager.clone(),
-                fee_estimator.clone(),
-                chain_monitor.clone(),
-                broadcaster.clone(),
-                router.clone(),
-                Arc::clone(&message_router),
-                logger.clone(),
-                user_config,
-                channel_monitor_references,
-                ldk_data_dir_path.clone(),
-            );
-            <(BlockHash, ChannelManager)>::read(&mut BufReader::new(f), read_args).unwrap()
-        } else {
-            // We're starting a fresh node.
-            restarting_node = false;
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                // We're starting a fresh node.
+                restarting_node = false;
 
-            let polled_best_block = polled_chain_tip.to_best_block();
-            let polled_best_block_hash = polled_best_block.block_hash;
-            let chain_params = ChainParameters {
-                network,
-                best_block: polled_best_block,
-            };
-            let fresh_channel_manager = channelmanager::ChannelManager::new(
-                fee_estimator.clone(),
-                chain_monitor.clone(),
-                broadcaster.clone(),
-                router.clone(),
-                Arc::clone(&message_router),
-                logger.clone(),
-                keys_manager.clone(),
-                keys_manager.clone(),
-                keys_manager.clone(),
-                user_config,
-                chain_params,
-                cur.as_secs() as u32,
-                ldk_data_dir_path.clone(),
-            );
-            (polled_best_block_hash, fresh_channel_manager)
+                let polled_best_block = polled_chain_tip.to_best_block();
+                let polled_best_block_hash = polled_best_block.block_hash;
+                let chain_params = ChainParameters {
+                    network,
+                    best_block: polled_best_block,
+                };
+                let fresh_channel_manager = channelmanager::ChannelManager::new(
+                    fee_estimator.clone(),
+                    chain_monitor.clone(),
+                    broadcaster.clone(),
+                    router.clone(),
+                    Arc::clone(&message_router),
+                    logger.clone(),
+                    keys_manager.clone(),
+                    keys_manager.clone(),
+                    keys_manager.clone(),
+                    user_config,
+                    chain_params,
+                    cur.as_secs() as u32,
+                    ldk_data_dir_path.clone(),
+                    Arc::clone(&kv_store) as Arc<dyn KVStoreSync + Send + Sync>,
+                );
+                (polled_best_block_hash, fresh_channel_manager)
+            }
+            Err(e) => {
+                panic!("Failed to read channel manager from KVStore: {e}");
+            }
         }
     };
 
@@ -2855,6 +2933,7 @@ pub(crate) async fn start_ldk(
                     AssetSchema::Uda,
                     AssetSchema::Ifa,
                 ],
+                reuse_addresses: false,
             },
             keys,
         )
@@ -2863,32 +2942,30 @@ pub(crate) async fn start_ldk(
     .await
     .unwrap();
     let rgb_online = rgb_wallet.go_online(false, indexer_url.to_string())?;
-    fs::write(
-        static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
-        account_xpub_colored.fingerprint().to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_COLORED_FNAME),
-        account_xpub_colored.to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_VANILLA_FNAME),
-        account_xpub_vanilla.to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_MASTER_FINGERPRINT_FNAME),
-        master_fingerprint.to_string(),
-    )
-    .expect("able to write");
+    save_config(
+        &static_state.database,
+        kv_store.as_ref(),
+        CONFIG_WALLET_FINGERPRINT,
+        &account_xpub_colored.fingerprint().to_string(),
+    )?;
+    save_config(
+        &static_state.database,
+        kv_store.as_ref(),
+        CONFIG_WALLET_ACCOUNT_XPUB_COLORED,
+        &account_xpub_colored.to_string(),
+    )?;
+    save_config(
+        &static_state.database,
+        kv_store.as_ref(),
+        CONFIG_WALLET_ACCOUNT_XPUB_VANILLA,
+        &account_xpub_vanilla.to_string(),
+    )?;
+    save_config(
+        &static_state.database,
+        kv_store.as_ref(),
+        CONFIG_WALLET_MASTER_FINGERPRINT,
+        &master_fingerprint.to_string(),
+    )?;
 
     let rgb_wallet_wrapper = Arc::new(RgbLibWalletWrapper::new(
         Arc::new(Mutex::new(rgb_wallet)),
@@ -2896,18 +2973,21 @@ pub(crate) async fn start_ldk(
     ));
 
     // Initialize the OutputSweeper.
-    let txes = Arc::new(Mutex::new(disk::read_output_spender_txes(
-        &ldk_data_dir.join(OUTPUT_SPENDER_TXES),
-    )));
+    let txes: OutputSpenderTxes = match kv_store.read("", "", OUTPUT_SPENDER_TXES_KEY) {
+        Ok(bytes) => OutputSpenderTxes::read(&mut &bytes[..]).unwrap_or_else(|_| new_hash_map()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => new_hash_map(),
+        Err(e) => panic!("Failed to read output spender txes from KVStore: {e}"),
+    };
+    let txes = Arc::new(Mutex::new(txes));
     let rgb_output_spender = Arc::new(RgbOutputSpender {
         static_state: static_state.clone(),
         rgb_wallet_wrapper: rgb_wallet_wrapper.clone(),
         keys_manager: keys_manager.clone(),
-        fs_store: fs_store.clone(),
+        kv_store: kv_store.clone(),
         txes,
         proxy_endpoint: proxy_endpoint.to_string(),
     });
-    let (sweeper_best_block, output_sweeper) = match fs_store.read(
+    let (sweeper_best_block, output_sweeper) = match kv_store.read(
         OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
         OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
         OUTPUT_SWEEPER_PERSISTENCE_KEY,
@@ -2920,7 +3000,7 @@ pub(crate) async fn start_ldk(
                 None,
                 rgb_output_spender,
                 rgb_wallet_wrapper.clone(),
-                fs_store.clone(),
+                KVStoreSyncWrapper(kv_store.clone()),
                 logger.clone(),
             );
             (channel_manager.current_best_block(), sweeper)
@@ -2932,7 +3012,7 @@ pub(crate) async fn start_ldk(
                 None,
                 rgb_output_spender.clone(),
                 rgb_wallet_wrapper.clone(),
-                fs_store.clone(),
+                KVStoreSyncWrapper(kv_store.clone()),
                 logger.clone(),
             );
             let mut reader = io::Cursor::new(&mut bytes);
@@ -3127,12 +3207,33 @@ pub(crate) async fn start_ldk(
         }
     });
 
-    let inbound_payments = Arc::new(Mutex::new(disk::read_inbound_payment_info(
-        &ldk_data_dir.join(INBOUND_PAYMENTS_FNAME),
-    )));
-    let outbound_payments = Arc::new(Mutex::new(disk::read_outbound_payment_info(
-        &ldk_data_dir.join(OUTBOUND_PAYMENTS_FNAME),
-    )));
+    // Read payment info from KVStore
+    let inbound_payments = Arc::new(Mutex::new({
+        match kv_store.read("", "", INBOUND_PAYMENTS_KEY) {
+            Ok(bytes) => InboundPaymentInfoStorage::read(&mut &bytes[..]).unwrap_or_else(|_| {
+                InboundPaymentInfoStorage {
+                    payments: new_hash_map(),
+                }
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => InboundPaymentInfoStorage {
+                payments: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read inbound payments from KVStore: {e}"),
+        }
+    }));
+    let outbound_payments = Arc::new(Mutex::new({
+        match kv_store.read("", "", OUTBOUND_PAYMENTS_KEY) {
+            Ok(bytes) => OutboundPaymentInfoStorage::read(&mut &bytes[..]).unwrap_or_else(|_| {
+                OutboundPaymentInfoStorage {
+                    payments: new_hash_map(),
+                }
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => OutboundPaymentInfoStorage {
+                payments: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read outbound payments from KVStore: {e}"),
+        }
+    }));
 
     let bump_tx_event_handler = Arc::new(BumpTransactionEventHandler::new(
         Arc::clone(&broadcaster),
@@ -3142,34 +3243,81 @@ pub(crate) async fn start_ldk(
     ));
 
     // Persist ChannelManager and NetworkGraph
-    let persister = Arc::new(FilesystemStore::new(ldk_data_dir_path.clone()));
+    let persister = KVStoreSyncWrapper(Arc::clone(&kv_store));
 
-    // Read swaps info
-    let maker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
-        &ldk_data_dir.join(MAKER_SWAPS_FNAME),
-    )));
-    let taker_swaps = Arc::new(Mutex::new(disk::read_swaps_info(
-        &ldk_data_dir.join(TAKER_SWAPS_FNAME),
-    )));
+    // Read swaps info from KVStore
+    let maker_swaps = Arc::new(Mutex::new({
+        match kv_store.read("", "", MAKER_SWAPS_KEY) {
+            Ok(bytes) => SwapMap::read(&mut &bytes[..]).unwrap_or_else(|_| SwapMap {
+                swaps: new_hash_map(),
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => SwapMap {
+                swaps: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read maker swaps from KVStore: {e}"),
+        }
+    }));
+    let taker_swaps = Arc::new(Mutex::new({
+        match kv_store.read("", "", TAKER_SWAPS_KEY) {
+            Ok(bytes) => SwapMap::read(&mut &bytes[..]).unwrap_or_else(|_| SwapMap {
+                swaps: new_hash_map(),
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => SwapMap {
+                swaps: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read taker swaps from KVStore: {e}"),
+        }
+    }));
 
-    // Read channel IDs info
-    let channel_ids_map = Arc::new(Mutex::new(disk::read_channel_ids_info(
-        &ldk_data_dir.join(CHANNEL_IDS_FNAME),
-    )));
-    let virtual_channel_draft_store = Arc::new(Mutex::new(disk::read_virtual_channel_draft_store(
-        &ldk_data_dir.join(VIRTUAL_CHANNEL_DRAFT_STORE_FNAME),
-    )));
-    let virtual_channel_session_store =
-        Arc::new(Mutex::new(disk::read_virtual_channel_session_store(
-            &ldk_data_dir.join(VIRTUAL_CHANNEL_SESSION_STORE_FNAME),
-        )));
+    // Read channel IDs info from KVStore
+    let channel_ids_map = Arc::new(Mutex::new({
+        match kv_store.read("", "", CHANNEL_IDS_KEY) {
+            Ok(bytes) => ChannelIdsMap::read(&mut &bytes[..]).unwrap_or_else(|_| ChannelIdsMap {
+                channel_ids: new_hash_map(),
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => ChannelIdsMap {
+                channel_ids: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read channel IDs from KVStore: {e}"),
+        }
+    }));
+
+    let virtual_channel_draft_store = Arc::new(Mutex::new({
+        match kv_store.read("", "", VIRTUAL_CHANNEL_DRAFTS_KEY) {
+            Ok(bytes) => VirtualChannelDraftStore::read(&mut &bytes[..]).unwrap_or_else(|_| {
+                VirtualChannelDraftStore {
+                    entries: new_hash_map(),
+                }
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => VirtualChannelDraftStore {
+                entries: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read virtual channel drafts from KVStore: {e}"),
+        }
+    }));
+
+    let virtual_channel_session_store = Arc::new(Mutex::new({
+        match kv_store.read("", "", VIRTUAL_CHANNEL_SESSIONS_KEY) {
+            Ok(bytes) => VirtualChannelSessionStore::read(&mut &bytes[..]).unwrap_or_else(|_| {
+                VirtualChannelSessionStore {
+                    entries: new_hash_map(),
+                }
+            }),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => VirtualChannelSessionStore {
+                entries: new_hash_map(),
+            },
+            Err(e) => panic!("Failed to read virtual channel sessions from KVStore: {e}"),
+        }
+    }));
+
     {
         let sessions = virtual_channel_session_store.lock().unwrap();
         for channel_id in sessions.entries.keys() {
-            let marker_path =
-                get_virtual_channel_marker_path(&channel_id.to_string(), &ldk_data_dir_path);
-            if !marker_path.exists() {
-                fs::write(marker_path, b"").expect("able to recover virtual channel marker");
+            let marker_key = format!("virtual_channel_{}", channel_id);
+            if kv_store.read("", "", &marker_key).is_err() {
+                kv_store
+                    .write("", "", &marker_key, vec![])
+                    .expect("able to recover virtual channel marker");
             }
         }
     }
@@ -3183,7 +3331,7 @@ pub(crate) async fn start_ldk(
         onion_messenger: onion_messenger.clone(),
         outbound_payments,
         peer_manager: Arc::clone(&peer_manager),
-        fs_store: Arc::clone(&fs_store),
+        kv_store: Arc::clone(&kv_store),
         bump_tx_event_handler,
         rgb_wallet_wrapper,
         maker_swaps,
@@ -3254,14 +3402,15 @@ pub(crate) async fn start_ldk(
     // Regularly reconnect to channel peers.
     let connect_cm = Arc::clone(&channel_manager);
     let connect_pm = Arc::clone(&peer_manager);
-    let peer_data_path = ldk_data_dir.join(CHANNEL_PEER_DATA);
+    let connect_db = Arc::clone(&static_state.database);
     let stop_connect = Arc::clone(&stop_processing);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            match disk::read_channel_peer_data(&peer_data_path) {
+            let db = RlnDatabase::new((*connect_db).clone());
+            match db.read_channel_peer_data() {
                 Ok(info) => {
                     for node_id in connect_cm
                         .list_channels()
@@ -3282,7 +3431,7 @@ pub(crate) async fn start_ldk(
                     }
                 }
                 Err(e) => tracing::error!(
-                    "ERROR: errored reading channel peer info from disk: {:?}",
+                    "ERROR: errored reading channel peer info from database: {:?}",
                     e
                 ),
             }
@@ -3413,306 +3562,230 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     tracing::info!("Stopped LDK");
 }
 
+pub(crate) fn clear_rgb_payment_pending(payment_hash: &PaymentHash, kv_store: &dyn KVStoreSync) {
+    let payment_hash_str = hex_str(&payment_hash.0);
+    let raw_pending_key = format!("{payment_hash_str}_pending");
+    let pending_suffix = format!("{payment_hash_str}_pending");
+    for namespace in [RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS] {
+        let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &raw_pending_key, false);
+        if let Ok(keys) = kv_store.list(RGB_PRIMARY_NS, namespace) {
+            for key in keys {
+                if key.ends_with(&pending_suffix) && key.len() > pending_suffix.len() {
+                    let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &key, false);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lightning::rgb_utils::{
-        get_rgb_channel_payment_info_path, get_rgb_payment_info_path,
-        get_rgb_payment_info_pending_path, parse_rgb_channel_info, write_rgb_channel_info,
-        RgbPaymentInfo,
-    };
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::kv_store::SeaOrmKvStore;
+    use lightning::rgb_utils::{RgbInfo, RGB_CHANNEL_INFO_NS};
+    use rgb_lib::AssetSchema;
+    use rln_migration::{Migrator, MigratorTrait};
+    use sea_orm::{ConnectOptions, Database};
+    use std::str::FromStr;
 
-    fn temp_test_dir(test_name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+    fn test_contract_id() -> rgb_lib::ContractId {
+        rgb_lib::ContractId::from_str("rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U")
             .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("rln-{test_name}-{unique}"));
-        fs::create_dir_all(&path).unwrap();
-        path
     }
 
-    fn test_contract_id() -> ContractId {
-        ContractId::from_str("rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U").unwrap()
+    fn build_kv_store() -> Arc<dyn KVStoreSync + Send + Sync> {
+        let db_path = std::env::temp_dir().join(format!("rln-ldk-unit-{}", uuid::Uuid::new_v4()));
+        let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+        let db =
+            crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+                .expect("db connection");
+        crate::runtime::block_on(Migrator::up(&db, None)).expect("run migrations");
+        Arc::new(SeaOrmKvStore::from_connection(Arc::new(db)))
     }
 
-    fn write_rgb_payment_info(path: &Path, rgb_payment_info: &RgbPaymentInfo) {
-        fs::write(path, serde_json::to_string(rgb_payment_info).unwrap()).unwrap();
+    fn seed_channel_info(
+        kv_store: &Arc<dyn KVStoreSync + Send + Sync>,
+        channel_id: &str,
+        local_rgb_amount: u64,
+        remote_rgb_amount: u64,
+    ) {
+        let info = RgbInfo {
+            contract_id: test_contract_id(),
+            schema: AssetSchema::Nia,
+            local_rgb_amount,
+            remote_rgb_amount,
+        };
+        let data = bincode::serialize(&info).expect("serialize rgb info");
+        kv_store
+            .write(RGB_PRIMARY_NS, RGB_CHANNEL_INFO_NS, channel_id, data)
+            .expect("write rgb channel info");
     }
 
-    #[test]
-    fn clear_rgb_payment_pending_markers_removes_only_pending_files() {
-        let ldk_data_dir = temp_test_dir("clear-rgb-pending-markers");
-        let channel_id = ChannelId([1; 32]);
-        let payment_hash = PaymentHash([2; 32]);
-
-        let raw_final_path = get_rgb_payment_info_path(&payment_hash, &ldk_data_dir, false);
-        let raw_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
-        let channel_final_path = get_rgb_channel_payment_info_path(
-            &channel_id,
-            &payment_hash,
-            &ldk_data_dir,
-            false,
-            false,
-        );
-        let channel_pending_path = get_rgb_channel_payment_info_path(
-            &channel_id,
-            &payment_hash,
-            &ldk_data_dir,
-            false,
-            true,
-        );
-
-        fs::write(&raw_final_path, b"raw-final").unwrap();
-        fs::write(&raw_pending_path, b"raw-pending").unwrap();
-        fs::write(&channel_final_path, b"channel-final").unwrap();
-        fs::write(&channel_pending_path, b"channel-pending").unwrap();
-
-        _clear_rgb_payment_pending_markers(&ldk_data_dir, &payment_hash);
-
-        assert!(raw_final_path.exists());
-        assert!(!raw_pending_path.exists());
-        assert!(channel_final_path.exists());
-        assert!(!channel_pending_path.exists());
-
-        fs::remove_dir_all(ldk_data_dir).unwrap();
+    fn seed_pending_payment_key(
+        kv_store: &Arc<dyn KVStoreSync + Send + Sync>,
+        namespace: &str,
+        channel_id: &str,
+        payment_hash: &PaymentHash,
+        swap_payment: bool,
+        inbound: bool,
+    ) -> String {
+        let info = RgbPaymentInfo {
+            contract_id: test_contract_id(),
+            amount: 25,
+            local_rgb_amount: 100,
+            remote_rgb_amount: 0,
+            swap_payment,
+            inbound,
+        };
+        let key = format!("{}{}_pending", channel_id, hex_str(&payment_hash.0));
+        let data = bincode::serialize(&info).expect("serialize rgb payment info");
+        kv_store
+            .write(RGB_PRIMARY_NS, namespace, &key, data)
+            .expect("write rgb payment info");
+        key
     }
 
-    #[test]
-    fn clear_rgb_payment_raw_pending_markers_removes_only_raw_pending_files() {
-        let ldk_data_dir = temp_test_dir("clear-rgb-raw-pending-markers");
-        let channel_id = ChannelId([7; 32]);
-        let payment_hash = PaymentHash([8; 32]);
-
-        let raw_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
-        let channel_pending_path = get_rgb_channel_payment_info_path(
-            &channel_id,
-            &payment_hash,
-            &ldk_data_dir,
-            false,
-            true,
-        );
-
-        fs::write(&raw_pending_path, b"raw-pending").unwrap();
-        fs::write(&channel_pending_path, b"channel-pending").unwrap();
-
-        _clear_rgb_payment_raw_pending_markers(&ldk_data_dir, &payment_hash);
-
-        assert!(!raw_pending_path.exists());
-        assert!(channel_pending_path.exists());
-
-        fs::remove_dir_all(ldk_data_dir).unwrap();
+    fn read_local_amount(kv_store: &Arc<dyn KVStoreSync + Send + Sync>, channel_id: &str) -> u64 {
+        let data = kv_store
+            .read(RGB_PRIMARY_NS, RGB_CHANNEL_INFO_NS, channel_id)
+            .expect("read rgb channel info");
+        let info: RgbInfo = bincode::deserialize(&data).expect("deserialize rgb info");
+        info.local_rgb_amount
     }
 
     #[test]
     fn finalize_rgb_channel_payment_clears_pending_markers_after_apply() {
-        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-applies");
-        let channel_id = ChannelId([3; 32]);
-        let payment_hash = PaymentHash([4; 32]);
-
-        let rgb_info = RgbInfo {
-            contract_id: test_contract_id(),
-            schema: AssetSchema::Nia,
-            local_rgb_amount: 100,
-            remote_rgb_amount: 0,
-        };
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(&hex_str(&channel_id.0), &ldk_data_dir, false),
-            &rgb_info,
-        );
-
-        let rgb_payment_info = RgbPaymentInfo {
-            contract_id: rgb_info.contract_id,
-            amount: 25,
-            local_rgb_amount: 100,
-            remote_rgb_amount: 0,
-            swap_payment: false,
-            inbound: false,
-        };
-        let raw_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
-        let channel_pending_path = get_rgb_channel_payment_info_path(
+        let kv_store = build_kv_store();
+        let channel_id = "a".repeat(64);
+        let payment_hash = PaymentHash([0xAB; 32]);
+        seed_channel_info(&kv_store, &channel_id, 0, 100);
+        let key = seed_pending_payment_key(
+            &kv_store,
+            RGB_PAYMENT_INFO_INBOUND_NS,
             &channel_id,
             &payment_hash,
-            &ldk_data_dir,
             false,
             true,
         );
-        write_rgb_payment_info(&raw_pending_path, &rgb_payment_info);
-        write_rgb_payment_info(&channel_pending_path, &rgb_payment_info);
 
-        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+        _finalize_rgb_channel_payment(&payment_hash, true, &kv_store).expect("scanner succeeds");
 
-        let updated_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
-            &hex_str(&channel_id.0),
-            &ldk_data_dir,
-            false,
+        assert!(matches!(
+            kv_store.read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &key),
+            Err(e) if e.kind() == io::ErrorKind::NotFound
         ));
-        assert_eq!(updated_rgb_info.local_rgb_amount, 75);
-        assert_eq!(updated_rgb_info.remote_rgb_amount, 25);
-        assert!(!raw_pending_path.exists());
-        assert!(!channel_pending_path.exists());
-
-        fs::remove_dir_all(ldk_data_dir).unwrap();
+        assert_eq!(read_local_amount(&kv_store, &channel_id), 25);
     }
 
     #[test]
     fn finalize_rgb_channel_payment_leaves_pending_markers_when_nothing_applies() {
-        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-skips");
-        let channel_id = ChannelId([5; 32]);
-        let payment_hash = PaymentHash([6; 32]);
-
-        let rgb_info = RgbInfo {
-            contract_id: test_contract_id(),
-            schema: AssetSchema::Nia,
-            local_rgb_amount: 100,
-            remote_rgb_amount: 0,
-        };
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(&hex_str(&channel_id.0), &ldk_data_dir, false),
-            &rgb_info,
-        );
-
-        let rgb_payment_info = RgbPaymentInfo {
-            contract_id: rgb_info.contract_id,
-            amount: 25,
-            local_rgb_amount: 100,
-            remote_rgb_amount: 0,
-            swap_payment: true,
-            inbound: true,
-        };
-        let raw_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, true);
-        let channel_pending_path = get_rgb_channel_payment_info_path(
+        let kv_store = build_kv_store();
+        let channel_id = "b".repeat(64);
+        let payment_hash = PaymentHash([0xCD; 32]);
+        seed_channel_info(&kv_store, &channel_id, 100, 0);
+        let key = seed_pending_payment_key(
+            &kv_store,
+            RGB_PAYMENT_INFO_INBOUND_NS,
             &channel_id,
             &payment_hash,
-            &ldk_data_dir,
             true,
             true,
         );
-        write_rgb_payment_info(&raw_pending_path, &rgb_payment_info);
-        write_rgb_payment_info(&channel_pending_path, &rgb_payment_info);
 
-        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+        _finalize_rgb_channel_payment(&payment_hash, false, &kv_store)
+            .expect("scanner succeeds without applying");
 
-        let unchanged_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
-            &hex_str(&channel_id.0),
-            &ldk_data_dir,
-            false,
-        ));
-        assert_eq!(unchanged_rgb_info.local_rgb_amount, 100);
-        assert_eq!(unchanged_rgb_info.remote_rgb_amount, 0);
-        assert!(raw_pending_path.exists());
-        assert!(channel_pending_path.exists());
-
-        fs::remove_dir_all(ldk_data_dir).unwrap();
+        assert!(kv_store
+            .read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &key)
+            .is_ok());
+        assert_eq!(read_local_amount(&kv_store, &channel_id), 100);
     }
 
     #[test]
-    fn finalize_rgb_channel_payment_preserves_other_direction_markers_until_they_apply() {
-        let ldk_data_dir = temp_test_dir("finalize-rgb-channel-payment-split-directions");
-        let inbound_channel_id = ChannelId([9; 32]);
-        let outbound_channel_id = ChannelId([10; 32]);
-        let payment_hash = PaymentHash([11; 32]);
-
-        let inbound_rgb_info = RgbInfo {
+    fn finalize_rgb_channel_payment_ignores_non_pending_keys() {
+        let kv_store = build_kv_store();
+        let channel_id = "c".repeat(64);
+        let payment_hash = PaymentHash([0xEF; 32]);
+        seed_channel_info(&kv_store, &channel_id, 100, 0);
+        let final_key = format!("{}{}", channel_id, hex_str(&payment_hash.0));
+        let info = RgbPaymentInfo {
             contract_id: test_contract_id(),
-            schema: AssetSchema::Nia,
-            local_rgb_amount: 0,
-            remote_rgb_amount: 100,
-        };
-        let outbound_rgb_info = RgbInfo {
-            contract_id: test_contract_id(),
-            schema: AssetSchema::Nia,
+            amount: 25,
             local_rgb_amount: 100,
             remote_rgb_amount: 0,
-        };
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(&hex_str(&inbound_channel_id.0), &ldk_data_dir, false),
-            &inbound_rgb_info,
-        );
-        write_rgb_channel_info(
-            &get_rgb_channel_info_path(&hex_str(&outbound_channel_id.0), &ldk_data_dir, false),
-            &outbound_rgb_info,
-        );
-
-        let inbound_payment_info = RgbPaymentInfo {
-            contract_id: inbound_rgb_info.contract_id,
-            amount: 20,
-            local_rgb_amount: 0,
-            remote_rgb_amount: 100,
-            swap_payment: true,
+            swap_payment: false,
             inbound: true,
         };
-        let outbound_payment_info = RgbPaymentInfo {
-            contract_id: outbound_rgb_info.contract_id,
-            amount: 10,
-            local_rgb_amount: 100,
-            remote_rgb_amount: 0,
-            swap_payment: true,
-            inbound: false,
-        };
+        kv_store
+            .write(
+                RGB_PRIMARY_NS,
+                RGB_PAYMENT_INFO_INBOUND_NS,
+                &final_key,
+                bincode::serialize(&info).unwrap(),
+            )
+            .unwrap();
 
-        let raw_inbound_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, true);
-        let raw_outbound_pending_path =
-            get_rgb_payment_info_pending_path(&payment_hash, &ldk_data_dir, false);
-        let inbound_channel_pending_path = get_rgb_channel_payment_info_path(
-            &inbound_channel_id,
-            &payment_hash,
-            &ldk_data_dir,
-            true,
-            true,
-        );
-        let outbound_channel_pending_path = get_rgb_channel_payment_info_path(
-            &outbound_channel_id,
-            &payment_hash,
-            &ldk_data_dir,
+        _finalize_rgb_channel_payment(&payment_hash, true, &kv_store).expect("scanner succeeds");
+
+        assert!(kv_store
+            .read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &final_key)
+            .is_ok());
+        assert_eq!(read_local_amount(&kv_store, &channel_id), 100);
+    }
+
+    #[test]
+    fn finalize_rgb_channel_payment_only_touches_matching_payment_hash() {
+        let kv_store = build_kv_store();
+        let channel_id = "d".repeat(64);
+        let target_hash = PaymentHash([0x11; 32]);
+        let other_hash = PaymentHash([0x22; 32]);
+        seed_channel_info(&kv_store, &channel_id, 0, 100);
+        let target_key = seed_pending_payment_key(
+            &kv_store,
+            RGB_PAYMENT_INFO_INBOUND_NS,
+            &channel_id,
+            &target_hash,
             false,
             true,
         );
-        write_rgb_payment_info(&raw_inbound_pending_path, &inbound_payment_info);
-        write_rgb_payment_info(&raw_outbound_pending_path, &outbound_payment_info);
-        write_rgb_payment_info(&inbound_channel_pending_path, &inbound_payment_info);
-        write_rgb_payment_info(&outbound_channel_pending_path, &outbound_payment_info);
-
-        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, true);
-
-        let updated_inbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
-            &hex_str(&inbound_channel_id.0),
-            &ldk_data_dir,
+        let other_key = seed_pending_payment_key(
+            &kv_store,
+            RGB_PAYMENT_INFO_INBOUND_NS,
+            &channel_id,
+            &other_hash,
             false,
-        ));
-        let unchanged_outbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
-            &hex_str(&outbound_channel_id.0),
-            &ldk_data_dir,
-            false,
-        ));
-        assert_eq!(updated_inbound_rgb_info.local_rgb_amount, 20);
-        assert_eq!(updated_inbound_rgb_info.remote_rgb_amount, 80);
-        assert_eq!(unchanged_outbound_rgb_info.local_rgb_amount, 100);
-        assert_eq!(unchanged_outbound_rgb_info.remote_rgb_amount, 0);
-        assert!(!inbound_channel_pending_path.exists());
-        assert!(outbound_channel_pending_path.exists());
-        assert!(raw_inbound_pending_path.exists());
-        assert!(raw_outbound_pending_path.exists());
+            true,
+        );
 
-        _finalize_rgb_channel_payment(&ldk_data_dir, &payment_hash, false);
+        _finalize_rgb_channel_payment(&target_hash, true, &kv_store).expect("scanner succeeds");
 
-        let updated_outbound_rgb_info = parse_rgb_channel_info(&get_rgb_channel_info_path(
-            &hex_str(&outbound_channel_id.0),
-            &ldk_data_dir,
-            false,
+        assert!(matches!(
+            kv_store.read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &target_key),
+            Err(e) if e.kind() == io::ErrorKind::NotFound
         ));
-        assert_eq!(updated_outbound_rgb_info.local_rgb_amount, 90);
-        assert_eq!(updated_outbound_rgb_info.remote_rgb_amount, 10);
-        assert!(!outbound_channel_pending_path.exists());
-        assert!(!raw_inbound_pending_path.exists());
-        assert!(!raw_outbound_pending_path.exists());
+        assert!(kv_store
+            .read(RGB_PRIMARY_NS, RGB_PAYMENT_INFO_INBOUND_NS, &other_key)
+            .is_ok());
+    }
 
-        fs::remove_dir_all(ldk_data_dir).unwrap();
+    #[test]
+    fn finalize_rgb_channel_payment_propagates_non_not_found_errors() {
+        let db_path = std::env::temp_dir().join(format!("rln-ldk-unit-{}", uuid::Uuid::new_v4()));
+        let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+        let db =
+            crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+                .expect("db connection");
+        let kv_store: Arc<dyn KVStoreSync + Send + Sync> =
+            Arc::new(SeaOrmKvStore::from_connection(Arc::new(db)));
+
+        let result = _finalize_rgb_channel_payment(&PaymentHash([0; 32]), true, &kv_store);
+        match result {
+            Err(e) => assert_ne!(
+                e.kind(),
+                io::ErrorKind::NotFound,
+                "real DB errors must not be classified as NotFound"
+            ),
+            Ok(()) => panic!("expected error when kv_store table is missing"),
+        }
     }
 }

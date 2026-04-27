@@ -1,6 +1,41 @@
 use super::*;
+use std::path::Path;
 
 const TEST_DIR_BASE: &str = "tmp/close_coop_standard/";
+
+/// Assert that no legacy filesystem config or consignment files exist for a node.
+/// These should all be stored in the KVStore/database.
+fn assert_no_legacy_files(test_dir: &str) {
+    let base = Path::new(test_dir);
+    let ldk_dir = base.join(".ldk");
+
+    // Config files should NOT exist on the filesystem
+    for config_file in [
+        "bitcoin_network",
+        "indexer_url",
+        "wallet_account_xpub_colored",
+        "wallet_account_xpub_vanilla",
+        "wallet_master_fingerprint",
+        "wallet_fingerprint",
+    ] {
+        assert!(
+            !base.join(config_file).exists(),
+            "legacy config file '{config_file}' should not exist on filesystem for {test_dir}"
+        );
+    }
+
+    // Consignment files should NOT exist in the LDK data dir
+    if ldk_dir.exists() {
+        for entry in std::fs::read_dir(&ldk_dir).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().to_string();
+            assert!(
+                !name.starts_with("consignment_"),
+                "legacy consignment file '{name}' should not exist in {ldk_dir:?}"
+            );
+        }
+    }
+}
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -60,6 +95,10 @@ async fn close_coop_standard() {
     )
     .await;
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 400);
+
+    // After channel open: no legacy files should exist
+    assert_no_legacy_files(&test_dir_node1);
+    assert_no_legacy_files(&test_dir_node2);
 
     keysend_with_ln_balance(
         node1_addr,
@@ -141,4 +180,9 @@ async fn close_coop_standard() {
     assert_eq!(asset_balance_spendable(node1_addr, &asset_id).await, 200);
     assert_eq!(asset_balance_spendable(node2_addr, &asset_id).await, 50);
     assert_eq!(asset_balance_spendable(node3_addr, &asset_id).await, 750);
+
+    // After full lifecycle: still no legacy files
+    assert_no_legacy_files(&test_dir_node1);
+    assert_no_legacy_files(&test_dir_node2);
+    assert_no_legacy_files(&test_dir_node3);
 }

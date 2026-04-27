@@ -4,6 +4,20 @@ const TEST_DIR_BASE: &str = "tmp/openchannel_virtual/";
 const VIRTUAL_TIMEOUT_BOUNDARY_CHUNK_SIZE: u16 = 144;
 const VIRTUAL_TIMEOUT_BOUNDARY_SYNC_TIMEOUT_SECS: f32 = 30.0;
 
+/// Assert that a virtual channel marker exists in KVStore (not on filesystem).
+fn assert_virtual_marker_in_kvstore(test_dir: &str, channel_id: &str) {
+    let db_path = get_db_path(&std::path::PathBuf::from(test_dir));
+    let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+    let db = crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+        .expect("connect to test db");
+    let kv_store = SeaOrmKvStore::from_connection(Arc::new(db));
+    let marker_key = format!("virtual_channel_{channel_id}");
+    assert!(
+        kv_store.read("", "", &marker_key).is_ok(),
+        "virtual channel marker '{marker_key}' should exist in KVStore for {test_dir}"
+    );
+}
+
 async fn close_channel_response(
     node_address: SocketAddr,
     channel_id: &str,
@@ -21,6 +35,28 @@ async fn close_channel_response(
         .send()
         .await
         .unwrap()
+}
+
+async fn issue_asset_nia_with_amounts(node_address: SocketAddr, amounts: Vec<u64>) -> AssetNIA {
+    println!("issuing NIA asset on node {node_address}");
+    let payload = IssueAssetNIARequest {
+        amounts,
+        ticker: s!("USDT"),
+        name: s!("Tether"),
+        precision: 0,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/issueassetnia"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<IssueAssetNIAResponse>()
+        .await
+        .unwrap()
+        .asset
 }
 
 async fn mine_blocks_and_wait_for_sync(
@@ -58,6 +94,101 @@ async fn mine_blocks_and_wait_for_sync(
              client={client_node_last_height})"
         )
     });
+}
+
+#[tokio::test]
+#[traced_test]
+#[serial_test::serial]
+async fn virtual_open_non_allowlisted_host_does_not_become_operational() {
+    initialize();
+
+    let test_storage_root = format!("{TEST_DIR_BASE}allowlist_reject/");
+    let host_node_peer_port = next_peer_port();
+    let client_node_peer_port = next_peer_port();
+
+    let (host_node_address, _host_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}host_node"),
+        host_node_peer_port,
+        false,
+        true,
+        vec![],
+    )
+    .await;
+    let host_node_info = node_info(host_node_address).await;
+
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let fake_allowlisted_secret = bitcoin::secp256k1::SecretKey::from_slice(&[42u8; 32]).unwrap();
+    let fake_allowlisted_pubkey =
+        bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &fake_allowlisted_secret);
+
+    let (client_node_address, _client_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}client_node"),
+        client_node_peer_port,
+        false,
+        true,
+        vec![fake_allowlisted_pubkey],
+    )
+    .await;
+    let client_node_info = node_info(client_node_address).await;
+
+    fund_and_create_utxos(host_node_address, None).await;
+
+    let open_request = OpenChannelRequest {
+        peer_pubkey_and_opt_addr: format!(
+            "{}@127.0.0.1:{}",
+            client_node_info.pubkey, client_node_peer_port
+        ),
+        capacity_sat: 100_000,
+        push_msat: 0,
+        asset_amount: None,
+        asset_id: None,
+        push_asset_amount: None,
+        public: false,
+        with_anchors: true,
+        fee_base_msat: None,
+        fee_proportional_millionths: None,
+        temporary_channel_id: None,
+        virtual_open_mode: Some("trusted_no_broadcast".to_string()),
+    };
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{host_node_address}/openchannel"))
+        .json(&open_request)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let _ = response
+        .json::<OpenChannelResponse>()
+        .await
+        .expect("host open returns temporary channel id");
+
+    let started_at = std::time::Instant::now();
+    while started_at.elapsed() < std::time::Duration::from_secs(20) {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let host_has_operational_virtual =
+            list_channels(host_node_address).await.into_iter().any(|c| {
+                c.peer_pubkey == client_node_info.pubkey
+                    && c.virtual_open_mode.as_deref() == Some("trusted_no_broadcast")
+                    && c.ready
+                    && c.is_usable
+            });
+        let client_has_operational_virtual = list_channels(client_node_address)
+            .await
+            .into_iter()
+            .any(|c| {
+                c.peer_pubkey == host_node_info.pubkey
+                    && c.virtual_open_mode.as_deref() == Some("trusted_no_broadcast")
+                    && c.ready
+                    && c.is_usable
+            });
+
+        assert!(
+            !host_has_operational_virtual && !client_has_operational_virtual,
+            "non-allowlisted inbound trusted virtual open must not become operational"
+        );
+    }
 }
 
 #[tokio::test]
@@ -364,6 +495,86 @@ async fn virtual_open_rejects_invalid_requests() {
 #[tokio::test]
 #[traced_test]
 #[serial_test::serial]
+async fn virtual_reconciliation_ignores_orphan_pending_rgb_entries() {
+    initialize();
+
+    let test_storage_root = format!("{TEST_DIR_BASE}orphan_pending/");
+    let host_node_peer_port = next_peer_port();
+    let client_node_peer_port = next_peer_port();
+
+    let (host_node_address, _host_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}host_node"),
+        host_node_peer_port,
+        false,
+        true,
+        vec![],
+    )
+    .await;
+    let host_node_info = node_info(host_node_address).await;
+
+    let (client_node_address, _client_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}client_node"),
+        client_node_peer_port,
+        false,
+        true,
+        vec![bitcoin::secp256k1::PublicKey::from_str(&host_node_info.pubkey).unwrap()],
+    )
+    .await;
+    let client_node_info = node_info(client_node_address).await;
+
+    fund_and_create_utxos(host_node_address, None).await;
+    let issued_asset_id = issue_asset_nia(host_node_address).await.asset_id;
+
+    let _opened_virtual_channel = open_virtual_channel(
+        host_node_address,
+        &client_node_info.pubkey,
+        Some(client_node_peer_port),
+        Some(100_000),
+        Some(0),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let invoice = ln_invoice(client_node_address, Some(2_000_000), None, None, 3600).await;
+    let decoded_invoice = decode_ln_invoice(host_node_address, &invoice.invoice).await;
+    let payment_hash_hex = decoded_invoice.payment_hash;
+
+    let host_node_test_dir = format!("{test_storage_root}host_node");
+    let channel_id_hex = "11".repeat(32);
+    let db_path = get_db_path(&std::path::PathBuf::from(&host_node_test_dir));
+    let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+    let db = crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+        .expect("connect to test db");
+    let kv_store = SeaOrmKvStore::from_connection(Arc::new(db));
+    let contract_id = ContractId::from_str(&issued_asset_id).expect("valid issued asset id");
+    let orphan_payment_info = RgbPaymentInfo {
+        contract_id,
+        amount: 1,
+        local_rgb_amount: 0,
+        remote_rgb_amount: 0,
+        swap_payment: false,
+        inbound: false,
+    };
+    let orphan_pending_key = format!("{channel_id_hex}{payment_hash_hex}_pending");
+    kv_store
+        .write(
+            RGB_PRIMARY_NS,
+            RGB_PAYMENT_INFO_OUTBOUND_NS,
+            &orphan_pending_key,
+            bincode::serialize(&orphan_payment_info).expect("serialize rgb payment info"),
+        )
+        .expect("write orphan pending key");
+
+    let payment = send_payment(host_node_address, invoice.invoice).await;
+    assert_eq!(payment.status, HTLCStatus::Succeeded);
+    let _ = node_info(host_node_address).await;
+}
+
+#[tokio::test]
+#[traced_test]
+#[serial_test::serial]
 async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_and_rgb_payments() {
     initialize();
 
@@ -463,11 +674,10 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
         Some(funded_rgb_amount)
     );
 
-    let expected_virtual_marker_path = PathBuf::from(format!(
-        "{test_storage_root}host_node/.ldk/virtual_channel_{}",
-        virtual_channel_after_timeout.channel_id
-    ));
-    assert!(expected_virtual_marker_path.exists());
+    assert_virtual_marker_in_kvstore(
+        &format!("{test_storage_root}host_node"),
+        &virtual_channel_after_timeout.channel_id,
+    );
 
     let btc_ln_invoice = ln_invoice(client_a_node_address, Some(3_000_000), None, None, 3600)
         .await
@@ -571,11 +781,10 @@ async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_an
         ChannelStatus::Opened
     ));
 
-    let expected_virtual_marker_path_b = PathBuf::from(format!(
-        "{test_storage_root}host_node/.ldk/virtual_channel_{}",
-        opened_virtual_channel_b.channel_id
-    ));
-    assert!(expected_virtual_marker_path_b.exists());
+    assert_virtual_marker_in_kvstore(
+        &format!("{test_storage_root}host_node"),
+        &opened_virtual_channel_b.channel_id,
+    );
 
     let client_a_to_b_btc_payment_msat = 4_000_000;
     let btc_ln_invoice_b = ln_invoice(

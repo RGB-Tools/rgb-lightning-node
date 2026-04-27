@@ -7,6 +7,7 @@ mod auth;
 mod backup;
 mod bitcoind;
 mod core_types;
+mod database;
 mod disk;
 mod error;
 #[cfg(test)]
@@ -14,9 +15,12 @@ mod error;
 mod fee_mock;
 #[cfg(feature = "uniffi")]
 pub mod ffi;
+mod kv_store;
 mod ldk;
 mod node;
 mod rgb;
+mod routes;
+mod runtime;
 mod sdk;
 mod swap;
 #[cfg(feature = "test-utils")]

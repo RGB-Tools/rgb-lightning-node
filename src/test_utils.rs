@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+use sea_orm::{ConnectOptions, Database};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -15,6 +16,12 @@ pub fn mock_locked_app_state() -> TestAppState {
     let tmp = tempfile::tempdir().expect("tempdir for mock state");
     let path = tmp.keep();
 
+    let db_path = path.join("rln_db");
+    let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+    let database =
+        crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+            .expect("mock database connection");
+
     TestAppState(Arc::new(AppState {
         static_state: Arc::new(StaticState {
             ldk_peer_listening_port: 9735,
@@ -25,6 +32,7 @@ pub fn mock_locked_app_state() -> TestAppState {
             max_media_upload_size_mb: 1,
             enable_virtual_channels_v0: false,
             virtual_peer_pubkeys: vec![],
+            database: Arc::new(database),
         }),
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),

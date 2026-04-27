@@ -7,6 +7,7 @@ mod uniffi_smoke_tests {
     use crate::utils::{AppState, StaticState};
     use bitcoin::hex::DisplayHex;
     use rgb_lib::BitcoinNetwork;
+    use sea_orm::{ConnectOptions, Database};
     use std::collections::HashSet;
     use std::str::FromStr;
     use std::sync::{Arc, Mutex};
@@ -76,6 +77,11 @@ mod uniffi_smoke_tests {
 
     fn mock_locked_state() -> Arc<AppState> {
         let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("rln_db");
+        let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+        let database =
+            crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+                .expect("mock database connection");
         Arc::new(AppState {
             static_state: Arc::new(StaticState {
                 ldk_peer_listening_port: 9735,
@@ -86,6 +92,7 @@ mod uniffi_smoke_tests {
                 max_media_upload_size_mb: 1,
                 enable_virtual_channels_v0: false,
                 virtual_peer_pubkeys: vec![],
+                database: Arc::new(database),
             }),
             cancel_token: CancellationToken::new(),
             unlocked_app_state: Arc::new(TokioMutex::new(None)),
