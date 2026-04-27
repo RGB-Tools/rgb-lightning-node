@@ -19,8 +19,9 @@ use rgb_lib::{
         rust_only::{check_proxy_url, ColoringInfo},
         AssetCFA, AssetIFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online,
         OperationResult, ReceiveData, Recipient, RefreshResult, RgbWalletOpsOffline,
-        RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, Transaction as RgbLibTransaction,
-        Transfer, TransportEndpoint, Unspent, Wallet as RgbLibWallet,
+        RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, SyncOptions,
+        Transaction as RgbLibTransaction, Transfer, TransportEndpoint, Unspent,
+        Wallet as RgbLibWallet,
     },
     AssetSchema, Assignment, BitcoinNetwork, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
     RgbTransport, RgbTxid, UpdateRes, WitnessOrd,
@@ -266,7 +267,6 @@ impl UnlockedAppState {
         fee_rate: u64,
         min_confirmations: u8,
         expiration_timestamp: Option<u64>,
-        skip_sync: bool,
     ) -> Result<OperationResult, RgbLibError> {
         self.rgb_wallet_wrapper.send(
             recipient_map,
@@ -274,7 +274,6 @@ impl UnlockedAppState {
             fee_rate,
             min_confirmations,
             expiration_timestamp,
-            skip_sync,
         )
     }
 
@@ -331,8 +330,8 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.sign_psbt(unsigned_psbt)
     }
 
-    pub(crate) fn rgb_sync(&self) -> Result<(), RgbLibError> {
-        self.rgb_wallet_wrapper.sync()
+    pub(crate) fn rgb_sync(&self, options: SyncOptions) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.sync(options)
     }
 
     pub(crate) fn rgb_upsert_witness(
@@ -642,7 +641,6 @@ impl RgbLibWalletWrapper {
         fee_rate: u64,
         min_confirmations: u8,
         expiration_timestamp: Option<u64>,
-        skip_sync: bool,
     ) -> Result<OperationResult, RgbLibError> {
         self.get_rgb_wallet().send(
             self.online,
@@ -651,7 +649,6 @@ impl RgbLibWalletWrapper {
             fee_rate,
             min_confirmations,
             expiration_timestamp,
-            skip_sync,
         )
     }
 
@@ -698,21 +695,19 @@ impl RgbLibWalletWrapper {
     }
 
     pub(crate) fn send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
-        self.get_rgb_wallet()
-            .send_btc_end(self.online, signed_psbt, false)
+        self.get_rgb_wallet().send_btc_end(self.online, signed_psbt)
     }
 
     pub(crate) fn send_end(&self, signed_psbt: String) -> Result<OperationResult, RgbLibError> {
-        self.get_rgb_wallet()
-            .send_end(self.online, signed_psbt, false)
+        self.get_rgb_wallet().send_end(self.online, signed_psbt)
     }
 
     pub(crate) fn sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
         self.get_rgb_wallet().sign_psbt(unsigned_psbt, None)
     }
 
-    pub(crate) fn sync(&self) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().sync(self.online)
+    pub(crate) fn sync(&self, options: SyncOptions) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().sync(self.online, options)
     }
 
     pub(crate) fn update_witnesses(

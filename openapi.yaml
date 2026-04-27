@@ -967,6 +967,11 @@ paths:
         - RGB
       summary: Sync the RGB wallet
       description: Sync the RGB wallet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRequest'
       responses:
         '200':
           description: Successful operation
@@ -2805,9 +2810,6 @@ components:
                   Fungible: 100
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
-        skip_sync:
-          type: boolean
-          example: false
     SendRgbResponse:
       type: object
       required:
@@ -2887,6 +2889,49 @@ components:
         - Succeeded
         - Expired
         - Failed
+    SyncKeychain:
+      oneOf:
+        - type: string
+          enum:
+            - Colored
+        - type: object
+          required:
+            - Vanilla
+          properties:
+            Vanilla:
+              type: object
+              required:
+                - lookback
+              properties:
+                lookback:
+                  type: integer
+                  example: 20
+      example:
+        Vanilla:
+          lookback: 20
+    SyncOptions:
+      type: object
+      required:
+        - keychain
+        - strategy
+      properties:
+        keychain:
+          $ref: '#/components/schemas/SyncKeychain'
+        strategy:
+          $ref: '#/components/schemas/SyncStrategy'
+    SyncRequest:
+      type: object
+      required:
+        - options
+      properties:
+        options:
+          $ref: '#/components/schemas/SyncOptions'
+    SyncStrategy:
+      type: string
+      enum:
+        - FastSync
+        - FullSync
+        - FullScan
     TakerRequest:
       type: object
       required:
@@ -3086,11 +3131,13 @@ components:
         - ReceiveWitness
         - Send
         - Inflation
+        - Burn
     TransferStatus:
       type: string
       enum:
         - Initiated
         - WaitingCounterparty
+        - WaitingSafeHeight
         - WaitingConfirmations
         - Settled
         - Failed

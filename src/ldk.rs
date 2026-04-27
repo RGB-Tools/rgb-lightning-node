@@ -70,8 +70,8 @@ use rgb_lib::{
     utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
-        DatabaseType, Recipient, SinglesigKeys, TransportEndpoint, Wallet as RgbLibWallet,
-        WalletData, WitnessData,
+        DatabaseType, OnlineOptions, Recipient, SinglesigKeys, TransportEndpoint,
+        Wallet as RgbLibWallet, WalletData, WitnessData,
     },
     AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Error as RgbLibError,
     Fascia, FileContent, RgbTransfer, RgbTxid, WitnessOrd,
@@ -112,6 +112,7 @@ use crate::utils::{
 pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
+const VANILLA_SYNC_LOOKBACK: u32 = 20;
 
 #[cfg(test)]
 pub(crate) static IGNORE_INBOUND_CHANNELS_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
@@ -1838,7 +1839,7 @@ pub(crate) async fn start_ldk(
         .into_extended_key()
         .expect("a valid key should have been provided");
     let master_xprv = &xkey
-        .into_xprv(network)
+        .into_xprv(network.into())
         .expect("should be possible to get an extended private key");
     let xprv: Xpriv = master_xprv
         .derive_priv(&Secp256k1_30::new(), &ChildNumber::Hardened { index: 535 })
@@ -2015,7 +2016,11 @@ pub(crate) async fn start_ldk(
     })
     .await
     .unwrap();
-    let rgb_online = rgb_wallet.go_online(false, indexer_url.to_string())?;
+    let rgb_online = rgb_wallet.go_online(OnlineOptions {
+        indexer_url: indexer_url.to_string(),
+        skip_consistency_check: false,
+        vanilla_sync_lookback: VANILLA_SYNC_LOOKBACK,
+    })?;
     fs::write(
         static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
         account_xpub_colored.fingerprint().to_string(),

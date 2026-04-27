@@ -54,7 +54,9 @@ use rgb_lib::{
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
         Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
         Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
-        Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
+        SyncKeychain as RgbLibSyncKeychain, SyncOptions as RgbLibSyncOptions,
+        SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
+        WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
     BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
@@ -1073,7 +1075,6 @@ pub(crate) struct SendRgbRequest {
     pub(crate) min_confirmations: u8,
     pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) recipient_map: HashMap<String, Vec<Recipient>>,
-    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1121,6 +1122,58 @@ impl_writeable_tlv_based_enum!(SwapStatus,
     (3, Expired) => {},
     (4, Failed) => {},
 );
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum SyncKeychain {
+    Colored,
+    Vanilla { lookback: u32 },
+}
+
+impl From<SyncKeychain> for RgbLibSyncKeychain {
+    fn from(value: SyncKeychain) -> Self {
+        match value {
+            SyncKeychain::Colored => RgbLibSyncKeychain::Colored,
+            SyncKeychain::Vanilla { lookback } => RgbLibSyncKeychain::Vanilla { lookback },
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SyncOptions {
+    keychain: SyncKeychain,
+    strategy: SyncStrategy,
+}
+
+impl From<SyncOptions> for RgbLibSyncOptions {
+    fn from(value: SyncOptions) -> Self {
+        Self {
+            keychain: value.keychain.into(),
+            strategy: value.strategy.into(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SyncRequest {
+    pub(crate) options: SyncOptions,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum SyncStrategy {
+    FullScan,
+    FullSync,
+    FastSync,
+}
+
+impl From<SyncStrategy> for RgbLibSyncStrategy {
+    fn from(value: SyncStrategy) -> Self {
+        match value {
+            SyncStrategy::FullScan => RgbLibSyncStrategy::FullScan,
+            SyncStrategy::FullSync => RgbLibSyncStrategy::FullSync,
+            SyncStrategy::FastSync => RgbLibSyncStrategy::FastSync,
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct TakerRequest {
@@ -1232,12 +1285,14 @@ pub(crate) enum TransferKind {
     ReceiveWitness,
     Send,
     Inflation,
+    Burn,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransferStatus {
     Initiated,
     WaitingCounterparty,
+    WaitingSafeHeight,
     WaitingConfirmations,
     Settled,
     Failed,
@@ -2587,6 +2642,7 @@ pub(crate) async fn list_transfers(
             status: match transfer.status {
                 rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
                 rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
+                rgb_lib::TransferStatus::WaitingSafeHeight => TransferStatus::WaitingSafeHeight,
                 rgb_lib::TransferStatus::WaitingConfirmations => {
                     TransferStatus::WaitingConfirmations
                 }
@@ -2601,6 +2657,7 @@ pub(crate) async fn list_transfers(
                 rgb_lib::wallet::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
                 rgb_lib::wallet::TransferKind::Send => TransferKind::Send,
                 rgb_lib::wallet::TransferKind::Inflation => TransferKind::Inflation,
+                rgb_lib::wallet::TransferKind::Burn => TransferKind::Burn,
             },
             txid: transfer.txid,
             recipient_id: transfer.recipient_id,
@@ -3772,7 +3829,6 @@ pub(crate) async fn send_rgb(
                 payload.fee_rate,
                 payload.min_confirmations,
                 payload.expiration_timestamp,
-                payload.skip_sync,
             )
         })
         .await
@@ -3816,12 +3872,13 @@ pub(crate) async fn sign_message(
 
 pub(crate) async fn sync(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<SyncRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        unlocked_state.rgb_sync()?;
+        unlocked_state.rgb_sync(payload.options.into())?;
 
         Ok(Json(EmptyResponse {}))
     })

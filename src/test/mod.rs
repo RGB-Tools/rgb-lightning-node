@@ -1579,7 +1579,6 @@ async fn send_assets(
             OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
         ),
         recipient_map,
-        skip_sync: false,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/sendrgb"))
