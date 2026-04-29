@@ -41,6 +41,7 @@ async fn drop_funding_signed() {
         None,
         None,
         true,
+        true,
     )
     .await
     .unwrap();
@@ -93,6 +94,7 @@ async fn drop_funding_signed() {
         None,
         None,
         None,
+        true,
         true,
     )
     .await
