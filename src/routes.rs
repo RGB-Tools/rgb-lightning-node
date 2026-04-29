@@ -2812,6 +2812,7 @@ pub(crate) async fn maker_execute(
         let first_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            &state.static_state.ldk_data_dir,
             unlocked_state.channel_manager.get_our_node_id(),
             taker_pk,
             if swap_info.is_to_btc() {
@@ -2829,6 +2830,7 @@ pub(crate) async fn maker_execute(
         let second_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            &state.static_state.ldk_data_dir,
             taker_pk,
             unlocked_state.channel_manager.get_our_node_id(),
             if swap_info.is_to_btc() || swap_info.is_asset_asset() {
