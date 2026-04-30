@@ -35,6 +35,7 @@ async fn openchannel_fail() {
         None,
         None,
         true,
+        true,
     )
     .await;
     check_response_is_nok(
@@ -65,6 +66,7 @@ async fn openchannel_fail() {
         None,
         None,
         true,
+        true,
     )
     .await;
     check_response_is_nok(
@@ -94,6 +96,7 @@ async fn openchannel_fail() {
         None,
         None,
         None,
+        true,
         true,
     )
     .await;

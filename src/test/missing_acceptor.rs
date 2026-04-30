@@ -42,6 +42,7 @@ async fn missing_acceptor() {
         None,
         None,
         true,
+        true,
     )
     .await
     .unwrap();

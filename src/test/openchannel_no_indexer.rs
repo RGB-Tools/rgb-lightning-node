@@ -36,6 +36,7 @@ async fn openchannel_no_indexer() {
         None,
         None,
         true,
+        true,
     )
     .await;
 

@@ -1222,6 +1222,7 @@ async fn open_channel_with_retry(
             None,
             None,
             true,
+            true,
         )
         .await;
 
@@ -1259,6 +1260,7 @@ async fn open_channel_funded_raw(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
+    public: bool,
 ) -> Result<Channel, Response> {
     open_channel_raw(
         node_address,
@@ -1273,6 +1275,7 @@ async fn open_channel_funded_raw(
         fee_proportional_millionths,
         temporary_channel_id,
         with_anchors,
+        public,
     )
     .await?;
 
@@ -1352,6 +1355,7 @@ async fn open_channel_raw(
     fee_proportional_millionths: Option<u32>,
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
+    public: bool,
 ) -> Result<OpenChannelResponse, Response> {
     println!(
         "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
@@ -1383,7 +1387,7 @@ async fn open_channel_raw(
         asset_amount,
         asset_id: asset_id.map(|a| a.to_string()),
         push_asset_amount,
-        public: true,
+        public,
         with_anchors,
         fee_base_msat,
         fee_proportional_millionths,
@@ -1432,6 +1436,7 @@ async fn open_channel_with_custom_data(
         fee_proportional_millionths,
         temporary_channel_id,
         with_anchors,
+        true,
     )
     .await
     .expect("channel opening should succeed")

@@ -405,9 +405,11 @@ pub(crate) fn get_max_local_rgb_amount<'r>(
     max_balance
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_route(
     channel_manager: &crate::ldk::ChannelManager,
     router: &crate::ldk::Router,
+    ldk_data_dir_path: &Path,
     start: PublicKey,
     dest: PublicKey,
     final_value_msat: Option<u64>,
@@ -415,6 +417,23 @@ pub(crate) fn get_route(
     hints: Vec<RouteHint>,
 ) -> Option<Route> {
     let inflight_htlcs = channel_manager.compute_inflight_htlcs();
+    let usable_channels;
+    let first_hops = if start == channel_manager.get_our_node_id() {
+        usable_channels = channel_manager.list_usable_channels();
+        let first_hops = usable_channels
+            .iter()
+            .filter(|channel| match rgb_payment {
+                Some((contract_id, _)) => {
+                    get_rgb_channel_info_optional(&channel.channel_id, ldk_data_dir_path, false)
+                        .is_some_and(|(rgb_info, _)| rgb_info.contract_id == contract_id)
+                }
+                None => true,
+            })
+            .collect::<Vec<_>>();
+        (!first_hops.is_empty()).then_some(first_hops)
+    } else {
+        None
+    };
     let payment_params = PaymentParameters {
         payee: Payee::Clear {
             node_id: dest,
@@ -438,7 +457,7 @@ pub(crate) fn get_route(
             max_total_routing_fee_msat: None,
             rgb_payment,
         },
-        None,
+        first_hops.as_deref(),
         inflight_htlcs,
     );
 

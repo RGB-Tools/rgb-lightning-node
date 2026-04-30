@@ -186,4 +186,66 @@ async fn swap_reverse_same_channel() {
     assert_eq!(swaps_taker.taker.len(), 1);
     let swap_taker = swaps_taker.taker.first().unwrap();
     assert_eq!(swap_taker.status, SwapStatus::Succeeded);
+
+    let private_asset_id = issue_asset_nia(node1_addr).await.asset_id;
+    open_channel_funded_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(100000),
+        Some(50000000),
+        Some(100),
+        Some(&private_asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+        false,
+    )
+    .await
+    .expect("private channel opening should succeed");
+
+    println!("\nsetup private channel swap");
+    let maker_addr = node1_addr;
+    let taker_addr = node2_addr;
+    let qty_from = 25000;
+    let qty_to = 10;
+    let maker_init_response = maker_init(
+        maker_addr,
+        qty_from,
+        None,
+        qty_to,
+        Some(&private_asset_id),
+        3600,
+    )
+    .await;
+    taker(taker_addr, maker_init_response.swapstring.clone()).await;
+
+    println!("\nexecute private channel swap");
+    maker_execute(
+        maker_addr,
+        maker_init_response.swapstring,
+        maker_init_response.payment_secret,
+        node2_pubkey,
+    )
+    .await;
+
+    let swaps_maker = list_swaps(maker_addr).await;
+    assert_eq!(swaps_maker.maker.len(), 2);
+    let swap_maker = swaps_maker
+        .maker
+        .iter()
+        .find(|s| s.payment_hash == maker_init_response.payment_hash)
+        .unwrap();
+    assert_eq!(swap_maker.status, SwapStatus::Pending);
+    wait_for_swap_status(
+        taker_addr,
+        &maker_init_response.payment_hash,
+        SwapStatus::Pending,
+    )
+    .await;
+
+    wait_for_ln_balance(maker_addr, &private_asset_id, 90).await;
+    wait_for_ln_balance(taker_addr, &private_asset_id, 10).await;
 }
