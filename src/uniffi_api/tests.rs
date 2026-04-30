@@ -8,6 +8,7 @@ mod uniffi_smoke_tests {
     use bitcoin::hex::DisplayHex;
     use rgb_lib::BitcoinNetwork;
     use sea_orm::{ConnectOptions, Database};
+    use serial_test::serial;
     use std::collections::HashSet;
     use std::str::FromStr;
     use std::sync::{Arc, Mutex};
@@ -15,6 +16,7 @@ mod uniffi_smoke_tests {
     use tokio_util::sync::CancellationToken;
 
     #[test]
+    #[serial(uniffi_state)]
     fn uniffi_entrypoints_require_initialized_state() {
         clear_uniffi_app_state();
         assert!(!uniffi_is_initialized());
@@ -93,6 +95,8 @@ mod uniffi_smoke_tests {
                 enable_virtual_channels_v0: false,
                 virtual_peer_pubkeys: vec![],
                 database: Arc::new(database),
+                lsp_base_url: None,
+                lsp_bearer_token: None,
             }),
             cancel_token: CancellationToken::new(),
             unlocked_app_state: Arc::new(TokioMutex::new(None)),
@@ -104,6 +108,7 @@ mod uniffi_smoke_tests {
     }
 
     #[test]
+    #[serial(uniffi_state)]
     fn uniffi_entrypoints_use_registered_state() {
         set_uniffi_app_state(mock_locked_state());
         assert!(uniffi_is_initialized());
@@ -135,6 +140,7 @@ mod uniffi_smoke_tests {
     }
 
     #[test]
+    #[serial(uniffi_state)]
     fn uniffi_instance_entrypoints_work_without_global_registration() {
         clear_uniffi_app_state();
         assert!(!uniffi_is_initialized());

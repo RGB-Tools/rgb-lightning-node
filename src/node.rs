@@ -16,6 +16,8 @@ pub struct NodeConfig {
     pub root_public_key: Option<biscuit_auth::PublicKey>,
     pub enable_virtual_channels_v0: bool,
     pub virtual_peer_pubkeys: Vec<bitcoin::secp256k1::PublicKey>,
+    pub lsp_base_url: Option<String>,
+    pub lsp_bearer_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -44,6 +46,8 @@ impl NodeHandle {
             root_public_key: config.root_public_key,
             enable_virtual_channels_v0: config.enable_virtual_channels_v0,
             virtual_peer_pubkeys: config.virtual_peer_pubkeys,
+            lsp_base_url: config.lsp_base_url,
+            lsp_bearer_token: config.lsp_bearer_token,
         };
         let state = start_daemon(&args).await?;
         Ok(Self { state })

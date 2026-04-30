@@ -97,17 +97,19 @@ private fun ensureDir(path: Path) {
 
 private fun makeNode(storageDir: Path, daemonPort: UShort, peerPort: UShort): SdkNode {
     return SdkNode.create(
-        SdkInitRequest(
-            storageDirPath = storageDir.pathString,
-            daemonListeningPort = daemonPort,
-            ldkPeerListeningPort = peerPort,
-            network = "regtest",
-            maxMediaUploadSizeMb = 20u,
-            enableVirtualChannelsV0 = false,
-            virtualPeerPubkeys = null,
+            SdkInitRequest(
+                storageDirPath = storageDir.pathString,
+                daemonListeningPort = daemonPort,
+                ldkPeerListeningPort = peerPort,
+                network = "regtest",
+                maxMediaUploadSizeMb = 20u,
+                enableVirtualChannelsV0 = false,
+                virtualPeerPubkeys = null,
+                lspBaseUrl = null,
+                lspBearerToken = null,
+            )
         )
-    )
-}
+    }
 
 private fun unlockRequest(password: String): SdkUnlockRequest {
     return SdkUnlockRequest(

@@ -621,6 +621,8 @@ pub struct SdkInitRequest {
     pub max_media_upload_size_mb: u16,
     pub enable_virtual_channels_v0: Option<bool>,
     pub virtual_peer_pubkeys: Option<Vec<PublicKey>>,
+    pub lsp_base_url: Option<String>,
+    pub lsp_bearer_token: Option<String>,
 }
 
 pub struct SendRgbRequest {

@@ -94,6 +94,8 @@ impl Default for UserArgs {
             root_public_key: None,
             enable_virtual_channels_v0: false,
             virtual_peer_pubkeys: vec![],
+            lsp_base_url: None,
+            lsp_bearer_token: None,
         }
     }
 }

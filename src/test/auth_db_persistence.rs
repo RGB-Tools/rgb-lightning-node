@@ -27,6 +27,8 @@ fn build_state(storage_dir_path: PathBuf, database: DatabaseConnection) -> AppSt
             enable_virtual_channels_v0: false,
             virtual_peer_pubkeys: vec![],
             database: Arc::new(database),
+            lsp_base_url: None,
+            lsp_bearer_token: None,
         }),
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),

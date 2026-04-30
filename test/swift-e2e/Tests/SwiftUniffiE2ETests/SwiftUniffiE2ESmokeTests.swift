@@ -25,7 +25,9 @@ final class SwiftUniffiE2ESmokeTests: XCTestCase {
                 network: "regtest",
                 maxMediaUploadSizeMb: 5,
                 enableVirtualChannelsV0: false,
-                virtualPeerPubkeys: nil
+                virtualPeerPubkeys: nil,
+                lspBaseUrl: nil,
+                lspBearerToken: nil
             )
         )
         defer { node.shutdown() }

@@ -42,6 +42,12 @@ struct Args {
 
     #[arg(long, value_delimiter = ',')]
     virtual_peer_pubkeys: Vec<String>,
+
+    #[arg(long)]
+    lsp_base_url: Option<String>,
+
+    #[arg(long)]
+    lsp_bearer_token: Option<String>,
 }
 
 pub(crate) struct UserArgs {
@@ -53,6 +59,8 @@ pub(crate) struct UserArgs {
     pub(crate) root_public_key: Option<biscuit_auth::PublicKey>,
     pub(crate) enable_virtual_channels_v0: bool,
     pub(crate) virtual_peer_pubkeys: Vec<PublicKey>,
+    pub(crate) lsp_base_url: Option<String>,
+    pub(crate) lsp_bearer_token: Option<String>,
 }
 
 pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
@@ -84,5 +92,7 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
         root_public_key,
         enable_virtual_channels_v0: args.enable_virtual_channels_v0,
         virtual_peer_pubkeys,
+        lsp_base_url: args.lsp_base_url,
+        lsp_bearer_token: args.lsp_bearer_token,
     })
 }

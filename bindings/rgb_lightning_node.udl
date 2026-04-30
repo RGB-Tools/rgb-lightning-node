@@ -528,6 +528,8 @@ dictionary SdkInitRequest {
     u16 max_media_upload_size_mb;
     boolean? enable_virtual_channels_v0;
     sequence<PublicKey>? virtual_peer_pubkeys;
+    string? lsp_base_url;
+    string? lsp_bearer_token;
 };
 
 dictionary SdkUnlockRequest {

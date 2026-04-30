@@ -36,6 +36,7 @@ use std::{
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use crate::async_order::{AsyncOrderMessageHandler, AsyncPaymentsPreimageRoot};
 use crate::core_types::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::ldk::{ChannelIdsMap, Router, VirtualChannelDraftStore, VirtualChannelSessionStore};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
@@ -102,8 +103,9 @@ pub(crate) struct StaticState {
     pub(crate) logger: Arc<FilesystemLogger>,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) virtual_peer_pubkeys: Vec<PublicKey>,
-    /// Shared database connection for mnemonic storage and LDK KVStore
     pub(crate) database: Arc<DatabaseConnection>,
+    pub(crate) lsp_base_url: Option<String>,
+    pub(crate) lsp_bearer_token: Option<String>,
 }
 
 pub(crate) struct UnlockedAppState {
@@ -115,6 +117,8 @@ pub(crate) struct UnlockedAppState {
     pub(crate) onion_messenger: Arc<OnionMessenger>,
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
+    pub(crate) async_order_handler: Arc<AsyncOrderMessageHandler>,
+    pub(crate) async_payments_preimage_root: Arc<AsyncPaymentsPreimageRoot>,
     pub(crate) kv_store: Arc<SeaOrmKvStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
@@ -298,6 +302,10 @@ pub(crate) fn hex_str(value: &[u8]) -> String {
     res
 }
 
+pub(crate) fn new_jsonrpc_request_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 pub(crate) fn hex_str_to_compressed_pubkey(hex: &str) -> Option<PublicKey> {
     if hex.len() != 33 * 2 {
         return None;
@@ -407,6 +415,8 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         max_media_upload_size_mb: args.max_media_upload_size_mb,
         virtual_peer_pubkeys: args.virtual_peer_pubkeys.clone(),
         database: Arc::new(database),
+        lsp_base_url: args.lsp_base_url.clone(),
+        lsp_bearer_token: args.lsp_bearer_token.clone(),
     });
 
     let app_state = Arc::new(AppState {

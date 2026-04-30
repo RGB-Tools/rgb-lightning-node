@@ -59,6 +59,7 @@ use rgb_lib::{
     BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::HashMap, net::ToSocketAddrs, path::Path, str::FromStr, sync::Arc, time::Duration,
 };
@@ -66,8 +67,14 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     sync::MutexGuard as TokioMutexGuard,
+    time::timeout,
 };
 
+use crate::async_order::{
+    read_async_payments_next_hash_index, write_async_payments_next_hash_index,
+    AsyncOrderNewHashWire, AsyncOrderNewResultWire, ASYNC_ORDER_MAX_HASH_BATCH_SIZE,
+    ASYNC_ORDER_RESPONSE_TIMEOUT_SECS,
+};
 use crate::ldk::{
     clear_rgb_payment_pending, start_ldk, stop_ldk, LdkBackgroundServices,
     VirtualChannelSessionStatus,
@@ -76,9 +83,9 @@ use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_route, hex_str,
-    hex_str_to_compressed_pubkey, hex_str_to_vec, validate_and_parse_description_hash,
-    validate_and_parse_payment_hash, validate_and_parse_payment_preimage, UnlockedAppState,
-    UserOnionMessageContents,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, new_jsonrpc_request_id,
+    validate_and_parse_description_hash, validate_and_parse_payment_hash,
+    validate_and_parse_payment_preimage, UnlockedAppState, UserOnionMessageContents,
 };
 use crate::{
     backup::{do_backup, restore_backup},
@@ -342,6 +349,27 @@ impl From<Assignment> for RgbLibAssignment {
             Assignment::Any => Self::Any,
         }
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AsyncOrderNewRequest {
+    pub(crate) host_node_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct AsyncOrderNewResponse {
+    pub(crate) request_id: String,
+    pub(crate) host_node_id: String,
+    pub(crate) protocol_version: u64,
+    pub(crate) order_id: String,
+    pub(crate) status: String,
+    pub(crate) accepted_through_index: u64,
+    pub(crate) next_index_expected: u64,
+    pub(crate) unused_hashes: u64,
+    pub(crate) refill_batch_size: u64,
+    pub(crate) first_hash_index: u64,
+    pub(crate) last_hash_index: u64,
+    pub(crate) hashes: Vec<AsyncOrderNewHashWire>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1370,6 +1398,101 @@ pub(crate) async fn address(
     let address = unlocked_state.rgb_get_address()?;
 
     Ok(Json(AddressResponse { address }))
+}
+
+pub(crate) async fn async_order_new(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<AsyncOrderNewRequest>, APIError>,
+) -> Result<Json<AsyncOrderNewResponse>, APIError> {
+    let guard = state.check_unlocked().await?;
+    let unlocked_state = Arc::clone(guard.as_ref().unwrap());
+    drop(guard);
+
+    let host_node_id =
+        hex_str_to_compressed_pubkey(&payload.host_node_id).ok_or(APIError::InvalidPubkey)?;
+    if unlocked_state
+        .peer_manager
+        .peer_by_node_id(&host_node_id)
+        .is_none()
+    {
+        return Err(APIError::InvalidPeerInfo(s!(
+            "/apay/new requires a connected host peer"
+        )));
+    }
+
+    let params = unlocked_state
+        .async_payments_preimage_root
+        .prepare_async_order_new_params(
+            read_async_payments_next_hash_index(unlocked_state.kv_store.as_ref(), &host_node_id)
+                .map_err(|err| APIError::Unexpected(err.message))?,
+            ASYNC_ORDER_MAX_HASH_BATCH_SIZE,
+        )
+        .map_err(|err| APIError::InvalidRequest(err.message))?;
+    let hashes = params.hashes.clone();
+    let first_hash_index = hashes
+        .first()
+        .map(|entry| entry.hash_index)
+        .expect("validated async_order.new hash batch is non-empty");
+    let last_hash_index = hashes
+        .last()
+        .map(|entry| entry.hash_index)
+        .expect("validated async_order.new hash batch is non-empty");
+    let request_id = new_jsonrpc_request_id();
+
+    let response_rx = unlocked_state
+        .async_order_handler
+        .queue_async_order_new_request(host_node_id, Value::String(request_id.clone()), params)
+        .map_err(|err| APIError::InvalidRequest(err.message))?;
+    unlocked_state.peer_manager.process_events();
+    let order_state: AsyncOrderNewResultWire = match timeout(
+        Duration::from_secs(ASYNC_ORDER_RESPONSE_TIMEOUT_SECS),
+        response_rx,
+    )
+    .await
+    {
+        Ok(Ok(Ok(result))) => result,
+        Ok(Ok(Err(err))) => {
+            return Err(APIError::InvalidRequest(format!(
+                "async_order host error {}: {}",
+                err.code, err.message
+            )));
+        }
+        Ok(Err(_)) => {
+            return Err(APIError::Network(s!(
+                "/apay/new response channel closed before host replied"
+            )))
+        }
+        Err(_) => {
+            unlocked_state
+                .async_order_handler
+                .forget_async_order_response(host_node_id, &request_id);
+            return Err(APIError::Network(s!(
+                "/apay/new timed out waiting for host response"
+            )));
+        }
+    };
+    let next_hash_index = order_state.next_index_expected;
+    write_async_payments_next_hash_index(
+        unlocked_state.kv_store.as_ref(),
+        &host_node_id,
+        next_hash_index,
+    )
+    .map_err(|err| APIError::Unexpected(err.message))?;
+
+    Ok(Json(AsyncOrderNewResponse {
+        request_id,
+        host_node_id: hex_str(&host_node_id.serialize()),
+        protocol_version: order_state.protocol_version,
+        order_id: order_state.order_id,
+        status: order_state.status,
+        accepted_through_index: order_state.accepted_through_index,
+        next_index_expected: order_state.next_index_expected,
+        unused_hashes: order_state.unused_hashes,
+        refill_batch_size: order_state.refill_batch_size,
+        first_hash_index,
+        last_hash_index,
+        hashes,
+    }))
 }
 
 pub(crate) async fn asset_balance(

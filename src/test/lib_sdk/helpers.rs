@@ -231,6 +231,8 @@ pub(crate) fn make_node(
         max_media_upload_size_mb: 20,
         enable_virtual_channels_v0: Some(false),
         virtual_peer_pubkeys: None,
+        lsp_base_url: None,
+        lsp_bearer_token: None,
     })
     .expect("create SDK node")
 }

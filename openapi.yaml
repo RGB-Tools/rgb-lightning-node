@@ -43,6 +43,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AddressResponse'
+  /apay/new:
+    post:
+      tags:
+        - Payments
+      summary: Send a new order with async-payment hashes
+      description: Derive deterministic payment hashes for async payments from the unlocked wallet. Send an async_order.new JSON-RPC request to the connected invoice-host peer so it can track those hashes and process asynchronous payments.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsyncOrderNewRequest'
+      responses:
+        '200':
+          description: Host accepted the async order request and returned order state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AsyncOrderNewResponse'
   /assetbalance:
     post:
       tags:
@@ -1058,6 +1076,79 @@ components:
         address:
           type: string
           example: bcrt1qnc5y6j6dmejrkwy93farhvpezk0lf46gk7aecs
+    AsyncOrderNewHash:
+      type: object
+      required:
+        - hash_index
+        - payment_hash
+      properties:
+        hash_index:
+          type: integer
+          example: 1
+        payment_hash:
+          type: string
+          example: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    AsyncOrderNewRequest:
+      type: object
+      required:
+        - host_node_id
+      properties:
+        host_node_id:
+          type: string
+          example: 02123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0
+    AsyncOrderNewResponse:
+      type: object
+      required:
+        - request_id
+        - host_node_id
+        - protocol_version
+        - order_id
+        - status
+        - accepted_through_index
+        - next_index_expected
+        - unused_hashes
+        - refill_batch_size
+        - first_hash_index
+        - last_hash_index
+        - hashes
+      properties:
+        request_id:
+          type: string
+          example: 3aebcbb3-1230-4e78-933f-cdfba5ac9f30
+        host_node_id:
+          type: string
+          example: 02123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0
+        protocol_version:
+          type: integer
+          example: 1
+        order_id:
+          type: string
+          example: '1'
+        status:
+          type: string
+          example: active
+        accepted_through_index:
+          type: integer
+          example: 200
+        next_index_expected:
+          type: integer
+          example: 201
+        unused_hashes:
+          type: integer
+          example: 200
+        refill_batch_size:
+          type: integer
+          example: 200
+        first_hash_index:
+          type: integer
+          example: 1
+        last_hash_index:
+          type: integer
+          example: 200
+        hashes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AsyncOrderNewHash'
     AssetBalanceRequest:
       type: object
       required:

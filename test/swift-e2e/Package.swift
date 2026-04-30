@@ -5,8 +5,13 @@ import PackageDescription
 // Original macOS-only: let libraryPath = "Libraries/macos"
 #if os(macOS)
 let libraryPath = "Libraries/macos"
+let openSslLinkerSettings: [LinkerSetting] = []
 #else
 let libraryPath = "Libraries/linux"
+let openSslLinkerSettings: [LinkerSetting] = [
+    .linkedLibrary("crypto"),
+    .linkedLibrary("ssl"),
+]
 #endif
 
 let package = Package(
@@ -33,7 +38,7 @@ let package = Package(
                     libraryPath,  // [TEST: Linux runner] was: "Libraries/macos"
                 ]),
                 .linkedLibrary("rgb_lightning_node"),
-            ]
+            ] + openSslLinkerSettings
         ),
         .testTarget(
             name: "SwiftUniffiE2ETests",

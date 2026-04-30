@@ -132,6 +132,8 @@ class SwapRoundtripBuyTest {
                 maxMediaUploadSizeMb = 20u,
                 enableVirtualChannelsV0 = false,
                 virtualPeerPubkeys = null,
+                lspBaseUrl = null,
+                lspBearerToken = null,
             )
         )
     }
