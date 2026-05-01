@@ -3164,27 +3164,11 @@ components:
       type: object
       required:
         - password
-        - bitcoind_rpc_username
-        - bitcoind_rpc_password
-        - bitcoind_rpc_host
-        - bitcoind_rpc_port
         - announce_addresses
       properties:
         password:
           type: string
           example: nodepassword
-        bitcoind_rpc_username:
-          type: string
-          example: user
-        bitcoind_rpc_password:
-          type: string
-          example: password
-        bitcoind_rpc_host:
-          type: string
-          example: localhost
-        bitcoind_rpc_port:
-          type: integer
-          example: 18443
         indexer_url:
           type:
             - string
