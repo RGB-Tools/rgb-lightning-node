@@ -101,13 +101,22 @@ async fn fail() {
         "file",
         reqwest::multipart::Part::bytes(file_bytes).headers([].into_iter().collect()),
     );
-    let res = reqwest::Client::new()
+    // RequestBodyLimitLayer can either reply 413 or close the connection mid-stream
+    // depending on how much of the body the server has read; both prove the limit triggered.
+    let result = reqwest::Client::new()
         .post(format!("http://{node1_addr}/postassetmedia"))
         .multipart(form)
         .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
-    let api_error_response = res.text().await.unwrap();
-    assert_eq!(api_error_response, "length limit exceeded");
+        .await;
+    match result {
+        Ok(res) => {
+            assert_eq!(res.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+            let api_error_response = res.text().await.unwrap();
+            assert_eq!(api_error_response, "length limit exceeded");
+        }
+        Err(e) => assert!(
+            e.is_request() || e.is_body(),
+            "expected payload-too-large rejection, got: {e:?}"
+        ),
+    }
 }

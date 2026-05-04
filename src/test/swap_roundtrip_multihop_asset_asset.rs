@@ -103,6 +103,10 @@ async fn swap_roundtrip_multihop_asset_asset() {
     )
     .await;
 
+    wait_for_usable_channels(node1_addr, 2).await;
+    wait_for_usable_channels(node2_addr, 4).await;
+    wait_for_usable_channels(node3_addr, 2).await;
+
     let channels_1_before = list_channels(node1_addr).await;
     let channels_2_before = list_channels(node2_addr).await;
     let channels_3_before = list_channels(node3_addr).await;
