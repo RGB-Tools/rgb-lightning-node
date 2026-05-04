@@ -111,6 +111,41 @@ async fn description_hash_invoice() {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
+async fn invalid_description_hash_invoice() {
+    initialize();
+
+    let test_dir_node1 = format!("{TEST_DIR_BASE}invalid_description_hash/node1");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        payment_hash: None,
+        description_hash: Some("not-a-valid-description-hash".to_string()),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid description hash: not-a-valid-description-hash",
+        "InvalidDescriptionHash",
+    )
+    .await;
+}
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
 async fn zero_amount_invoice() {
     initialize();
 
