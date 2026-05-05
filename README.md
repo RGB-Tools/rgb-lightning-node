@@ -46,14 +46,12 @@ docker build -t rgb-lightning-node .
 ## Run
 
 In order to operate, the node will need:
-- a bitcoind node
 - an indexer instance (electrum or esplora)
 - an [RGB proxy server] instance
 
 Once services are running, daemons can be started.
 Each daemon needs to be started in a separate shell with `rgb-lightning-node`,
 specifying:
-- bitcoind user, password, host and port
 - node data directory
 - node listening port
 - LN peer listening port
@@ -129,18 +127,10 @@ For more info about regtest utility commands, run:
 ```
 
 When unlocking regtest nodes use the following local services:
-- bitcoind_rpc_username: user
-- bitcoind_rpc_password: password
-- bitcoind_rpc_host: localhost
-- bitcoind_rpc_port: 18433
 - indexer_url: 127.0.0.1:50001
 - proxy_endpoint: rpc://127.0.0.1:3000/json-rpc
 
 To unlock a regtest nodes running in docker use the following local services:
-- bitcoind_rpc_username: user
-- bitcoind_rpc_password: password
-- bitcoind_rpc_host: bitcoind
-- bitcoind_rpc_port: 18433
 - indexer_url: electrs:50001
 - proxy_endpoint: rpc://proxy:3000/json-rpc
 
@@ -172,10 +162,6 @@ rgb-lightning-node dataldk2/ --daemon-listening-port 3003 \
 ```
 
 When unlocking testnet3 nodes you can use the following services:
-- bitcoind_rpc_username: user
-- bitcoind_rpc_username: password
-- bitcoind_rpc_host: electrum.iriswallet.com
-- bitcoind_rpc_port: 18332
 - indexer_url: ssl://electrum.iriswallet.com:50013
 - proxy_endpoint: rpcs://proxy.iriswallet.com/0.2/json-rpc
 
@@ -183,7 +169,6 @@ When unlocking testnet3 nodes you can use the following services:
 
 To run testnet4 use the same options as testnet3 except for:
 - CLI arg: `--network testnet4`
-- bitcoind_rpc_port: 18443
 - indexer_url: ssl://electrum.iriswallet.com:50053
 
 ## Use

@@ -476,7 +476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b59a3f7fbe678874fa34354097644a171276e02a49934c13b3d61c54610ddf39"
 dependencies = [
  "bdk_core",
- "electrum-client 0.24.1",
+ "electrum-client",
 ]
 
 [[package]]
@@ -837,12 +837,6 @@ dependencies = [
  "wasm-bindgen",
  "windows-link",
 ]
-
-[[package]]
-name = "chunked_transfer"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
 
 [[package]]
 name = "cipher"
@@ -1354,23 +1348,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "electrum-client"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c7b1f8783238bb18e6e137875b0a66f3dffe6c7ea84066e05d033cf180b150f"
-dependencies = [
- "bitcoin",
- "byteorder",
- "libc",
- "log",
- "rustls 0.23.40",
- "serde",
- "serde_json",
- "webpki-roots 0.25.4",
- "winapi",
 ]
 
 [[package]]
@@ -2404,19 +2381,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lightning-block-sync"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee5069846b07a62aaecdaf25233e067bc69f245b7c8fd00cc9c217053221f875"
-dependencies = [
- "bitcoin",
- "chunked_transfer",
- "lightning",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "lightning-dns-resolver"
 version = "0.3.0"
 dependencies = [
@@ -2500,6 +2464,17 @@ dependencies = [
  "bitcoin-io",
  "bitcoin_hashes",
  "lightning",
+]
+
+[[package]]
+name = "lightning-transaction-sync"
+version = "0.2.1"
+dependencies = [
+ "bitcoin",
+ "electrum-client",
+ "esplora-client",
+ "lightning",
+ "lightning-macros 0.2.1",
 ]
 
 [[package]]
@@ -3697,20 +3672,21 @@ dependencies = [
  "clap",
  "dircmp",
  "dirs",
- "electrum-client 0.20.0",
+ "electrum-client",
+ "esplora-client",
  "futures",
  "hex-conservative 0.3.2",
  "http",
  "lazy_static",
  "lightning",
  "lightning-background-processor",
- "lightning-block-sync",
  "lightning-dns-resolver",
  "lightning-invoice",
  "lightning-macros 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
+ "lightning-transaction-sync",
  "magic-crypt",
  "once_cell",
  "rand 0.8.6",
@@ -3747,7 +3723,7 @@ dependencies = [
  "baid64",
  "base85",
  "chrono",
- "electrum-client 0.24.1",
+ "electrum-client",
  "esplora-client",
  "getrandom 0.3.4",
  "indexmap",

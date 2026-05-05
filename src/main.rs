@@ -1,9 +1,9 @@
 mod args;
 mod auth;
 mod backup;
-mod bitcoind;
 mod disk;
 mod error;
+mod indexer;
 mod ldk;
 mod rgb;
 mod routes;
