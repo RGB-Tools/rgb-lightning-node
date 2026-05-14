@@ -59,14 +59,12 @@ jobs:
       fail-fast: false
       matrix:
         scenario:
-          # RGB-channel scenarios temporarily disabled in Python CI:
-          # - payment
-          # - hodl_e2e
-          # - hodl_expiry
+          - payment
+          - hodl_e2e
+          - hodl_expiry
+          # Disabled: CI-only failure after issue #28 fix; peer disconnect
+          # before funding tx broadcast, distinct from the original race.
           # - openchannel_push_asset_amount
-          # They currently flake in rust-lightning with InvalidColoringInfo
-          # during RGB channel opening. Keep them runnable manually and
-          # re-enable after the dedicated RGB openchannel follow-up fix.
           - getchannelid_fail
           - openchannel_fail_no_utxos
           - openchannel_fail_unknown_asset
