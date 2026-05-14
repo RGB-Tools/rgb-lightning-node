@@ -1,0 +1,271 @@
+name: Release SDK (Swift + Kotlin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0 or 0.1.0-beta.1)"
+        required: true
+        type: string
+      publish_to_maven:
+        description: "Publish Kotlin Android artifact to Maven"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  KOTLIN_VERSION: 1.9.24
+  JAVA_VERSION: "17"
+  ANDROID_NDK_VERSION: 27.3.13750724
+
+jobs:
+  resolve-version:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      publish_to_maven: ${{ steps.resolve.outputs.publish_to_maven }}
+    steps:
+      - name: Resolve version
+        id: resolve
+        run: |
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+          PUBLISH_TO_MAVEN="${{ inputs.publish_to_maven }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "publish_to_maven=${PUBLISH_TO_MAVEN}" >> "$GITHUB_OUTPUT"
+
+  kotlin-android:
+    name: Build Kotlin Android and publish Maven
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 80
+    needs: resolve-version
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-34" "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Export Android NDK environment
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/.android/sdk}}"
+          NDK_PATH="${SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "AWS_LC_SYS_ANDROID_NDK_ROOT=${NDK_PATH}" >> "$GITHUB_ENV"
+          echo "AWS_LC_SYS_ANDROID_NDK=${NDK_PATH}" >> "$GITHUB_ENV"
+
+      - name: Add Android targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+
+      - name: Install Android native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build make clang pkg-config build-essential
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.4 --locked
+
+      - name: Install bindgen-cli
+        run: |
+          cargo install --force --locked bindgen-cli
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          bindgen --version
+
+      - name: Build host cdylib with external signer API
+        run: cargo build --release --features "uniffi,vls" --lib
+
+      - name: Generate Kotlin Android bindings
+        run: ./scripts/ci/uniffi_generate_from_library.sh kotlin target/uniffi/kotlin-android target/release/librgb_lightning_node.so uniffi-android.toml
+
+      - name: Build Android JNI libs
+        env:
+          AWS_LC_SYS_EXTERNAL_BINDGEN: "1"
+          CMAKE: /usr/bin/cmake
+          UNIFFI_CARGO_FEATURES: "uniffi,vls"
+        run: |
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          export BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi="--sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          export BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android="--sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          ./scripts/ci/build_android_jni.sh
+
+      - name: Publish Kotlin Android to Maven
+        if: needs.resolve-version.outputs.publish_to_maven == 'true'
+        env:
+          MAVEN_GROUP_ID: ${{ vars.MAVEN_GROUP_ID }}
+          MAVEN_ARTIFACT_ID: ${{ vars.MAVEN_ARTIFACT_ID }}
+          JRELEASER_MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          JRELEASER_MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+          JRELEASER_GPG_KEY_NAME: ${{ secrets.GPG_KEY_NAME }}
+          JRELEASER_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "${{ secrets.GPG_SECRET_KEY }}" | gpg --batch --import
+          gpg --list-secret-keys --keyid-format short
+
+          GROUP_ID="${MAVEN_GROUP_ID:-org.utexo}"
+          ARTIFACT_ID="${MAVEN_ARTIFACT_ID:-rgb-lightning-node-android}"
+          gradle -p bindings/kotlin-android-sdk \
+            publish \
+            -PGROUP_ID="${GROUP_ID}" \
+            -PARTIFACT_ID="${ARTIFACT_ID}" \
+            -PVERSION_NAME="${{ needs.resolve-version.outputs.version }}"
+
+          gradle -p bindings/kotlin-android-sdk \
+            jreleaserDeploy \
+            -PGROUP_ID="${GROUP_ID}" \
+            -PARTIFACT_ID="${ARTIFACT_ID}" \
+            -PVERSION_NAME="${{ needs.resolve-version.outputs.version }}" \
+            -Pjreleaser.gpg.keyName="${JRELEASER_GPG_KEY_NAME}" \
+            -Pjreleaser.gpg.passphrase="${JRELEASER_GPG_PASSPHRASE}"
+
+      - name: Package Kotlin Android release bundle
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          mkdir -p release/kotlin-android
+          cp -r target/uniffi/kotlin-android release/kotlin-android/
+          cp target/release/librgb_lightning_node.so release/kotlin-android/
+          (cd release && zip -r "rgb-lightning-node-kotlin-android-${VERSION}.zip" kotlin-android)
+
+      - name: Upload Kotlin Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-android-release
+          if-no-files-found: error
+          path: release/rgb-lightning-node-kotlin-android-${{ needs.resolve-version.outputs.version }}.zip
+
+  swift-ios:
+    name: Build Swift XCFramework
+    runs-on: warp-macos-latest-arm64-6x
+    timeout-minutes: 90
+    needs: resolve-version
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Install bindgen-cli
+        run: |
+          cargo install --force --locked bindgen-cli
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          bindgen --version
+
+      - name: Add Apple targets
+        run: |
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          rustup target add x86_64-apple-ios
+
+      - name: Build static libraries for Apple targets
+        env:
+          AWS_LC_SYS_EXTERNAL_BINDGEN: "1"
+        run: |
+          IOS_SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          SIM_SYSROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          IOS_SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version)"
+          SIM_SDK_VER="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          export IPHONEOS_DEPLOYMENT_TARGET="${IOS_SDK_VER}"
+          export CARGO_TARGET_AARCH64_APPLE_IOS_RUSTFLAGS="-C link-arg=-miphoneos-version-min=${IOS_SDK_VER}"
+          export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUSTFLAGS="-C link-arg=-mios-simulator-version-min=${SIM_SDK_VER}"
+          export CARGO_TARGET_X86_64_APPLE_IOS_RUSTFLAGS="-C link-arg=-mios-simulator-version-min=${SIM_SDK_VER}"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--sysroot=${IOS_SYSROOT}"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--sysroot=${SIM_SYSROOT}"
+          export BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_ios="--sysroot=${SIM_SYSROOT}"
+          cargo build --release --features "uniffi,vls" --lib
+          cargo build --release --features "uniffi,vls" --lib --target aarch64-apple-ios
+          cargo build --release --features "uniffi,vls" --lib --target aarch64-apple-ios-sim
+          cargo build --release --features "uniffi,vls" --lib --target x86_64-apple-ios
+
+      - name: Generate Swift bindings
+        run: ./scripts/ci/uniffi_generate_from_library.sh swift target/uniffi/swift target/release/librgb_lightning_node.dylib
+
+      - name: Package XCFramework
+        run: ./scripts/ci/package_swift_xcframework.sh
+
+      - name: Zip Swift release bundle
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          mkdir -p release/swift
+          cp -r target/uniffi/swift/RGBLightningNode.xcframework release/swift/
+          cp target/uniffi/swift/RGBLightningNode.swift release/swift/
+          cp target/uniffi/swift/RGBLightningNodeFFI.h release/swift/
+          cp target/uniffi/swift/RGBLightningNodeFFI.modulemap release/swift/
+          (cd release && zip -r "rgb-lightning-node-swift-${VERSION}.zip" swift)
+
+      - name: Upload Swift bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-release
+          if-no-files-found: error
+          path: release/rgb-lightning-node-swift-${{ needs.resolve-version.outputs.version }}.zip
+
+  github-release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: [resolve-version, kotlin-android, swift-ios]
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: SDK v${{ needs.resolve-version.outputs.version }}
+          body: |
+            ## RGB Lightning Node SDK
+
+            Includes release bundles for:
+            - Swift XCFramework
+            - Kotlin Android bindings + JNI artifacts
+          draft: false
+          prerelease: ${{ contains(needs.resolve-version.outputs.version, 'alpha') || contains(needs.resolve-version.outputs.version, 'beta') || contains(needs.resolve-version.outputs.version, 'rc') }}
+          files: |
+            release-assets/**/rgb-lightning-node-swift-${{ needs.resolve-version.outputs.version }}.zip
+            release-assets/**/rgb-lightning-node-kotlin-android-${{ needs.resolve-version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
