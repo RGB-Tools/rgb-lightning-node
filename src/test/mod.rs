@@ -34,10 +34,11 @@ use crate::routes::{
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
     ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
     DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, FailTransfersRequest,
-    FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest,
-    GetChannelIdResponse, GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
-    HTLCStatus, InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
+    DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
+    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
+    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, HTLCStatus,
+    InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
     InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
     IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
     IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
@@ -526,6 +527,24 @@ async fn decode_rgb_invoice(node_address: SocketAddr, invoice: &str) -> DecodeRG
     check_response_is_ok(res)
         .await
         .json::<DecodeRGBInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn decode_swapstring(node_address: SocketAddr, swapstring: &str) -> DecodeSwapstringResponse {
+    println!("decoding swapstring {swapstring} for node {node_address}");
+    let payload = DecodeSwapstringRequest {
+        swapstring: swapstring.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/decodeswapstring"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<DecodeSwapstringResponse>()
         .await
         .unwrap()
 }

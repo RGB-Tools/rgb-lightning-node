@@ -522,6 +522,21 @@ pub(crate) struct DecodeRGBInvoiceResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeSwapstringRequest {
+    pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeSwapstringResponse {
+    pub(crate) qty_from: u64,
+    pub(crate) qty_to: u64,
+    pub(crate) from_asset: Option<String>,
+    pub(crate) to_asset: Option<String>,
+    pub(crate) expiry: u64,
+    pub(crate) payment_hash: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct DisconnectPeerRequest {
     pub(crate) peer_pubkey: String,
 }
@@ -1733,6 +1748,23 @@ pub(crate) async fn decode_rgb_invoice(
         network: invoice_data.network.into(),
         expiration_timestamp: invoice_data.expiration_timestamp,
         transport_endpoints: invoice_data.transport_endpoints,
+    }))
+}
+
+pub(crate) async fn decode_swap_string(
+    WithRejection(Json(payload), _): WithRejection<Json<DecodeSwapstringRequest>, APIError>,
+) -> Result<Json<DecodeSwapstringResponse>, APIError> {
+    let swapstring = SwapString::from_str(&payload.swapstring)
+        .map_err(|e| APIError::InvalidSwapString(payload.swapstring, e.to_string()))?;
+    let swap_info = swapstring.swap_info;
+
+    Ok(Json(DecodeSwapstringResponse {
+        qty_from: swap_info.qty_from,
+        qty_to: swap_info.qty_to,
+        from_asset: swap_info.from_asset.map(|a| a.to_string()),
+        to_asset: swap_info.to_asset.map(|a| a.to_string()),
+        expiry: swap_info.expiry,
+        payment_hash: hex_str(&swapstring.payment_hash.0),
     }))
 }
 
