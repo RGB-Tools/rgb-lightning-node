@@ -13,7 +13,7 @@ impl EntityName for Entity {
 
 #[derive(Clone, Debug, PartialEq, DeriveModel, DeriveActiveModel, Eq)]
 pub struct Model {
-    pub id: i32,
+    pub idx: i32,
     pub encrypted_mnemonic: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -21,7 +21,7 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveColumn)]
 pub enum Column {
-    Id,
+    Idx,
     EncryptedMnemonic,
     CreatedAt,
     UpdatedAt,
@@ -29,7 +29,7 @@ pub enum Column {
 
 #[derive(Copy, Clone, Debug, EnumIter, DerivePrimaryKey)]
 pub enum PrimaryKey {
-    Id,
+    Idx,
 }
 
 impl PrimaryKeyTrait for PrimaryKey {
@@ -46,7 +46,7 @@ impl ColumnTrait for Column {
     type EntityName = Entity;
     fn def(&self) -> ColumnDef {
         match self {
-            Self::Id => ColumnType::Integer.def(),
+            Self::Idx => ColumnType::Integer.def(),
             Self::EncryptedMnemonic => ColumnType::String(StringLen::None).def(),
             Self::CreatedAt => ColumnType::BigInteger.def(),
             Self::UpdatedAt => ColumnType::BigInteger.def(),

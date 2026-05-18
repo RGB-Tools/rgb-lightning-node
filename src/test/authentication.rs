@@ -208,7 +208,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res).await;
+    check_response_is_ok(res).await;
     let t_0 = OffsetDateTime::now_utc();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -234,7 +234,7 @@ async fn authentication() {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await

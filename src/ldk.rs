@@ -676,11 +676,7 @@ fn handle_funding_prepare_err(
     }
 }
 
-async fn handle_open_chan_fail(
-    channel_id: &ChannelId,
-    static_state: &StaticState,
-    unlocked_state: Arc<UnlockedAppState>,
-) {
+async fn handle_open_chan_fail(channel_id: &ChannelId, unlocked_state: Arc<UnlockedAppState>) {
     tracing::info!("Handling open channel failure for channel {channel_id}");
     let channel_id_str = channel_id.0.as_hex().to_string();
     let kv_store_dyn: Arc<dyn KVStoreSync + Send + Sync> =
@@ -979,8 +975,7 @@ async fn handle_ldk_events(
             {
                 tracing::error!(
                         "ERROR: Channel went away before we could fund it. The peer disconnected or refused the channel.");
-                handle_open_chan_fail(&final_channel_id, &static_state, unlocked_state.clone())
-                    .await;
+                handle_open_chan_fail(&final_channel_id, unlocked_state.clone()).await;
             }
         }
         Event::FundingTxBroadcastSafe { .. } => {
@@ -1450,7 +1445,7 @@ async fn handle_ldk_events(
 
             // the ChannelClosed event gets fired also after node crashes/restarts, so it's better
             // to handle the failure here (regardless what the DiscardFunding event documents)
-            handle_open_chan_fail(&channel_id, &static_state, unlocked_state.clone()).await;
+            handle_open_chan_fail(&channel_id, unlocked_state.clone()).await;
         }
         Event::DiscardFunding { channel_id, .. } => {
             tracing::info!(
@@ -1461,7 +1456,7 @@ async fn handle_ldk_events(
             // this will probably do nothing, since the ChannelClosed event will be triggered
             // before, but in case of splicing this should be the correct place to handle the
             // failure
-            handle_open_chan_fail(&channel_id, &static_state, unlocked_state.clone()).await;
+            handle_open_chan_fail(&channel_id, unlocked_state.clone()).await;
         }
         Event::HTLCIntercepted {
             is_swap,

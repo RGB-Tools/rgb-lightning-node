@@ -436,7 +436,7 @@ pub(crate) fn get_max_local_rgb_amount<'r>(
 pub(crate) fn get_route(
     channel_manager: &crate::ldk::ChannelManager,
     router: &crate::ldk::Router,
-    ldk_data_dir_path: &Path,
+    kv_store: &dyn KVStoreSync,
     start: PublicKey,
     dest: PublicKey,
     final_value_msat: Option<u64>,
@@ -451,8 +451,8 @@ pub(crate) fn get_route(
             .iter()
             .filter(|channel| match rgb_payment {
                 Some((contract_id, _)) => {
-                    get_rgb_channel_info_optional(&channel.channel_id, ldk_data_dir_path, false)
-                        .is_some_and(|(rgb_info, _)| rgb_info.contract_id == contract_id)
+                    get_rgb_channel_info_optional(&channel.channel_id, false, kv_store)
+                        .is_some_and(|rgb_info| rgb_info.contract_id == contract_id)
                 }
                 None => true,
             })

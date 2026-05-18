@@ -2374,6 +2374,7 @@ name = "lightning"
 version = "0.2.2"
 dependencies = [
  "bech32 0.11.1",
+ "bincode",
  "bitcoin",
  "dnssec-prover",
  "futures",
@@ -2386,7 +2387,6 @@ dependencies = [
  "possiblyrandom",
  "rgb-lib",
  "serde",
- "serde_json",
  "tokio",
 ]
 
@@ -3689,6 +3689,7 @@ dependencies = [
  "axum-extra",
  "baid58",
  "base64 0.22.1",
+ "bincode",
  "biscuit-auth",
  "bitcoin",
  "bitcoin-bech32",
@@ -3717,7 +3718,9 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rgb-lib",
+ "rln-migration",
  "scrypt",
+ "sea-orm",
  "serde",
  "serde_json",
  "serial_test",
@@ -3857,6 +3860,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
 dependencies = [
  "digest 0.10.7",
+]
+
+[[package]]
+name = "rln-migration"
+version = "0.1.0"
+dependencies = [
+ "sea-orm-migration",
+ "tokio",
 ]
 
 [[package]]

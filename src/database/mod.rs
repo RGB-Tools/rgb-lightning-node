@@ -7,8 +7,7 @@ use std::str::FromStr;
 use bitcoin::secp256k1::PublicKey;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter,
-    TransactionTrait,
+    ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
 };
 
 use crate::database::entities::{
@@ -35,46 +34,42 @@ impl RlnDatabase {
     pub fn add_revoked_tokens(&self, token_id_hexes: Vec<String>) -> Result<(), APIError> {
         let now = crate::utils::get_current_timestamp() as i64;
 
-        block_on(self.connection.transaction::<_, (), sea_orm::DbErr>(
-            move |txn| {
-                Box::pin(async move {
-                    for hex in token_id_hexes {
-                        let token = RevokedTokenActMod {
-                            token_id: ActiveValue::Set(hex),
-                            revoked_at: ActiveValue::Set(now),
-                        };
-                        RevokedTokenEntity::insert(token)
-                            .on_conflict(
-                                OnConflict::column(RevokedTokenColumn::TokenId)
-                                    .do_nothing()
-                                    .to_owned(),
-                            )
-                            .exec(txn)
-                            .await?;
-                    }
-                    Ok(())
-                })
-            },
-        ))
+        block_on(
+            self.connection
+                .transaction::<_, (), sea_orm::DbErr>(move |txn| {
+                    Box::pin(async move {
+                        for hex in token_id_hexes {
+                            let token = RevokedTokenActMod {
+                                token_id: ActiveValue::Set(hex),
+                                revoked_at: ActiveValue::Set(now),
+                            };
+                            RevokedTokenEntity::insert(token)
+                                .on_conflict(
+                                    OnConflict::column(RevokedTokenColumn::TokenId)
+                                        .do_nothing()
+                                        .to_owned(),
+                                )
+                                .exec(txn)
+                                .await?;
+                        }
+                        Ok(())
+                    })
+                }),
+        )
         .map_err(|e| match e {
-            sea_orm::TransactionError::Connection(err) | sea_orm::TransactionError::Transaction(err) => {
-                APIError::from(err)
-            }
+            sea_orm::TransactionError::Connection(err)
+            | sea_orm::TransactionError::Transaction(err) => APIError::from(err),
         })?;
 
         Ok(())
     }
 
     pub fn delete_channel_peer(&self, pubkey: &str) -> Result<(), APIError> {
-        let result = block_on(
-            ChannelPeerEntity::find()
+        block_on(
+            ChannelPeerEntity::delete_many()
                 .filter(ChannelPeerColumn::Pubkey.eq(pubkey))
-                .one(self.get_connection()),
+                .exec(self.get_connection()),
         )?;
-
-        if let Some(peer) = result {
-            block_on(peer.delete(self.get_connection()))?;
-        }
 
         Ok(())
     }
@@ -159,7 +154,7 @@ impl RlnDatabase {
         let now = crate::utils::get_current_timestamp() as i64;
 
         let mnemonic = DbMnemonicActMod {
-            id: ActiveValue::Set(1),
+            idx: ActiveValue::Set(1),
             encrypted_mnemonic: ActiveValue::Set(encrypted_mnemonic),
             created_at: ActiveValue::Set(now),
             updated_at: ActiveValue::Set(now),
@@ -168,7 +163,7 @@ impl RlnDatabase {
         block_on(
             MnemonicEntity::insert(mnemonic)
                 .on_conflict(
-                    OnConflict::column(MnemonicColumn::Id)
+                    OnConflict::column(MnemonicColumn::Idx)
                         .update_columns([
                             MnemonicColumn::EncryptedMnemonic,
                             MnemonicColumn::UpdatedAt,
