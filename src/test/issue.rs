@@ -49,6 +49,48 @@ async fn issue() {
     assert_eq!(nia_asset.asset_id, asset_nia.asset_id);
     assert_eq!(uda_asset.asset_id, asset_uda.asset_id);
 
+    // check /decodeswapstring
+    let maker_init_response = maker_init(
+        node1_addr,
+        30,
+        Some(&asset_nia.asset_id),
+        3_000_000,
+        None,
+        100,
+    )
+    .await;
+    let decoded_swapstring = decode_swapstring(node1_addr, &maker_init_response.swapstring).await;
+    assert_eq!(decoded_swapstring.qty_from, 30);
+    assert_eq!(decoded_swapstring.qty_to, 3_000_000);
+    assert_eq!(
+        decoded_swapstring.from_asset,
+        Some(asset_nia.asset_id.clone())
+    );
+    assert_eq!(decoded_swapstring.to_asset, None);
+    assert!(decoded_swapstring.expiry > 0);
+    assert_eq!(
+        decoded_swapstring.payment_hash,
+        maker_init_response.payment_hash
+    );
+
+    // check /decodeswapstring invalid swapstring error
+    let payload = DecodeSwapstringRequest {
+        swapstring: s!("not_a_valid_swapstring"),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/decodeswapstring"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid swap string 'not_a_valid_swapstring'",
+        "InvalidSwapString",
+    )
+    .await;
+
     // check /getassetmedia
     let mut buf_reader = tokio::io::BufReader::new(tokio::fs::File::open(file_path).await.unwrap());
     let mut file_bytes = Vec::new();
