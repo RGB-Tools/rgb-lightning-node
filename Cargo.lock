@@ -3630,8 +3630,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-lib"
-version = "0.3.0-beta.5"
-source = "git+https://github.com/RGB-Tools/rgb-lib?branch=master#57a88030f522860e8450b6927de2b83005c658a2"
+version = "0.3.0-beta.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d06e96989b2b4c24d05a6b0f02a9482a5c4babeb4706eea920a4f63f4e89a01d"
 dependencies = [
  "amplify",
  "base64 0.22.1",
@@ -3672,8 +3673,9 @@ dependencies = [
 
 [[package]]
 name = "rgb-lib-migration"
-version = "0.3.0-beta.3"
-source = "git+https://github.com/RGB-Tools/rgb-lib?branch=master#57a88030f522860e8450b6927de2b83005c658a2"
+version = "0.3.0-beta.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c162cf4ccf61bf6250ec0b0b5ae99616c96f3a028580298f252998419f294aa7"
 dependencies = [
  "sea-orm-migration",
  "tokio",

@@ -36,7 +36,7 @@ lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/ligh
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "0.3.0-beta.5", features = [
+rgb-lib = { version = "0.3.0-beta.6", features = [
     "electrum",
     "esplora",
 ] }
@@ -71,7 +71,6 @@ tracing-test = "0.2.5"
 [patch.crates-io]
 lightning = { path = "./rust-lightning/lightning" }
 lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
-rgb-lib = { git = "https://github.com/RGB-Tools/rgb-lib", branch = "master" }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"
