@@ -259,6 +259,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DecodeRGBInvoiceResponse'
+  /decodeswapstring:
+    post:
+      tags:
+        - Swaps
+      summary: Decode a swapstring
+      description: Decode the provided swapstring
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecodeSwapstringRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecodeSwapstringResponse'
   /disconnectpeer:
     post:
       tags:
@@ -1690,6 +1708,44 @@ components:
           items:
             type: string
             example: rpcs://proxy.iriswallet.com/0.2/json-rpc
+    DecodeSwapstringRequest:
+      type: object
+      required:
+        - swapstring
+      properties:
+        swapstring:
+          type: string
+          example: 30/rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8/10/rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE/1715896416/9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
+    DecodeSwapstringResponse:
+      type: object
+      required:
+        - qty_from
+        - qty_to
+        - expiry
+        - payment_hash
+      properties:
+        qty_from:
+          type: integer
+          example: 30
+        qty_to:
+          type: integer
+          example: 10
+        from_asset:
+          type:
+            - string
+            - 'null'
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        to_asset:
+          type:
+            - string
+            - 'null'
+          example: rgb:icfqnK9y-wObZKTu-XJcDL98-sKbE5Mh-OuDJhiI-brRJrzE
+        expiry:
+          type: integer
+          example: 1715896416
+        payment_hash:
+          type: string
+          example: 9d342c6ba006e24abee84a2e034a22d5e30c1f2599fb9c3574d46d3cde3d65a2
     DisconnectPeerRequest:
       type: object
       required:
