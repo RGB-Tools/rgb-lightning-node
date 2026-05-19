@@ -211,6 +211,7 @@ The node currently exposes the following APIs:
 - `/createutxos` (POST)
 - `/decodelninvoice` (POST)
 - `/decodergbinvoice` (POST)
+- `/decodeswapstring` (POST)
 - `/disconnectpeer` (POST)
 - `/estimatefee` (POST)
 - `/failtransfers` (POST)
