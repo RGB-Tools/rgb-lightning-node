@@ -2700,11 +2700,12 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Assignment'
             - type: 'null'
+          example: null
         expiration_timestamp:
           type:
             - integer
             - 'null'
-          example: 1695811760
+          example: null
         witness:
           type: boolean
           example: false
@@ -2840,7 +2841,7 @@ components:
           type:
             - integer
             - 'null'
-          example: 1695811760
+          example: null
         recipient_map:
           type: object
           additionalProperties:
