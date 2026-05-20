@@ -2826,7 +2826,6 @@ components:
         - fee_rate
         - min_confirmations
         - recipient_map
-        - skip_sync
       properties:
         donation:
           type: boolean
@@ -2852,18 +2851,21 @@ components:
             rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8:
               - recipient_id: "utxob:2FjRqgQ-eEWCVHY5-zmpFtYzT-gGm3MdR-sTnxNcS-7RtUbY9-4NYuuh"
                 assignment:
-                  Fungible: 400
+                  type: Fungible
+                  value: 400
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
               - recipient_id: "utxob:3GkRrhR-fFXDLIZ6-0anqGuzU-hHn4NeS-tUoyOdT-8SuVcZ0-5OZvvi"
                 assignment:
-                  Fungible: 200
+                  type: Fungible
+                  value: 200
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
             rgb:d8qDVS5X-ICVG2uM-CPr3yO4-lfBhgjt-7FN1EPE-ApY1LcM:
               - recipient_id: "utxob:4HlSsiS-gGYEMKA7-1borHvaV-iIo5OfT-uVpzPeU-9TvWdA1-6PAwwj"
                 assignment:
-                  Fungible: 100
+                  type: Fungible
+                  value: 100
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
     SendRgbResponse:
