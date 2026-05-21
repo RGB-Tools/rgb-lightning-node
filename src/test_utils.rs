@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use sea_orm::{ConnectOptions, Database};
 use tokio::sync::Mutex as TokioMutex;
@@ -32,7 +32,7 @@ pub fn mock_locked_app_state() -> TestAppState {
             max_media_upload_size_mb: 1,
             enable_virtual_channels_v0: false,
             virtual_peer_pubkeys: vec![],
-            database: Arc::new(database),
+            database: RwLock::new(Arc::new(database)),
             lsp_base_url: None,
             lsp_bearer_token: None,
             vss_url: None,

@@ -30,7 +30,7 @@ use std::{
     path::Path,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, RwLock},
     time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
@@ -73,8 +73,12 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn db(&self) -> Arc<DatabaseConnection> {
+        self.static_state.db()
+    }
+
     pub(crate) fn get_db(&self) -> RlnDatabase {
-        RlnDatabase::new((*self.static_state.database).clone())
+        RlnDatabase::new((*self.db()).clone())
     }
 
     pub(crate) fn get_changing_state(&self) -> MutexGuard<'_, bool> {
@@ -109,7 +113,7 @@ pub(crate) struct StaticState {
     pub(crate) logger: Arc<FilesystemLogger>,
     pub(crate) max_media_upload_size_mb: u16,
     pub(crate) virtual_peer_pubkeys: Vec<PublicKey>,
-    pub(crate) database: Arc<DatabaseConnection>,
+    pub(crate) database: RwLock<Arc<DatabaseConnection>>,
     pub(crate) lsp_base_url: Option<String>,
     pub(crate) lsp_bearer_token: Option<String>,
     /// VSS server URL (None = VSS disabled). Populated regardless of the
@@ -120,6 +124,12 @@ pub(crate) struct StaticState {
     /// continues with empty local state instead of aborting unlock.
     #[cfg_attr(not(feature = "vss"), allow(dead_code))]
     pub(crate) vss_allow_empty_restore: bool,
+}
+
+impl StaticState {
+    pub(crate) fn db(&self) -> Arc<DatabaseConnection> {
+        self.database.read().unwrap().clone()
+    }
 }
 
 pub(crate) struct UnlockedAppState {
@@ -428,13 +438,10 @@ pub(crate) fn parse_peer_info(
     Ok((pubkey.unwrap(), peer_addr))
 }
 
-pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppError> {
-    // Initialize the Logger (creates ldk_data_dir and its logs directory)
-    let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
-    let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
-
-    // Initialize the shared database connection
-    let db_path = get_db_path(&args.storage_dir_path);
+pub(crate) async fn open_database_pool(
+    storage_dir_path: &Path,
+) -> Result<DatabaseConnection, AppError> {
+    let db_path = get_db_path(storage_dir_path);
     let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
     let mut opt = ConnectOptions::new(connection_string);
     // Use single connection to avoid deadlocks
@@ -443,12 +450,21 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         .connect_timeout(Duration::from_secs(8))
         .idle_timeout(Duration::from_secs(8))
         .max_lifetime(Duration::from_secs(8));
-
-    let database = crate::runtime::block_on(Database::connect(opt)).map_err(|e| {
+    Database::connect(opt).await.map_err(|e| {
         AppError::IO(std::io::Error::other(format!(
             "Database connection failed: {e}"
         )))
-    })?;
+    })
+}
+
+pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppError> {
+    // Initialize the Logger (creates ldk_data_dir and its logs directory)
+    let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
+    let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
+
+    // Initialize the shared database connection
+    let database = crate::runtime::block_on(open_database_pool(&args.storage_dir_path))?;
+    let db_path = get_db_path(&args.storage_dir_path);
 
     crate::runtime::block_on(Migrator::up(&database, None))
         .map_err(|e| AppError::IO(std::io::Error::other(format!("Migration failed: {e}"))))?;
@@ -470,7 +486,7 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         logger,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
         virtual_peer_pubkeys: args.virtual_peer_pubkeys.clone(),
-        database: Arc::new(database),
+        database: RwLock::new(Arc::new(database)),
         lsp_base_url: args.lsp_base_url.clone(),
         lsp_bearer_token: args.lsp_bearer_token.clone(),
         vss_url: args.vss_url.clone(),

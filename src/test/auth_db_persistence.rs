@@ -4,7 +4,7 @@ use rln_migration::{Migrator, MigratorTrait};
 use sea_orm::{ActiveValue, ConnectOptions, Database, DatabaseConnection, EntityTrait};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -26,7 +26,7 @@ fn build_state(storage_dir_path: PathBuf, database: DatabaseConnection) -> AppSt
             max_media_upload_size_mb: 1,
             enable_virtual_channels_v0: false,
             virtual_peer_pubkeys: vec![],
-            database: Arc::new(database),
+            database: RwLock::new(Arc::new(database)),
             lsp_base_url: None,
             lsp_bearer_token: None,
             vss_url: None,

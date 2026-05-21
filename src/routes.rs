@@ -87,7 +87,7 @@ use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_route, hex_str,
-    hex_str_to_compressed_pubkey, hex_str_to_vec, new_jsonrpc_request_id,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, new_jsonrpc_request_id, open_database_pool,
     validate_and_parse_description_hash, validate_and_parse_payment_hash,
     validate_and_parse_payment_preimage, UnlockedAppState, UserOnionMessageContents,
 };
@@ -1635,7 +1635,7 @@ pub(crate) async fn backup(
     no_cancel(async move {
         let _guard = state.check_locked().await?;
 
-        let _mnemonic = check_password_validity(&payload.password, &state.static_state.database)?;
+        let _mnemonic = check_password_validity(&payload.password, &state.db())?;
 
         do_backup(
             &state.static_state.storage_dir_path,
@@ -1714,14 +1714,9 @@ pub(crate) async fn change_password(
 
         check_password_strength(payload.new_password.clone())?;
 
-        let mnemonic =
-            check_password_validity(&payload.old_password, &state.static_state.database)?;
+        let mnemonic = check_password_validity(&payload.old_password, &state.db())?;
 
-        encrypt_and_save_mnemonic(
-            payload.new_password,
-            mnemonic.to_string(),
-            &state.static_state.database,
-        )?;
+        encrypt_and_save_mnemonic(payload.new_password, mnemonic.to_string(), &state.db())?;
 
         Ok(Json(EmptyResponse {}))
     })
@@ -2397,7 +2392,7 @@ pub(crate) async fn init(
 
         check_password_strength(payload.password.clone())?;
 
-        check_already_initialized(&state.static_state.database)?;
+        check_already_initialized(&state.db())?;
 
         let mnemonic = match payload.mnemonic {
             Some(mnemonic) => Mnemonic::from_str(&mnemonic)
@@ -2412,11 +2407,7 @@ pub(crate) async fn init(
             }
         };
 
-        encrypt_and_save_mnemonic(
-            payload.password,
-            mnemonic.clone(),
-            &state.static_state.database,
-        )?;
+        encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &state.db())?;
 
         Ok(Json(InitResponse { mnemonic }))
     })
@@ -4051,7 +4042,7 @@ pub(crate) async fn restore(
     no_cancel(async move {
         let _unlocked_state = state.check_locked().await?;
 
-        check_already_initialized(&state.static_state.database)?;
+        check_already_initialized(&state.db())?;
 
         restore_backup(
             Path::new(&payload.backup_path),
@@ -4059,7 +4050,17 @@ pub(crate) async fn restore(
             &state.static_state.storage_dir_path,
         )?;
 
-        let _mnemonic = check_password_validity(&payload.password, &state.static_state.database)?;
+        // restore_backup overwrote the SQLite file under the pre-restore pool;
+        // reopen so subsequent queries (including unlock) see the restored data.
+        let new_pool = open_database_pool(&state.static_state.storage_dir_path)
+            .await
+            .map_err(|e| APIError::Unexpected(e.to_string()))?;
+        {
+            let mut guard = state.static_state.database.write().unwrap();
+            *guard = Arc::new(new_pool);
+        }
+
+        let _mnemonic = check_password_validity(&payload.password, &state.db())?;
 
         Ok(Json(EmptyResponse {}))
     })
@@ -4547,14 +4548,13 @@ pub(crate) async fn unlock(
             }
         }
 
-        let mnemonic =
-            match check_password_validity(&payload.password, &state.static_state.database) {
-                Ok(mnemonic) => mnemonic,
-                Err(e) => {
-                    state.update_changing_state(false);
-                    return Err(e);
-                }
-            };
+        let mnemonic = match check_password_validity(&payload.password, &state.db()) {
+            Ok(mnemonic) => mnemonic,
+            Err(e) => {
+                state.update_changing_state(false);
+                return Err(e);
+            }
+        };
 
         tracing::debug!("Starting LDK...");
         let (new_ldk_background_services, new_unlocked_app_state) =

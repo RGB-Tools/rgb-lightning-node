@@ -11,7 +11,7 @@ mod uniffi_smoke_tests {
     use serial_test::serial;
     use std::collections::HashSet;
     use std::str::FromStr;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
     use tokio::sync::Mutex as TokioMutex;
     use tokio_util::sync::CancellationToken;
 
@@ -94,7 +94,7 @@ mod uniffi_smoke_tests {
                 max_media_upload_size_mb: 1,
                 enable_virtual_channels_v0: false,
                 virtual_peer_pubkeys: vec![],
-                database: Arc::new(database),
+                database: RwLock::new(Arc::new(database)),
                 lsp_base_url: None,
                 lsp_bearer_token: None,
                 vss_url: None,

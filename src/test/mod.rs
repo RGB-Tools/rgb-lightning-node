@@ -20,7 +20,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::sync::{Arc, Once, RwLock};
+use std::sync::{Arc, Mutex, Once, OnceLock, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -54,8 +54,8 @@ use crate::routes::{
     Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{
-    get_db_path, hex_str, hex_str_to_vec, validate_and_parse_payment_hash, ELECTRUM_URL_REGTEST,
-    LOGS_DIR, PROXY_ENDPOINT_LOCAL,
+    get_db_path, hex_str, hex_str_to_vec, validate_and_parse_payment_hash, AppState,
+    ELECTRUM_URL_REGTEST, LOGS_DIR, PROXY_ENDPOINT_LOCAL,
 };
 
 use super::*;
@@ -213,8 +213,9 @@ async fn start_daemon_with_virtual_options(
         virtual_peer_pubkeys,
         ..Default::default()
     };
+    let (router, app_state) = app(args).await.unwrap();
+    register_app_state(node_address, Arc::clone(&app_state));
     tokio::spawn(async move {
-        let (router, app_state) = app(args).await.unwrap();
         axum::serve(listener, router)
             .with_graceful_shutdown(shutdown_signal(app_state))
             .await
@@ -2212,6 +2213,24 @@ fn wait_electrs_sync() {
     }
 }
 
+fn app_state_registry() -> &'static Mutex<HashMap<SocketAddr, Arc<AppState>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<SocketAddr, Arc<AppState>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_app_state(addr: SocketAddr, app_state: Arc<AppState>) {
+    app_state_registry().lock().unwrap().insert(addr, app_state);
+}
+
+pub(crate) fn test_get_app_state(addr: SocketAddr) -> Arc<AppState> {
+    app_state_registry()
+        .lock()
+        .unwrap()
+        .get(&addr)
+        .cloned()
+        .unwrap_or_else(|| panic!("no AppState registered for {addr}"))
+}
+
 pub(crate) fn initialize() {
     INIT.call_once(|| {
         if std::env::var("SKIP_INIT").is_ok() {
@@ -2265,6 +2284,7 @@ mod openchannel_push_asset_amount;
 mod payment;
 mod refuse_high_fees;
 mod restart;
+mod restore_swaps_db_pool;
 mod send_receive;
 mod swap_assets_liquidity_both_ways;
 mod swap_reverse_same_channel;

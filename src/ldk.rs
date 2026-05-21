@@ -2902,9 +2902,9 @@ pub(crate) async fn start_ldk(
     let static_state = &app_state.static_state;
 
     // Initialize Persistence using shared database connection
-    let local_kv_store = Arc::new(crate::kv_store::SeaOrmKvStore::from_connection(Arc::clone(
-        &static_state.database,
-    )));
+    let local_kv_store = Arc::new(crate::kv_store::SeaOrmKvStore::from_connection(
+        static_state.db(),
+    ));
 
     // Initialize VSS replication if configured.
     //
@@ -2986,7 +2986,7 @@ pub(crate) async fn start_ldk(
         Arc::clone(&kv_store) as Arc<dyn KVStoreSync + Send + Sync>;
 
     // Sync config from database to KVStore
-    sync_config_to_kvstore(&static_state.database, kv_store.as_ref())?;
+    sync_config_to_kvstore(&static_state.db(), kv_store.as_ref())?;
 
     let ldk_data_dir = static_state.ldk_data_dir.clone();
     let ldk_data_dir_path = PathBuf::from(&ldk_data_dir);
@@ -3065,13 +3065,13 @@ pub(crate) async fn start_ldk(
         }
     };
     save_config(
-        &app_state.static_state.database,
+        &app_state.db(),
         kv_store.as_ref(),
         CONFIG_INDEXER_URL,
         indexer_url,
     )?;
     save_config(
-        &app_state.static_state.database,
+        &app_state.db(),
         kv_store.as_ref(),
         CONFIG_BITCOIN_NETWORK,
         &bitcoin_network.to_string(),
@@ -3321,25 +3321,25 @@ pub(crate) async fn start_ldk(
     }
 
     save_config(
-        &static_state.database,
+        &static_state.db(),
         kv_store.as_ref(),
         CONFIG_WALLET_FINGERPRINT,
         &account_xpub_colored.fingerprint().to_string(),
     )?;
     save_config(
-        &static_state.database,
+        &static_state.db(),
         kv_store.as_ref(),
         CONFIG_WALLET_ACCOUNT_XPUB_COLORED,
         &account_xpub_colored.to_string(),
     )?;
     save_config(
-        &static_state.database,
+        &static_state.db(),
         kv_store.as_ref(),
         CONFIG_WALLET_ACCOUNT_XPUB_VANILLA,
         &account_xpub_vanilla.to_string(),
     )?;
     save_config(
-        &static_state.database,
+        &static_state.db(),
         kv_store.as_ref(),
         CONFIG_WALLET_MASTER_FINGERPRINT,
         &master_fingerprint.to_string(),
@@ -3818,7 +3818,7 @@ pub(crate) async fn start_ldk(
     // Regularly reconnect to channel peers.
     let connect_cm = Arc::clone(&channel_manager);
     let connect_pm = Arc::clone(&peer_manager);
-    let connect_db = Arc::clone(&static_state.database);
+    let connect_db = static_state.db();
     let stop_connect = Arc::clone(&stop_processing);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));

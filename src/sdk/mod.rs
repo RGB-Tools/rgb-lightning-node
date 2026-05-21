@@ -1686,7 +1686,7 @@ pub(crate) async fn init(
     let _unlocked_state = check_locked(&state).await?;
 
     check_password_strength(password.clone())?;
-    check_already_initialized(&state.static_state.database)?;
+    check_already_initialized(&state.db())?;
 
     let mnemonic = match mnemonic {
         Some(mnemonic) => Mnemonic::from_str(&mnemonic)
@@ -1701,7 +1701,7 @@ pub(crate) async fn init(
         }
     };
 
-    encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.static_state.database)?;
+    encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.db())?;
     Ok(InitData { mnemonic })
 }
 
@@ -1720,7 +1720,7 @@ pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Resu
         }
     }
 
-    let mnemonic = match check_password_validity(&request.password, &state.static_state.database) {
+    let mnemonic = match check_password_validity(&request.password, &state.db()) {
         Ok(mnemonic) => mnemonic,
         Err(e) => {
             update_changing_state(&state, false);
