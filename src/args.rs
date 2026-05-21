@@ -48,6 +48,33 @@ struct Args {
 
     #[arg(long)]
     lsp_bearer_token: Option<String>,
+
+    /// VSS server URL for cloud backup (e.g., https://example.com/vss).
+    ///
+    /// HTTPS is required for non-loopback hosts unless `--vss-allow-http` is
+    /// also set; this prevents accidentally shipping channel state plaintext
+    /// over the network.
+    #[arg(long)]
+    vss_url: Option<String>,
+
+    /// Allow `--vss-url` to use the `http://` scheme for non-loopback hosts.
+    ///
+    /// Without this flag, only `https://` URLs and loopback HTTP URLs
+    /// (e.g. `http://localhost:8081/vss`) are accepted. Set this only when
+    /// you have an out-of-band reason to trust the link (e.g. a private
+    /// network with link-layer encryption).
+    #[arg(long, default_value_t = false)]
+    vss_allow_http: bool,
+
+    /// On a fresh device with no local LDK state, if VSS restore fails
+    /// (server unreachable, wrong signing key, etc.), start with an empty
+    /// local state instead of aborting unlock.
+    ///
+    /// **Use with care.** A node started fresh has no channel monitors and
+    /// can lose funds if it had active channels. The default behavior
+    /// (abort on restore failure) is the safe choice in almost all cases.
+    #[arg(long, default_value_t = false)]
+    vss_allow_empty_restore: bool,
 }
 
 pub(crate) struct UserArgs {
@@ -61,6 +88,8 @@ pub(crate) struct UserArgs {
     pub(crate) virtual_peer_pubkeys: Vec<PublicKey>,
     pub(crate) lsp_base_url: Option<String>,
     pub(crate) lsp_bearer_token: Option<String>,
+    pub(crate) vss_url: Option<String>,
+    pub(crate) vss_allow_empty_restore: bool,
 }
 
 pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
@@ -83,6 +112,11 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
         virtual_peer_pubkeys.push(parsed_pubkey);
     }
 
+    // Reject http:// URLs unless the host is loopback or --vss-allow-http is set.
+    if let Some(url) = &args.vss_url {
+        crate::utils::validate_vss_url(url, args.vss_allow_http)?;
+    }
+
     Ok(UserArgs {
         storage_dir_path: args.storage_directory_path,
         daemon_listening_port,
@@ -94,5 +128,7 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
         virtual_peer_pubkeys,
         lsp_base_url: args.lsp_base_url,
         lsp_bearer_token: args.lsp_bearer_token,
+        vss_url: args.vss_url,
+        vss_allow_empty_restore: args.vss_allow_empty_restore,
     })
 }

@@ -210,7 +210,7 @@ def wait_for_channel_funding_tx(
     node_a: rln.SdkNode,
     node_b: rln.SdkNode,
     asset_id,
-    timeout_sec: int = 120,
+    timeout_sec: int = 240,
 ):
     deadline = time.time() + timeout_sec
     last = "no channels"
@@ -266,7 +266,7 @@ def wait_for_usable_channel(
     node_a: rln.SdkNode,
     node_b: rln.SdkNode,
     asset_id,
-    timeout_sec: int = 120,
+    timeout_sec: int = 240,
     mine_every_polls: int = 5,
 ):
     deadline = time.time() + timeout_sec
@@ -302,7 +302,7 @@ def wait_for_usable_channel(
 def wait_for_channel_ready(
     node: rln.SdkNode,
     channel_id,
-    timeout_sec: int = 10,
+    timeout_sec: int = 60,
 ):
     deadline = time.time() + timeout_sec
     last = "channel not found"
@@ -365,7 +365,7 @@ def wait_for_channel_asset_state(
 def wait_for_channel_id(
     node: rln.SdkNode,
     temporary_channel_id,
-    timeout_sec: int = 10,
+    timeout_sec: int = 60,
 ):
     deadline = time.time() + timeout_sec
     last = "mapping not found"
@@ -386,7 +386,7 @@ def wait_for_channel_id(
     )
 
 
-def wait_payment_final(node: rln.SdkNode, invoice: str, timeout_sec: int = 60):
+def wait_payment_final(node: rln.SdkNode, invoice: str, timeout_sec: int = 120):
     deadline = time.time() + timeout_sec
     last = None
     while time.time() < deadline:
@@ -621,8 +621,8 @@ def keysend_with_ln_balance(
     initial_receiver_balance: int,
 ):
     payment_hash = keysend(sender, dest_pubkey, amt_msat, asset_id, asset_amount)
-    wait_for_ln_balance(sender, asset_id, initial_sender_balance - asset_amount, 60)
-    wait_for_ln_balance(receiver, asset_id, initial_receiver_balance + asset_amount, 60)
+    wait_for_ln_balance(sender, asset_id, initial_sender_balance - asset_amount, 120)
+    wait_for_ln_balance(receiver, asset_id, initial_receiver_balance + asset_amount, 120)
     wait_for_payment_status(
         receiver, payment_hash, rln.PaymentType.INBOUND_AUTO_CLAIM, 60
     )

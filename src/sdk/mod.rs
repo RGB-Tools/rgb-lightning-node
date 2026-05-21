@@ -355,7 +355,6 @@ pub(crate) struct SendRgbRequestData {
     pub(crate) donation: bool,
     pub(crate) fee_rate: u64,
     pub(crate) min_confirmations: u8,
-    pub(crate) skip_sync: bool,
     pub(crate) recipient_groups: Vec<AssetRecipientsInput>,
 }
 
@@ -728,7 +727,8 @@ pub(crate) enum TransactionType {
     RgbSend,
     Drain,
     CreateUtxos,
-    User,
+    SendBtc,
+    Incoming,
 }
 
 #[derive(Debug, PartialEq)]
@@ -738,12 +738,14 @@ pub(crate) enum TransferKind {
     ReceiveWitness,
     Send,
     Inflation,
+    Burn,
 }
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum TransferStatus {
     Initiated,
     WaitingCounterparty,
+    WaitingSafeHeight,
     WaitingConfirmations,
     Settled,
     Failed,
@@ -1549,7 +1551,6 @@ pub(crate) async fn send_rgb(
     donation: bool,
     fee_rate: u64,
     min_confirmations: u8,
-    skip_sync: bool,
 ) -> Result<SendRgbData, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
@@ -1560,14 +1561,7 @@ pub(crate) async fn send_rgb(
 
     let unlocked_state_copy = unlocked_state.clone();
     let send_result = tokio::task::spawn_blocking(move || {
-        unlocked_state_copy.rgb_send(
-            recipient_map,
-            donation,
-            fee_rate,
-            min_confirmations,
-            None,
-            skip_sync,
-        )
+        unlocked_state_copy.rgb_send(recipient_map, donation, fee_rate, min_confirmations, None)
     })
     .await
     .unwrap()?;
@@ -1620,7 +1614,6 @@ pub(crate) async fn send_rgb_from_groups(
         request.donation,
         request.fee_rate,
         request.min_confirmations,
-        request.skip_sync,
     )
     .await
 }
@@ -1639,7 +1632,13 @@ pub(crate) async fn init(
         Some(mnemonic) => Mnemonic::from_str(&mnemonic)
             .map_err(|e| APIError::InvalidMnemonic(e.to_string()))?
             .to_string(),
-        None => generate_keys(state.static_state.network).mnemonic,
+        None => {
+            generate_keys(
+                state.static_state.network,
+                rgb_lib::keys::WitnessVersion::Taproot,
+            )
+            .mnemonic
+        }
     };
 
     encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.static_state.database)?;
@@ -2504,6 +2503,8 @@ pub(crate) async fn open_channel(
                 MIN_CHANNEL_CONFIRMATIONS,
                 None,
                 true,
+                // Channel-funding dry run: mirror the real funding tx's final locktime.
+                Some(0),
             )
         })
         .await
@@ -3697,7 +3698,8 @@ pub(crate) async fn list_transactions(
                 rgb_lib::wallet::TransactionType::RgbSend => TransactionType::RgbSend,
                 rgb_lib::wallet::TransactionType::Drain => TransactionType::Drain,
                 rgb_lib::wallet::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
-                rgb_lib::wallet::TransactionType::User => TransactionType::User,
+                rgb_lib::wallet::TransactionType::SendBtc => TransactionType::SendBtc,
+                rgb_lib::wallet::TransactionType::Incoming => TransactionType::Incoming,
             },
             txid: tx.txid,
             received: tx.received,
@@ -3729,6 +3731,7 @@ pub(crate) async fn list_transfers(
             status: match transfer.status {
                 rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
                 rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
+                rgb_lib::TransferStatus::WaitingSafeHeight => TransferStatus::WaitingSafeHeight,
                 rgb_lib::TransferStatus::WaitingConfirmations => {
                     TransferStatus::WaitingConfirmations
                 }
@@ -3743,6 +3746,7 @@ pub(crate) async fn list_transfers(
                 rgb_lib::wallet::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
                 rgb_lib::wallet::TransferKind::Send => TransferKind::Send,
                 rgb_lib::wallet::TransferKind::Inflation => TransferKind::Inflation,
+                rgb_lib::wallet::TransferKind::Burn => TransferKind::Burn,
             },
             txid: transfer.txid,
             recipient_id: transfer.recipient_id,

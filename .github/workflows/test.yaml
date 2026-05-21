@@ -59,3 +59,23 @@ jobs:
       - name: Stop regtest services
         if: always()
         run: ./regtest.sh stop
+
+  vss-tests:
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+      - name: Build with vss feature
+        run: cargo build --features vss
+      - name: Start regtest and VSS services
+        run: VSS=1 ./regtest.sh start
+      - name: Run VSS tests (e2e against regtest + VSS server)
+        run: cargo test --features vss "test::vss::tests" -- --test-threads=1
+      - name: Stop regtest and VSS services
+        if: always()
+        run: docker compose --profile vss down -v --remove-orphans

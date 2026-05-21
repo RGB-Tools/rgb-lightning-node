@@ -69,7 +69,6 @@ fn locked_state_does_not_bypass_unlock_guards() {
         donation: false,
         fee_rate: 1,
         min_confirmations: 1,
-        skip_sync: true,
         recipient_groups: vec![],
     });
     assert!(matches!(send_rgb, Err(RlnError::InvalidRequest)));

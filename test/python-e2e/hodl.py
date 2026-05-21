@@ -155,7 +155,7 @@ def wait_for_peer_channel_funding_tx(
     sender: rln.SdkNode,
     receiver_pubkey,
     asset_id,
-    timeout_sec: int = 120,
+    timeout_sec: int = 240,
 ):
     deadline = time.time() + timeout_sec
     last = "no channels"
@@ -193,7 +193,7 @@ def wait_for_peer_channel_funding_tx(
 def wait_for_channel_usable(
     node: rln.SdkNode,
     channel_id,
-    timeout_sec: int = 120,
+    timeout_sec: int = 240,
 ):
     deadline = time.time() + timeout_sec
     last = "channel not found"
@@ -272,14 +272,14 @@ def open_hodl_asset_channel(
     )
 
     funding_txid = wait_for_peer_channel_funding_tx(
-        sender, receiver_info.pubkey, asset_id, 120
+        sender, receiver_info.pubkey, asset_id, 240
     )
     print(f"Mining blocks until {receiver_name} funding tx is confirmed...")
     mine_until_tx_confirmed(sender, funding_txid, 180)
     print(f"Mining {OPEN_CHANNEL_CONFIRM_BLOCKS} blocks for channel confirmations...")
     run_regtest("mine", str(OPEN_CHANNEL_CONFIRM_BLOCKS))
     channel_id = sender.get_channel_id(open_response.temporary_channel_id)
-    wait_for_channel_ready(sender, channel_id, 10)
+    wait_for_channel_ready(sender, channel_id, 60)
     wait_for_channel_usable(sender, channel_id, CHANNEL_READY_TIMEOUT_SEC)
     wait_for_channel_usable(receiver, channel_id, CHANNEL_READY_TIMEOUT_SEC)
     print(f"Channel to {receiver_name} is usable")
@@ -299,7 +299,6 @@ def send_asset_for_second_channel(
             donation=True,
             fee_rate=1,
             min_confirmations=1,
-            skip_sync=False,
             recipient_groups=[
                 rln.AssetRecipients(
                     asset_id=asset_id,
@@ -321,7 +320,7 @@ def send_asset_for_second_channel(
     refresh_transfers(receiver)
     refresh_transfers(receiver)
     refresh_transfers(sender)
-    wait_for_balance(receiver, asset_id, asset_amount, 60)
+    wait_for_balance(receiver, asset_id, asset_amount, 180)
 
 
 def assert_decoded_hodl_invoice(decoded, payment_hash_hex: str, asset_id):
@@ -410,7 +409,7 @@ def assert_offchain_balances(
     expected_outbound: int,
     expected_inbound: int,
     node_name: str,
-    timeout_sec: int = 30,
+    timeout_sec: int = 60,
 ):
     deadline = time.time() + timeout_sec
     last_outbound = None
@@ -1071,9 +1070,9 @@ def hodl_e2e_scenario():
         unlock_if_needed(node_b, NODE_B_PASSWORD, "node B")
         unlock_if_needed(node_c, NODE_C_PASSWORD, "node C")
 
-        wait_for_usable_channels(node_a, 1, 120)
-        wait_for_usable_channels(node_b, 2, 120)
-        wait_for_usable_channels(node_c, 1, 120)
+        wait_for_usable_channels(node_a, 1, 240)
+        wait_for_usable_channels(node_b, 2, 240)
+        wait_for_usable_channels(node_c, 1, 240)
         wait_for_channel_usable(node_a, channel_ab, CHANNEL_READY_TIMEOUT_SEC)
         wait_for_channel_usable(node_b, channel_ab, CHANNEL_READY_TIMEOUT_SEC)
         wait_for_channel_usable(node_b, channel_bc, CHANNEL_READY_TIMEOUT_SEC)

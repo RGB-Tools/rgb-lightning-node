@@ -96,6 +96,8 @@ impl Default for UserArgs {
             virtual_peer_pubkeys: vec![],
             lsp_base_url: None,
             lsp_bearer_token: None,
+            vss_url: None,
+            vss_allow_empty_restore: false,
         }
     }
 }
@@ -1735,7 +1737,6 @@ async fn send_assets(
             OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
         ),
         recipient_map,
-        skip_sync: false,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/sendrgb"))
@@ -2282,3 +2283,5 @@ mod swap_roundtrip_sell;
 mod upload_asset_media;
 mod vanilla_payment_on_rgb_channel;
 mod virtual_channels;
+#[cfg(feature = "vss")]
+mod vss;

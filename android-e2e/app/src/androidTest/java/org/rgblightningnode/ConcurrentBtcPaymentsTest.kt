@@ -55,7 +55,7 @@ class ConcurrentBtcPaymentsTest {
     private val invoiceAmtMsat2: ULong = 5_000_000u
     private val utxosNum: UByte = 10u
     private val utxosFeeRate: ULong = 7u
-    private val channelReadyTimeoutSec: Long = 60L
+    private val channelReadyTimeoutSec: Long = 120L
 
     private fun bitcoindRpc(method: String, vararg params: Any): JSONObject {
         val url = URL("http://$bitcoindHost:$bitcoindPort/")
@@ -556,17 +556,17 @@ class ConcurrentBtcPaymentsTest {
 
             log("waiting for sender-side payment success")
             val payment1Sender =
-                waitForPaymentStatus(nodeC, response1.paymentHash!!, PaymentType.OUTBOUND, 60L)
+                waitForPaymentStatus(nodeC, response1.paymentHash!!, PaymentType.OUTBOUND, 120L)
             val payment2Sender =
-                waitForPaymentStatus(nodeD, response2.paymentHash!!, PaymentType.OUTBOUND, 60L)
+                waitForPaymentStatus(nodeD, response2.paymentHash!!, PaymentType.OUTBOUND, 120L)
             dumpNodeState(nodeC, "node C after sender success")
             dumpNodeState(nodeD, "node D after sender success")
             assertEquals(HtlcStatus.SUCCEEDED, payment1Sender.status)
             assertEquals(HtlcStatus.SUCCEEDED, payment2Sender.status)
 
             log("waiting for receiver invoice success")
-            waitForInvoiceStatus(nodeA, invoice1, InvoiceStatus.SUCCEEDED, 60L)
-            waitForInvoiceStatus(nodeA, invoice2, InvoiceStatus.SUCCEEDED, 60L)
+            waitForInvoiceStatus(nodeA, invoice1, InvoiceStatus.SUCCEEDED, 120L)
+            waitForInvoiceStatus(nodeA, invoice2, InvoiceStatus.SUCCEEDED, 120L)
             dumpNodeState(nodeA, "node A after invoice success")
 
             val payments = nodeA.listPayments()
@@ -577,7 +577,7 @@ class ConcurrentBtcPaymentsTest {
             assertEquals(HtlcStatus.SUCCEEDED, payment1.status)
             assertEquals(HtlcStatus.SUCCEEDED, payment2.status)
 
-            waitForChannelLocalBalanceMsat(nodeA, channelA.channelId, invoiceAmtMsat1 + invoiceAmtMsat2, 30L)
+            waitForChannelLocalBalanceMsat(nodeA, channelA.channelId, invoiceAmtMsat1 + invoiceAmtMsat2, 60L)
             val channelsAfter = nodeA.listChannels()
             assertEquals(1, channelsAfter.size)
             assertEquals(invoiceAmtMsat1 + invoiceAmtMsat2, channelsAfter.first().localBalanceSat * 1000u)

@@ -16,7 +16,10 @@ mod rgb;
 mod routes;
 mod runtime;
 mod swap;
+mod synced_kv_store;
 mod utils;
+#[cfg(feature = "vss")]
+mod vss_kv_store;
 
 #[cfg(test)]
 mod test;
@@ -61,6 +64,8 @@ use crate::routes::{
     post_asset_media, refresh_transfers, restore, revoke_token, rgb_invoice, send_btc,
     send_onion_message, send_payment, send_rgb, shutdown, sign_message, sync, taker, unlock,
 };
+#[cfg(feature = "vss")]
+use crate::routes::{vss_backup, vss_backup_info};
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
 #[tokio::main]
@@ -171,7 +176,14 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/signmessage", post(sign_message))
         .route("/sync", post(sync))
         .route("/taker", post(taker))
-        .route("/unlock", post(unlock))
+        .route("/unlock", post(unlock));
+
+    #[cfg(feature = "vss")]
+    let router = router
+        .route("/vssbackup", post(vss_backup))
+        .route("/vssbackupinfo", get(vss_backup_info));
+
+    let router = router
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {

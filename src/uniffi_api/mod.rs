@@ -46,6 +46,8 @@ fn handle_from_request(request: SdkInitRequest) -> Result<NodeHandle, RlnError> 
         virtual_peer_pubkeys: request.virtual_peer_pubkeys.unwrap_or_default(),
         lsp_base_url: request.lsp_base_url,
         lsp_bearer_token: request.lsp_bearer_token,
+        vss_url: None,
+        vss_allow_empty_restore: false,
     };
     block_on_app(NodeHandle::new(config))
 }
@@ -58,7 +60,6 @@ fn send_rgb_from_state(
         donation: request.donation,
         fee_rate: request.fee_rate,
         min_confirmations: request.min_confirmations,
-        skip_sync: request.skip_sync,
         recipient_groups: request
             .recipient_groups
             .into_iter()
@@ -865,7 +866,8 @@ impl SdkNode {
                     crate::sdk::TransactionType::RgbSend => TransactionType::RgbSend,
                     crate::sdk::TransactionType::Drain => TransactionType::Drain,
                     crate::sdk::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
-                    crate::sdk::TransactionType::User => TransactionType::User,
+                    crate::sdk::TransactionType::SendBtc => TransactionType::SendBtc,
+                    crate::sdk::TransactionType::Incoming => TransactionType::Incoming,
                 };
                 Ok(Transaction {
                     transaction_type,

@@ -83,6 +83,13 @@ _start_services() {
     $COMPOSE up -d
     echo "waiting for electrs to have completed startup"
     _wait_for_electrs
+
+    # optionally start VSS server
+    if [ "${VSS:-}" = "1" ]; then
+        echo "starting VSS server..."
+        $COMPOSE --profile vss up -d
+        echo "VSS server available at http://localhost:8081/vss"
+    fi
 }
 
 _stop_services() {

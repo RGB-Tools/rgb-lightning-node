@@ -29,6 +29,8 @@ fn build_state(storage_dir_path: PathBuf, database: DatabaseConnection) -> AppSt
             database: Arc::new(database),
             lsp_base_url: None,
             lsp_bearer_token: None,
+            vss_url: None,
+            vss_allow_empty_restore: false,
         }),
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),

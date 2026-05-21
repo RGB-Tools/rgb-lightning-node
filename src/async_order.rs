@@ -385,7 +385,7 @@ impl AsyncPaymentsPreimageRoot {
             let message = format!("async_payment_root_derivation_failed: {err}");
             JsonRpcErrorWire::internal_error(message)
         })?;
-        let mut account_xprv = xkey.into_xprv(network).ok_or_else(|| {
+        let mut account_xprv = xkey.into_xprv(network.into()).ok_or_else(|| {
             JsonRpcErrorWire::internal_error("async_payment_xprv_not_available".to_owned())
         })?;
 

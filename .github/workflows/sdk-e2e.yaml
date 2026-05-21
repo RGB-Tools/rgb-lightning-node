@@ -96,6 +96,29 @@ jobs:
           PYTHON_E2E_SCENARIO: ${{ matrix.scenario }}
         run: python3 test/python-e2e/PythonUniffiE2e.py
 
+      - name: Dump node logs on failure
+        if: failure()
+        run: |
+          echo "===== LDK channel/funding events ====="
+          find target/uniffi/python-e2e/data -name logs.txt | while read -r f; do
+            echo "### $f"
+            grep -iE "OpenChannel|AcceptChannel|FundingGeneration|funding_transaction|Channel went away|Funding TXID|disconnect|refus|reject|closed|close_channel|ERROR|WARN|Generated funding|broadcast|chan.*clos|cannot " "$f" || true
+          done
+          echo "===== rgb-lib non-sync lines ====="
+          find target/uniffi/python-e2e/data -path '*/data/*' -name log | while read -r f; do
+            echo "### $f"
+            grep -vE "Syncing\.\.\.|Sync completed" "$f" || true
+          done
+
+      - name: Upload node logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-logs-${{ matrix.scenario }}
+          path: target/uniffi/python-e2e/data/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+
       - name: Stop regtest services
         if: always()
         run: ./regtest.sh stop

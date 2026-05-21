@@ -384,7 +384,6 @@ fn success() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![RgbRecipient {
@@ -420,7 +419,6 @@ fn success() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![RgbRecipient {
@@ -459,7 +457,10 @@ fn success() {
             .iter()
             .find(|tx| tx.sent == 128_000)
             .expect("rgb send transaction");
-        assert!(matches!(tx_user.transaction_type, TransactionType::User));
+        assert!(matches!(
+            tx_user.transaction_type,
+            TransactionType::Incoming
+        ));
         assert!(matches!(
             tx_utxos.transaction_type,
             TransactionType::CreateUtxos

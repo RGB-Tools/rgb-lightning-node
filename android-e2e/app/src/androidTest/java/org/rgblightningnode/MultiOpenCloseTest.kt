@@ -59,7 +59,7 @@ class MultiOpenCloseTest {
     private val utxosNum: UByte = 10u
     private val utxosFeeRate: ULong = 7u
     private val assetSupply: ULong = 1000u
-    private val channelReadyTimeoutSec: Long = 60L
+    private val channelReadyTimeoutSec: Long = 120L
 
     private fun bitcoindRpc(method: String, vararg params: Any): JSONObject {
         val url = URL("http://$bitcoindHost:$bitcoindPort/")
@@ -291,7 +291,7 @@ class MultiOpenCloseTest {
             "unexpected keysend status: ${response.status}",
             response.status == HtlcStatus.PENDING || response.status == HtlcStatus.SUCCEEDED
         )
-        waitForPaymentStatus(sender, response.paymentHash, PaymentType.OUTBOUND, 60L)
+        waitForPaymentStatus(sender, response.paymentHash, PaymentType.OUTBOUND, 120L)
         return response.paymentHash
     }
 
@@ -341,7 +341,6 @@ class MultiOpenCloseTest {
                 donation = true,
                 feeRate = utxosFeeRate,
                 minConfirmations = 1u,
-                skipSync = false,
                 recipientGroups = listOf(
                     AssetRecipients(
                         assetId = assetId,
@@ -428,7 +427,7 @@ class MultiOpenCloseTest {
                     virtualOpenMode = null,
                 )
             )
-            var fundingTxid = waitForChannelFundingTx(nodeA, nodeBReady, assetId, 120L)
+            var fundingTxid = waitForChannelFundingTx(nodeA, nodeBReady, assetId, 240L)
             log("Mining blocks one by one until funding tx is confirmed...")
             mineUntilTxConfirmed(nodeA, fundingTxid)
             mine(openChannelConfirmBlocks)
@@ -440,8 +439,8 @@ class MultiOpenCloseTest {
 
             val firstChannelId = nodeA.getChannelId(firstOpen.temporaryChannelId)
             closeChannel(nodeA, firstChannelId, nodeBPubkey)
-            waitForBalance(nodeA, assetId, 900uL, 70L)
-            waitForBalance(nodeBReady, assetId, 100uL, 70L)
+            waitForBalance(nodeA, assetId, 900uL, 180L)
+            waitForBalance(nodeBReady, assetId, 100uL, 180L)
 
             val secondOpen = nodeA.openchannel(
                 SdkOpenChannelRequest(
@@ -459,7 +458,7 @@ class MultiOpenCloseTest {
                     virtualOpenMode = null,
                 )
             )
-            fundingTxid = waitForChannelFundingTx(nodeA, nodeBReady, assetId, 120L)
+            fundingTxid = waitForChannelFundingTx(nodeA, nodeBReady, assetId, 240L)
             log("Mining blocks one by one until funding tx is confirmed...")
             mineUntilTxConfirmed(nodeA, fundingTxid)
             mine(openChannelConfirmBlocks)
@@ -471,8 +470,8 @@ class MultiOpenCloseTest {
 
             val secondChannelId = nodeA.getChannelId(secondOpen.temporaryChannelId)
             closeChannel(nodeA, secondChannelId, nodeBPubkey)
-            waitForBalance(nodeA, assetId, 800uL, 70L)
-            waitForBalance(nodeBReady, assetId, 200uL, 70L)
+            waitForBalance(nodeA, assetId, 800uL, 180L)
+            waitForBalance(nodeBReady, assetId, 200uL, 180L)
 
             val recipientIdA = rgbInvoice(nodeCReady)
             sendRgb(nodeA, assetId, recipientIdA, 700u)

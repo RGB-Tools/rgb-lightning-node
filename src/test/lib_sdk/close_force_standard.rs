@@ -115,7 +115,6 @@ fn close_force_standard() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![RgbRecipient {
@@ -151,7 +150,6 @@ fn close_force_standard() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![RgbRecipient {

@@ -1066,6 +1066,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResponse'
+  /vssbackup:
+    post:
+      tags:
+        - Other
+      summary: Trigger a manual VSS backup of the RGB wallet
+      description: >
+        Builds a zip of the current RGB wallet directory and uploads it to the
+        configured VSS server. Only available when the node was started with
+        --vss-url. The node's KV state is replicated automatically on every
+        persistence event and is not affected by this endpoint.
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - version
+                properties:
+                  version:
+                    type: integer
+                    format: int64
+                    description: Server-side version of the just-uploaded RGB wallet backup.
+        '503':
+          description: VSS is not configured or unreachable
+  /vssbackupinfo:
+    get:
+      tags:
+        - Other
+      summary: Inspect VSS backup status
+      description: >
+        Returns whether a backup exists on the server, its server-side version,
+        whether the local wallet has changes since the last backup, and how
+        many KV-stream writes are queued for retry after a replication
+        failure. Read-only; callable by tokens with the read-only role.
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - backup_exists
+                  - backup_required
+                  - pending_kv_writes
+                properties:
+                  backup_exists:
+                    type: boolean
+                    description: True if the VSS server has a backup for this wallet.
+                  server_version:
+                    type: integer
+                    format: int64
+                    nullable: true
+                    description: Server-side version of the most recent backup, if any.
+                  backup_required:
+                    type: boolean
+                    description: >
+                      True if the local wallet has changes since the last
+                      successful upload (i.e. a manual backup is needed).
+                  pending_kv_writes:
+                    type: integer
+                    description: >
+                      Number of KV writes that failed to replicate and are
+                      queued for retry. A persistently non-zero value
+                      indicates VSS replication is degraded.
+        '503':
+          description: VSS is not configured or unreachable
 components:
   schemas:
     AddressResponse:
@@ -2947,7 +3016,6 @@ components:
         - fee_rate
         - min_confirmations
         - recipient_map
-        - skip_sync
       properties:
         donation:
           type: boolean
@@ -2987,9 +3055,6 @@ components:
                   Fungible: 100
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
-        skip_sync:
-          type: boolean
-          example: false
     SendRgbResponse:
       type: object
       required:

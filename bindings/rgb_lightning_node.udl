@@ -271,7 +271,8 @@ enum TransactionType {
     "RgbSend",
     "Drain",
     "CreateUtxos",
-    "User",
+    "SendBtc",
+    "Incoming",
 };
 
 dictionary Transaction {
@@ -724,7 +725,6 @@ dictionary SendRgbRequest {
     boolean donation;
     u64 fee_rate;
     u8 min_confirmations;
-    boolean skip_sync;
     sequence<AssetRecipients> recipient_groups;
 };
 

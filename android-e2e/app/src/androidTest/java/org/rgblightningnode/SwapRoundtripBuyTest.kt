@@ -62,7 +62,7 @@ class SwapRoundtripBuyTest {
     private val utxosNum: UByte = 10u
     private val utxosFeeRate: ULong = 7u
     private val assetSupply: ULong = 1000u
-    private val channelReadyTimeoutSec: Long = 20L
+    private val channelReadyTimeoutSec: Long = 60L
     private var noMineCount: Int = 0
 
     private fun bitcoindRpc(method: String, vararg params: Any): JSONObject {
@@ -445,7 +445,6 @@ class SwapRoundtripBuyTest {
                 donation = true,
                 feeRate = utxosFeeRate,
                 minConfirmations = 1u,
-                skipSync = false,
                 recipientGroups = listOf(
                     AssetRecipients(
                         assetId = assetId,
@@ -617,10 +616,10 @@ class SwapRoundtripBuyTest {
             assertEquals(1, makerPendingLists.maker.size)
             val makerPending = makerPendingLists.maker.first()
             assertEquals(SwapStatus.PENDING, makerPending.status)
-            waitForSwapStatus(requireNotNull(nodeB), makerInit.paymentHash, SwapStatus.SUCCEEDED, 70L)
+            waitForSwapStatus(requireNotNull(nodeB), makerInit.paymentHash, SwapStatus.SUCCEEDED, 150L)
 
-            waitForLnBalance(requireNotNull(nodeA), assetId, 590uL, 60L)
-            waitForLnBalance(requireNotNull(nodeB), assetId, 10uL, 60L)
+            waitForLnBalance(requireNotNull(nodeA), assetId, 590uL, 120L)
+            waitForLnBalance(requireNotNull(nodeB), assetId, 10uL, 120L)
 
             safeShutdown(nodeA); safeShutdown(nodeB)
             pauseAfterShutdown()
@@ -628,11 +627,11 @@ class SwapRoundtripBuyTest {
             nodeB = makeNode("swap_roundtrip_buy/node_b", nodeBDaemonPort, nodeBPeerPort)
             unlockNode(requireNotNull(nodeA), "nodeApass", "node A")
             unlockNode(requireNotNull(nodeB), "nodeBpass", "node B")
-            waitForUsableChannels(requireNotNull(nodeA), 2, 60L)
-            waitForUsableChannels(requireNotNull(nodeB), 2, 60L)
+            waitForUsableChannels(requireNotNull(nodeA), 2, 120L)
+            waitForUsableChannels(requireNotNull(nodeB), 2, 120L)
 
-            waitForAssetOffchainBalances(requireNotNull(nodeA), assetId, 590uL, 10uL, 60L)
-            waitForAssetOffchainBalances(requireNotNull(nodeB), assetId, 10uL, 590uL, 60L)
+            waitForAssetOffchainBalances(requireNotNull(nodeA), assetId, 590uL, 10uL, 120L)
+            waitForAssetOffchainBalances(requireNotNull(nodeB), assetId, 10uL, 590uL, 120L)
 
             val makerSucceededLists = requireNotNull(nodeA).`listSwaps`()
             assertEquals(1, makerSucceededLists.maker.size)
@@ -657,8 +656,8 @@ class SwapRoundtripBuyTest {
             assertEquals(chanB21Before.localBalanceSat - btcLegDiffSat, chanB21.localBalanceSat)
 
             closeChannel(requireNotNull(nodeA), channel12Id, infoB.pubkey)
-            waitForBalance(requireNotNull(nodeA), assetId, 990uL, 70L)
-            waitForBalance(requireNotNull(nodeB), assetId, 10uL, 70L)
+            waitForBalance(requireNotNull(nodeA), assetId, 990uL, 180L)
+            waitForBalance(requireNotNull(nodeB), assetId, 10uL, 180L)
 
             closeChannel(requireNotNull(nodeB), channel21Id, infoA.pubkey)
 

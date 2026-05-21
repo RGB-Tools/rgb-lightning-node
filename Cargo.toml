@@ -11,6 +11,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [features]
 default = []
 test-utils = []
+vss = ["rgb-lib/vss", "dep:vss-client"]
 
 [dependencies]
 amplify = { version = "=4.8.1", default-features = false }
@@ -70,6 +71,7 @@ typenum = "1.17.0"
 uuid = { version = "1.11.0", default-features = false, features = ["v4"] }
 walkdir = "2.5.0"
 uniffi = { version = "0.28.3", features = ["build"], optional = true }
+vss-client = { package = "vss-client-ng", git = "https://github.com/lightningdevkit/vss-client", rev = "ad63805047561dcf3117cd992ad6d8bc3881adef", default-features = false, features = ["sigs-auth"], optional = true }
 zip = { version = "2.2.0", default-features = false, features = ["time", "zstd"] }
 
 [dev-dependencies]
@@ -87,6 +89,7 @@ uniffi = { version = "0.28.3", features = ["build"], optional = true }
 [patch.crates-io]
 lightning = { path = "./rust-lightning/lightning" }
 lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
+rgb-lib = { git = "https://github.com/UTEXO-Protocol/rgb-lib", branch = "dev" }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"

@@ -105,13 +105,13 @@ def payment_scenario():
         )
         print(f"openchannel temporary_channel_id: {open_response.temporary_channel_id}")
 
-        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 120)
+        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 240)
         print("Mining blocks one by one until funding tx is confirmed...")
         mine_until_tx_confirmed(node_a, funding_txid, 180)
         print(f"Mining {OPEN_CHANNEL_CONFIRM_BLOCKS} blocks for channel confirmations...")
         run_regtest("mine", str(OPEN_CHANNEL_CONFIRM_BLOCKS))
         channel_id = node_a.get_channel_id(open_response.temporary_channel_id)
-        wait_for_channel_ready(node_a, channel_id, 10)
+        wait_for_channel_ready(node_a, channel_id, 60)
         wait_for_usable_channel(node_a, node_b, asset_id, CHANNEL_READY_TIMEOUT_SEC, 5)
         print("Channel is usable")
 

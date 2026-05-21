@@ -77,7 +77,6 @@ fn send_receive() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![RgbRecipient {
@@ -124,7 +123,6 @@ fn send_receive() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id_2.clone(),
                     recipients: vec![RgbRecipient {
@@ -186,7 +184,6 @@ fn send_receive() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![
                     AssetRecipients {
                         asset_id: asset_id.clone(),
@@ -285,7 +282,6 @@ fn send_receive() {
                 donation: true,
                 fee_rate: CREATE_UTXOS_FEE_RATE,
                 min_confirmations: 1,
-                skip_sync: false,
                 recipient_groups: vec![AssetRecipients {
                     asset_id: asset_id.clone(),
                     recipients: vec![

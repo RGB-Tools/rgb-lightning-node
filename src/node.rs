@@ -18,6 +18,8 @@ pub struct NodeConfig {
     pub virtual_peer_pubkeys: Vec<bitcoin::secp256k1::PublicKey>,
     pub lsp_base_url: Option<String>,
     pub lsp_bearer_token: Option<String>,
+    pub vss_url: Option<String>,
+    pub vss_allow_empty_restore: bool,
 }
 
 #[derive(Clone)]
@@ -48,6 +50,8 @@ impl NodeHandle {
             virtual_peer_pubkeys: config.virtual_peer_pubkeys,
             lsp_base_url: config.lsp_base_url,
             lsp_bearer_token: config.lsp_bearer_token,
+            vss_url: config.vss_url,
+            vss_allow_empty_restore: config.vss_allow_empty_restore,
         };
         let state = start_daemon(&args).await?;
         Ok(Self { state })

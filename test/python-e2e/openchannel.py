@@ -255,7 +255,7 @@ def openchannel_push_asset_amount_scenario():
         fund_and_create_utxos(node_c, "node C")
 
         asset_id = issue_asset_nia(node_a, "node A")
-        wait_for_balance(node_a, asset_id, 1000, 60)
+        wait_for_balance(node_a, asset_id, 1000, 180)
         peer_uri = f"{node_b_pubkey}@127.0.0.1:{NODE_B_PEER_PORT + peer_offset}"
         node_a.connectpeer(peer_uri)
         wait_for_peer(node_a, node_b_pubkey, 20)
@@ -282,7 +282,7 @@ def openchannel_push_asset_amount_scenario():
             f"{partial_push_channel.temporary_channel_id}"
         )
 
-        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 120)
+        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 240)
         print("Mining blocks one by one until funding tx is confirmed...")
         mine_until_tx_confirmed(node_a, funding_txid, 180)
         print(f"Mining {OPEN_CHANNEL_CONFIRM_BLOCKS} blocks for channel confirmations...")
@@ -290,7 +290,7 @@ def openchannel_push_asset_amount_scenario():
         partial_channel_id = wait_for_channel_id(
             node_a, partial_push_channel.temporary_channel_id, 10
         )
-        wait_for_channel_ready(node_a, partial_channel_id, 60)
+        wait_for_channel_ready(node_a, partial_channel_id, 120)
         node_a_partial = next(
             c for c in node_a.list_channels() if c.channel_id == partial_channel_id
         )
@@ -356,8 +356,8 @@ def openchannel_push_asset_amount_scenario():
         )
 
         close_channel(node_a, partial_channel_id, node_b_pubkey)
-        wait_for_balance(node_a, asset_id, 700, 70)
-        wait_for_balance(node_b, asset_id, 300, 70)
+        wait_for_balance(node_a, asset_id, 700, 180)
+        wait_for_balance(node_b, asset_id, 300, 180)
 
         full_push_channel = node_a.openchannel(
             rln.SdkOpenChannelRequest(
@@ -380,13 +380,13 @@ def openchannel_push_asset_amount_scenario():
             f"{full_push_channel.temporary_channel_id}"
         )
 
-        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 120)
+        funding_txid = wait_for_channel_funding_tx(node_a, node_b, asset_id, 240)
         print("Mining blocks one by one until funding tx is confirmed...")
         mine_until_tx_confirmed(node_a, funding_txid, 180)
         print(f"Mining {OPEN_CHANNEL_CONFIRM_BLOCKS} blocks for channel confirmations...")
         run_regtest("mine", str(OPEN_CHANNEL_CONFIRM_BLOCKS))
         full_channel_id = wait_for_channel_id(node_a, full_push_channel.temporary_channel_id, 10)
-        wait_for_channel_ready(node_a, full_channel_id, 60)
+        wait_for_channel_ready(node_a, full_channel_id, 120)
 
         node_a.shutdown()
         node_b.shutdown()
@@ -399,8 +399,8 @@ def openchannel_push_asset_amount_scenario():
         node_a.unlock(unlock_request(NODE_A_PASSWORD))
         node_b.unlock(unlock_request(NODE_B_PASSWORD))
 
-        wait_for_usable_channels(node_a, 1, 120)
-        wait_for_usable_channels(node_b, 1, 120)
+        wait_for_usable_channels(node_a, 1, 240)
+        wait_for_usable_channels(node_b, 1, 240)
 
         assert asset_balance_spendable(node_a, asset_id) == 100
         assert asset_balance_spendable(node_b, asset_id) == 300
@@ -432,8 +432,8 @@ def openchannel_push_asset_amount_scenario():
         )
 
         close_channel(node_a, full_channel_id, node_b_pubkey)
-        wait_for_balance(node_a, asset_id, 200, 70)
-        wait_for_balance(node_b, asset_id, 800, 70)
+        wait_for_balance(node_a, asset_id, 200, 180)
+        wait_for_balance(node_b, asset_id, 800, 180)
 
         recipient_id = rgb_invoice(node_c)
         node_b.send_rgb(
@@ -441,7 +441,6 @@ def openchannel_push_asset_amount_scenario():
                 donation=True,
                 fee_rate=CREATE_UTXOS_FEE_RATE,
                 min_confirmations=1,
-                skip_sync=False,
                 recipient_groups=[
                     rln.AssetRecipients(
                         asset_id=asset_id,

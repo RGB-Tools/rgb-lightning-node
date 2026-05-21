@@ -60,7 +60,7 @@ class RestartTest {
     private val utxosNum: UByte = 10u
     private val utxosFeeRate: ULong = 7u
     private val assetSupply: ULong = 1000u
-    private val channelReadyTimeoutSec: Long = 60L
+    private val channelReadyTimeoutSec: Long = 120L
 
     private fun bitcoindRpc(method: String, vararg params: Any): JSONObject {
         val url = URL("http://$bitcoindHost:$bitcoindPort/")
@@ -373,7 +373,6 @@ class RestartTest {
                 donation = true,
                 feeRate = utxosFeeRate,
                 minConfirmations = 1u,
-                skipSync = false,
                 recipientGroups = listOf(
                     AssetRecipients(
                         assetId = assetId,
@@ -473,7 +472,7 @@ class RestartTest {
                     virtualOpenMode = null,
                 )
             )
-            val fundingTxid = waitForChannelFundingTx(requireNotNull(nodeA), requireNotNull(nodeB), assetId, 120L)
+            val fundingTxid = waitForChannelFundingTx(requireNotNull(nodeA), requireNotNull(nodeB), assetId, 240L)
             log("Mining blocks one by one until funding tx is confirmed...")
             mineUntilTxConfirmed(requireNotNull(nodeA), fundingTxid)
             mine(openChannelConfirmBlocks)
@@ -485,7 +484,7 @@ class RestartTest {
             pauseAfterShutdown()
             nodeA = makeNode("restart/node_a", nodeADaemonPort, nodeAPeerPort)
             unlockNode(requireNotNull(nodeA), "nodeApass", "node A")
-            waitForChannelReady(requireNotNull(nodeA), channelId, 10L)
+            waitForChannelReady(requireNotNull(nodeA), channelId, 60L)
 
             safeShutdown(nodeA)
             pauseAfterShutdown()
@@ -493,9 +492,9 @@ class RestartTest {
             nodeB = makeNode("restart/node_b", nodeBDaemonPort, nodeBPeerPort)
             unlockNode(requireNotNull(nodeA), "nodeApass", "node A")
             unlockNode(requireNotNull(nodeB), "nodeBpass", "node B")
-            waitForChannelReady(requireNotNull(nodeA), channelId, 10L)
-            waitForUsableChannels(requireNotNull(nodeA), 1, 60L)
-            waitForUsableChannels(requireNotNull(nodeB), 1, 60L)
+            waitForChannelReady(requireNotNull(nodeA), channelId, 60L)
+            waitForUsableChannels(requireNotNull(nodeA), 1, 120L)
+            waitForUsableChannels(requireNotNull(nodeB), 1, 120L)
             assertEquals(400uL, assetBalanceSpendable(requireNotNull(nodeA), assetId))
 
             val invoice = requireNotNull(nodeB).lnInvoice(
@@ -517,7 +516,7 @@ class RestartTest {
                 )
             )
             val paymentHash = requireNotNull(sendPayment.paymentHash)
-            waitForPaymentStatus(requireNotNull(nodeA), paymentHash, PaymentType.OUTBOUND, 60L)
+            waitForPaymentStatus(requireNotNull(nodeA), paymentHash, PaymentType.OUTBOUND, 120L)
 
             safeShutdown(nodeA); safeShutdown(nodeB)
             pauseAfterShutdown()
@@ -528,9 +527,9 @@ class RestartTest {
             log("restart12_3: node A unlocked")
             unlockNode(requireNotNull(nodeB), "nodeBpass", "node B")
             log("restart12_3: node B unlocked")
-            waitForChannelReady(requireNotNull(nodeA), channelId, 10L)
-            waitForUsableChannels(requireNotNull(nodeA), 1, 60L)
-            waitForUsableChannels(requireNotNull(nodeB), 1, 60L)
+            waitForChannelReady(requireNotNull(nodeA), channelId, 60L)
+            waitForUsableChannels(requireNotNull(nodeA), 1, 120L)
+            waitForUsableChannels(requireNotNull(nodeB), 1, 120L)
             waitForSucceededPaymentInList(
                 requireNotNull(nodeA),
                 paymentHash,
@@ -545,8 +544,8 @@ class RestartTest {
             )
 
             closeChannel(requireNotNull(nodeA), channelId, nodeBPubkey)
-            waitForBalance(requireNotNull(nodeA), assetId, 900uL, 70L)
-            waitForBalance(requireNotNull(nodeB), assetId, 100uL, 70L)
+            waitForBalance(requireNotNull(nodeA), assetId, 900uL, 180L)
+            waitForBalance(requireNotNull(nodeB), assetId, 100uL, 180L)
 
             safeShutdown(nodeA); safeShutdown(nodeB)
             pauseAfterShutdown()

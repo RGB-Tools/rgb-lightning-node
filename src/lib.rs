@@ -24,11 +24,14 @@ mod routes;
 mod runtime;
 mod sdk;
 mod swap;
+mod synced_kv_store;
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
 #[cfg(feature = "uniffi")]
 mod uniffi_api;
 mod utils;
+#[cfg(feature = "vss")]
+mod vss_kv_store;
 
 pub use node::{NodeConfig, NodeHandle};
 

@@ -35,6 +35,8 @@ pub fn mock_locked_app_state() -> TestAppState {
             database: Arc::new(database),
             lsp_base_url: None,
             lsp_bearer_token: None,
+            vss_url: None,
+            vss_allow_empty_restore: false,
         }),
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),

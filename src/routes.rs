@@ -1121,7 +1121,6 @@ pub(crate) struct SendRgbRequest {
     pub(crate) min_confirmations: u8,
     pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) recipient_map: HashMap<String, Vec<Recipient>>,
-    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1235,7 +1234,8 @@ pub(crate) enum TransactionType {
     RgbSend,
     Drain,
     CreateUtxos,
-    User,
+    SendBtc,
+    Incoming,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1262,12 +1262,14 @@ pub(crate) enum TransferKind {
     ReceiveWitness,
     Send,
     Inflation,
+    Burn,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum TransferStatus {
     Initiated,
     WaitingCounterparty,
+    WaitingSafeHeight,
     WaitingConfirmations,
     Settled,
     Failed,
@@ -2327,7 +2329,13 @@ pub(crate) async fn init(
             Some(mnemonic) => Mnemonic::from_str(&mnemonic)
                 .map_err(|e| APIError::InvalidMnemonic(e.to_string()))?
                 .to_string(),
-            None => generate_keys(state.static_state.network).mnemonic,
+            None => {
+                generate_keys(
+                    state.static_state.network,
+                    rgb_lib::keys::WitnessVersion::Taproot,
+                )
+                .mnemonic
+            }
         };
 
         encrypt_and_save_mnemonic(
@@ -2922,7 +2930,8 @@ pub(crate) async fn list_transactions(
                 rgb_lib::wallet::TransactionType::RgbSend => TransactionType::RgbSend,
                 rgb_lib::wallet::TransactionType::Drain => TransactionType::Drain,
                 rgb_lib::wallet::TransactionType::CreateUtxos => TransactionType::CreateUtxos,
-                rgb_lib::wallet::TransactionType::User => TransactionType::User,
+                rgb_lib::wallet::TransactionType::SendBtc => TransactionType::SendBtc,
+                rgb_lib::wallet::TransactionType::Incoming => TransactionType::Incoming,
             },
             txid: tx.txid,
             received: tx.received,
@@ -2954,6 +2963,7 @@ pub(crate) async fn list_transfers(
             status: match transfer.status {
                 rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
                 rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
+                rgb_lib::TransferStatus::WaitingSafeHeight => TransferStatus::WaitingSafeHeight,
                 rgb_lib::TransferStatus::WaitingConfirmations => {
                     TransferStatus::WaitingConfirmations
                 }
@@ -2968,6 +2978,7 @@ pub(crate) async fn list_transfers(
                 rgb_lib::wallet::TransferKind::ReceiveWitness => TransferKind::ReceiveWitness,
                 rgb_lib::wallet::TransferKind::Send => TransferKind::Send,
                 rgb_lib::wallet::TransferKind::Inflation => TransferKind::Inflation,
+                rgb_lib::wallet::TransferKind::Burn => TransferKind::Burn,
             },
             txid: transfer.txid,
             recipient_id: transfer.recipient_id,
@@ -3775,6 +3786,8 @@ pub(crate) async fn open_channel(
                         MIN_CHANNEL_CONFIRMATIONS,
                         None,
                         true,
+                        // Channel-funding dry run: mirror the real funding tx's final locktime.
+                        Some(0),
                     )
                 })
                 .await
@@ -4347,7 +4360,6 @@ pub(crate) async fn send_rgb(
                 payload.fee_rate,
                 payload.min_confirmations,
                 payload.expiration_timestamp,
-                payload.skip_sync,
             )
         })
         .await
@@ -4488,4 +4500,63 @@ pub(crate) async fn unlock(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+#[cfg(feature = "vss")]
+pub(crate) async fn vss_backup(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, APIError> {
+    let guard = state.check_unlocked().await?;
+    let unlocked_state = guard.as_ref().unwrap().clone();
+    drop(guard);
+
+    let vss_client = unlocked_state
+        .rgb_wallet_wrapper
+        .vss_client()
+        .ok_or_else(|| APIError::Unexpected("VSS is not configured".to_string()))?;
+
+    let wrapper = unlocked_state.rgb_wallet_wrapper.clone();
+    let version = tokio::task::spawn_blocking(move || {
+        let wallet = wrapper.get_rgb_wallet();
+        let rt = vss_client.handle().clone();
+        rt.block_on(wallet.vss_backup(&vss_client))
+    })
+    .await
+    .map_err(|e| APIError::Unexpected(format!("VSS backup task failed: {e}")))?
+    .map_err(|e| APIError::Unexpected(format!("VSS backup failed: {e}")))?;
+
+    Ok(Json(serde_json::json!({ "version": version })))
+}
+
+#[cfg(feature = "vss")]
+pub(crate) async fn vss_backup_info(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, APIError> {
+    let guard = state.check_unlocked().await?;
+    let unlocked_state = guard.as_ref().unwrap().clone();
+    drop(guard);
+
+    let vss_client = unlocked_state
+        .rgb_wallet_wrapper
+        .vss_client()
+        .ok_or_else(|| APIError::Unexpected("VSS is not configured".to_string()))?;
+
+    let wrapper = unlocked_state.rgb_wallet_wrapper.clone();
+    let info = tokio::task::spawn_blocking(move || {
+        let wallet = wrapper.get_rgb_wallet();
+        let rt = vss_client.handle().clone();
+        rt.block_on(wallet.vss_backup_info(&vss_client))
+    })
+    .await
+    .map_err(|e| APIError::Unexpected(format!("VSS backup info task failed: {e}")))?
+    .map_err(|e| APIError::Unexpected(format!("VSS backup info failed: {e}")))?;
+
+    let pending_kv_writes = unlocked_state.kv_store.pending_remote_writes();
+
+    Ok(Json(serde_json::json!({
+        "backup_exists": info.backup_exists,
+        "server_version": info.server_version,
+        "backup_required": info.backup_required,
+        "pending_kv_writes": pending_kv_writes,
+    })))
 }

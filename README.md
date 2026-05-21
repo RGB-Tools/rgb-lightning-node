@@ -394,6 +394,79 @@ Here is a list of projects using RLN, in alphabetical order:
 - [Tiramisu Wallet]
 
 
+## VSS Cloud Backup (optional)
+
+The node supports optional cloud backup via [VSS] (Versioned Storage Service).
+When enabled, the node replicates its state to a remote VSS server so it can be
+recovered on a new device. The feature is fully opt-in: it must be compiled in
+with `--features vss` and turned on at runtime with `--vss-url`. Without both,
+the node behaves exactly as before.
+
+Two independent data streams are backed up:
+
+- **Node KV state** — channel manager, channel monitors, payment info, swap
+  data and RGB channel info. Every update is written to both the local SQLite
+  database and the remote VSS server.
+- **RGB wallet data** — the wallet files managed by rgb-lib, backed up
+  automatically after every state-changing wallet operation.
+
+### Setup
+
+Start the VSS server alongside regtest services:
+```sh
+VSS=1 ./regtest.sh start
+```
+
+Or manually:
+```sh
+docker compose --profile vss up -d
+```
+
+### Usage
+
+Pass `--vss-url` when starting the node:
+```sh
+cargo run --features vss -- /tmp/rlndata --vss-url https://example.com/vss
+```
+
+Options:
+- `--vss-url <URL>` — VSS server URL; enables VSS backup. For non-loopback
+  hosts an `https://` URL is required (see `--vss-allow-http`).
+- `--vss-allow-http` — allow an `http://` `--vss-url` for non-loopback hosts.
+  By default only `https://` URLs and loopback HTTP URLs (e.g.
+  `http://localhost:8081/vss`) are accepted. Use only on a network you trust
+  out-of-band.
+- `--vss-allow-empty-restore` — on a fresh device, if a VSS restore fails
+  (server unreachable, wrong key, etc.), start with empty local state instead
+  of aborting unlock. **Use with care:** starting fresh with no channel
+  monitors can lose funds if the node had active channels. The default
+  (abort on restore failure) is the safe choice.
+
+### Encryption
+
+The KV stream is always encrypted at rest on VSS using XChaCha20-Poly1305 with
+a key derived from the VSS signing key. There is no option to disable it. The
+VSS signing key is derived from the wallet mnemonic, so backups can only be
+read and restored by a node initialized with the same mnemonic.
+
+### Recovery
+
+On a fresh start, if the local database has no channel-manager state but the
+VSS server has data, the node automatically restores from VSS before
+initializing. Each VSS store is owned by a single running node instance; a
+second node pointed at the same store refuses to start to avoid corrupting
+state.
+
+VSS replication is best-effort: a write that fails to reach the server is
+queued and retried on later successful writes. The number of pending writes is
+reported by `GET /vssbackupinfo` so monitoring can alert on persistent
+staleness.
+
+### API endpoints (when VSS is enabled)
+- `POST /vssbackup` — trigger a manual RGB wallet backup
+- `GET /vssbackupinfo` — check backup status (includes pending write count)
+
+[VSS]: https://github.com/lightningdevkit/vss-server
 [Biscuit tokens]: https://www.biscuitsec.org/
 [RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample

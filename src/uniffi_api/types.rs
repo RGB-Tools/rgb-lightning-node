@@ -176,7 +176,8 @@ pub enum TransactionType {
     RgbSend,
     Drain,
     CreateUtxos,
-    User,
+    SendBtc,
+    Incoming,
 }
 
 pub struct Transaction {
@@ -629,7 +630,6 @@ pub struct SendRgbRequest {
     pub donation: bool,
     pub fee_rate: u64,
     pub min_confirmations: u8,
-    pub skip_sync: bool,
     pub recipient_groups: Vec<AssetRecipients>,
 }
 

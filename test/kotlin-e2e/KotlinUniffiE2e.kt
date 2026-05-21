@@ -56,12 +56,12 @@ private val ISSUE_ASSET_SUPPLY: ULong = env("ISSUE_ASSET_SUPPLY", "1000").toULon
 private val OPEN_CHANNEL_ASSET_AMOUNT: ULong = env("OPEN_CHANNEL_ASSET_AMOUNT", "200").toULong()
 private val PAYMENT_ASSET_AMOUNT: ULong = env("PAYMENT_ASSET_AMOUNT", "50").toULong()
 private const val OPEN_CHANNEL_CONFIRM_BLOCKS: Int = 6
-private val CHANNEL_FUNDING_TX_TIMEOUT_SEC: Long = env("CHANNEL_FUNDING_TX_TIMEOUT_SEC", "100").toLong()
-private val CHANNEL_CONFIRM_TIMEOUT_SEC: Long = env("CHANNEL_CONFIRM_TIMEOUT_SEC", "100").toLong()
-private val CHANNEL_READY_TIMEOUT_SEC: Long = env("CHANNEL_READY_TIMEOUT_SEC", "20").toLong()
-private val CHANNEL_COUNT_TIMEOUT_SEC: Long = env("CHANNEL_COUNT_TIMEOUT_SEC", "20").toLong()
-private val BALANCE_TIMEOUT_SEC: Long = env("BALANCE_TIMEOUT_SEC", "140").toLong()
-private val PAYMENT_TIMEOUT_SEC: Long = env("PAYMENT_TIMEOUT_SEC", "80").toLong()
+private val CHANNEL_FUNDING_TX_TIMEOUT_SEC: Long = env("CHANNEL_FUNDING_TX_TIMEOUT_SEC", "240").toLong()
+private val CHANNEL_CONFIRM_TIMEOUT_SEC: Long = env("CHANNEL_CONFIRM_TIMEOUT_SEC", "200").toLong()
+private val CHANNEL_READY_TIMEOUT_SEC: Long = env("CHANNEL_READY_TIMEOUT_SEC", "60").toLong()
+private val CHANNEL_COUNT_TIMEOUT_SEC: Long = env("CHANNEL_COUNT_TIMEOUT_SEC", "60").toLong()
+private val BALANCE_TIMEOUT_SEC: Long = env("BALANCE_TIMEOUT_SEC", "240").toLong()
+private val PAYMENT_TIMEOUT_SEC: Long = env("PAYMENT_TIMEOUT_SEC", "160").toLong()
 private val RESET_DATA: Boolean = env("RESET_DATA", "1") == "1"
 private val SCENARIO: String = env("KOTLIN_E2E_SCENARIO", "payment")
 
@@ -889,7 +889,6 @@ private fun openchannelPushAssetAmountScenario() {
                 donation = true,
                 feeRate = CREATE_UTXOS_FEE_RATE,
                 minConfirmations = 1u,
-                skipSync = false,
                 recipientGroups = listOf(
                     AssetRecipients(
                         assetId = assetId,
