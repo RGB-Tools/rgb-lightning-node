@@ -9,6 +9,44 @@ pub(crate) const HTLC_MIN_MSAT: u64 = 3_000_000;
 pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
 pub(crate) const DEFAULT_FINAL_CLTV_EXPIRY_DELTA: u32 = 14;
 
+pub(crate) mod async_order {
+    use crate::async_order::{AsyncOrderNewHashWire, AsyncOrderRequestInvoiceParamsWire};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub(crate) struct AsyncOrderNewRequest {
+        pub(crate) host_node_id: String,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub(crate) struct AsyncOrderNewResponse {
+        pub(crate) request_id: String,
+        pub(crate) host_node_id: String,
+        pub(crate) protocol_version: u64,
+        pub(crate) order_id: String,
+        pub(crate) status: String,
+        pub(crate) accepted_through_index: u64,
+        pub(crate) next_index_expected: u64,
+        pub(crate) unused_hashes: u64,
+        pub(crate) refill_batch_size: u64,
+        pub(crate) first_hash_index: u64,
+        pub(crate) last_hash_index: u64,
+        pub(crate) hashes: Vec<AsyncOrderNewHashWire>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub(crate) struct AsyncOrderOutboundInvoiceRequest {
+        pub(crate) client_node_id: String,
+        pub(crate) params: AsyncOrderRequestInvoiceParamsWire,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub(crate) struct AsyncOrderOutboundInvoiceResponse {
+        pub(crate) payment_hash: String,
+        pub(crate) bolt11: String,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub(crate) enum HTLCStatus {
     Pending,

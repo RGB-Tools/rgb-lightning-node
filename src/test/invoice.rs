@@ -25,6 +25,7 @@ async fn invoice() {
         asset_amount: Some(1),
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -42,6 +43,7 @@ async fn invoice() {
         asset_amount: Some(1),
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -59,6 +61,7 @@ async fn invoice() {
         asset_amount: None,
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -83,6 +86,7 @@ async fn description_hash_invoice() {
     fund_and_create_utxos(node1_addr, None).await;
 
     let description_hash = lightning_invoice::Sha256(Sha256::hash(b"out-of-band description"));
+    let inbound_min_final_cltv = 144;
     let payload = LNInvoiceRequest {
         amt_msat: None,
         expiry_sec: 900,
@@ -90,6 +94,7 @@ async fn description_hash_invoice() {
         asset_amount: None,
         payment_hash: None,
         description_hash: Some(description_hash.0.to_string()),
+        min_final_cltv_expiry_delta: Some(inbound_min_final_cltv),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -106,6 +111,10 @@ async fn description_hash_invoice() {
         invoice.description(),
         lightning_invoice::Bolt11InvoiceDescriptionRef::Hash(hash) if *hash == description_hash
     ));
+    assert_eq!(
+        invoice.min_final_cltv_expiry_delta(),
+        u64::from(inbound_min_final_cltv) + 3
+    );
 }
 
 #[serial_test::serial]
@@ -126,6 +135,7 @@ async fn invalid_description_hash_invoice() {
         asset_amount: None,
         payment_hash: None,
         description_hash: Some("not-a-valid-description-hash".to_string()),
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -181,6 +191,7 @@ async fn zero_amount_invoice() {
         asset_amount: None,
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -269,6 +280,7 @@ async fn zero_amount_invoice() {
         asset_amount: None,
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let invoice_without_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -293,6 +305,7 @@ async fn zero_amount_invoice() {
         asset_amount: Some(50),
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let invoice_with_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))

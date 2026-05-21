@@ -326,6 +326,7 @@ pub struct DecodeLnInvoiceResponse {
     pub payment_hash: PaymentHash,
     pub payment_secret: String,
     pub payee_pubkey: Option<PublicKey>,
+    pub min_final_cltv_expiry_delta: u64,
     pub network: String,
 }
 
@@ -396,6 +397,7 @@ pub struct LnInvoiceRequest {
     pub asset_amount: Option<u64>,
     pub payment_hash: Option<PaymentHash>,
     pub description_hash: Option<String>,
+    pub min_final_cltv_expiry_delta: Option<u16>,
 }
 
 pub struct CancelHodlInvoiceRequest {

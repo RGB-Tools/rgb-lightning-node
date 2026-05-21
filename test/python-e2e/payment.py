@@ -131,6 +131,7 @@ def payment_scenario():
                 asset_amount=PAYMENT_ASSET_AMOUNT,
                 description_hash=None,
                 payment_hash=None,
+                min_final_cltv_expiry_delta=None,
             )
         ).invoice
         print(f"invoice: {invoice}")

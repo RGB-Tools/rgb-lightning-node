@@ -660,6 +660,7 @@ private fun paymentScenario() {
                 assetAmount = PAYMENT_ASSET_AMOUNT,
                 descriptionHash = null,
                 paymentHash = null,
+                minFinalCltvExpiryDelta = null,
             )
         ).invoice
         println("invoice: $invoice")
@@ -1019,6 +1020,7 @@ private fun closeCoopVanillaScenario(name: String, portOffset: UInt, withAnchors
                 assetAmount = null,
                 descriptionHash = null,
                 paymentHash = null,
+                minFinalCltvExpiryDelta = null,
             )
         ).invoice
         val sendPayment = nodeB.sendpayment(

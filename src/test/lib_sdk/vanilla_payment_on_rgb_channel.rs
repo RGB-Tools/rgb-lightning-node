@@ -103,6 +103,7 @@ fn vanilla_payment_on_rgb_channel() {
                 asset_amount: None,
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node B vanilla ln_invoice")
             .invoice;

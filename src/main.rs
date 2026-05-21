@@ -53,8 +53,8 @@ use crate::auth::conditional_auth_middleware;
 use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::routes::{
-    address, asset_balance, asset_metadata, async_order_new, backup, btc_balance,
-    cancel_hodl_invoice, change_password, check_indexer_url, check_proxy_endpoint,
+    address, asset_balance, asset_metadata, async_order_new, async_order_outbound_invoice, backup,
+    btc_balance, cancel_hodl_invoice, change_password, check_indexer_url, check_proxy_endpoint,
     claim_hodl_invoice, close_channel, connect_peer, create_utxos, decode_ln_invoice,
     decode_rgb_invoice, disconnect_peer, estimate_fee, fail_transfers, get_asset_media,
     get_channel_id, get_payment, get_swap, inflate, init, invoice_status, issue_asset_cfa,
@@ -120,6 +120,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .layer(DefaultBodyLimit::disable())
         .route("/address", post(address))
         .route("/apay/new", post(async_order_new))
+        .route("/apay/outboundinvoice", post(async_order_outbound_invoice))
         .route("/assetbalance", post(asset_balance))
         .route("/assetmetadata", post(asset_metadata))
         .route("/backup", post(backup))

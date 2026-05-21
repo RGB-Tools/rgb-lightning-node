@@ -505,6 +505,7 @@ class RestartTest {
                     assetAmount = 100u,
                     descriptionHash = null,
                     paymentHash = null,
+                    minFinalCltvExpiryDelta = null,
                 )
             ).invoice
             val sendPayment = requireNotNull(nodeA).sendpayment(

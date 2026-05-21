@@ -62,6 +62,7 @@ fn locked_state_does_not_bypass_unlock_guards() {
         asset_amount: None,
         payment_hash: None,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     });
     assert!(matches!(invoice, Err(RlnError::NotInitialized)));
 

@@ -561,6 +561,7 @@ async fn claim_hodl_invoice_btc_rgb() {
         asset_amount: None,
         payment_hash: Some(payment_hash.clone()),
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let duplicate_hash_res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))

@@ -33,6 +33,7 @@ fn description_hash_survives_sdk_path() {
                 asset_amount: None,
                 payment_hash: None,
                 description_hash: Some(description_hash.0.to_string()),
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node ln_invoice with description_hash")
             .invoice;

@@ -159,6 +159,7 @@ fn restart() {
                 asset_amount: Some(100),
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node B ln_invoice")
             .invoice;

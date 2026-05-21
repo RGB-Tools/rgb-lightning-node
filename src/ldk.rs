@@ -1,5 +1,8 @@
 use crate::async_order::{
-    AsyncOrderAccessControl, AsyncOrderMessageHandler, AsyncPaymentsPreimageRoot,
+    AsyncOrderAccessControl, AsyncOrderInvoiceProvider, AsyncOrderMessageHandler,
+    AsyncOrderOutboundInvoiceResultWire, AsyncOrderRequestInvoiceParamsWire,
+    AsyncPaymentsPreimageRoot, JsonRpcErrorWire, ASYNC_ERROR_INVOICE_HASH_MISMATCH,
+    ASYNC_ERROR_STALE_FLOW,
 };
 use crate::synced_kv_store::SyncedKvStore;
 use amplify::{map, s};
@@ -16,7 +19,9 @@ use lightning::chain::{BestBlock, Filter};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
 use lightning::ln::channel_state::ChannelDetails;
-use lightning::ln::channelmanager::{self, ChannelFundingType, PaymentId, RecentPaymentDetails};
+use lightning::ln::channelmanager::{
+    self, Bolt11InvoiceParameters, ChannelFundingType, PaymentId, RecentPaymentDetails,
+};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
 };
@@ -61,7 +66,7 @@ use lightning_block_sync::poll;
 use lightning_block_sync::SpvClient;
 use lightning_block_sync::UnboundedCache;
 use lightning_dns_resolver::OMDomainResolver;
-use lightning_invoice::PaymentSecret;
+use lightning_invoice::{Bolt11InvoiceDescription, PaymentSecret};
 use lightning_net_tokio::SocketDescriptor;
 use rand::RngCore;
 use rgb_lib::{
@@ -100,7 +105,8 @@ use tokio::task::JoinHandle;
 
 use crate::bitcoind::BitcoindClient;
 use crate::core_types::{
-    HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE, MIN_CHANNEL_CONFIRMATIONS,
+    HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT, FEE_RATE, HTLC_MIN_MSAT,
+    MIN_CHANNEL_CONFIRMATIONS,
 };
 use crate::database::RlnDatabase;
 use crate::disk::{self, FilesystemLogger};
@@ -125,9 +131,9 @@ use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLib
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
-    hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL,
-    PROXY_ENDPOINT_PUBLIC,
+    hex_str, validate_and_parse_payment_hash, AppState, StaticState, UnlockedAppState,
+    ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST, ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET,
+    ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL, PROXY_ENDPOINT_PUBLIC,
 };
 
 const VIRTUAL_CHANNEL_DOMAIN_SEPARATOR: &[u8] = b"rln_virtual_channels_v0";
@@ -164,12 +170,14 @@ pub(crate) fn virtual_channel_synthetic_outpoint(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InvoiceType {
     AutoClaim,
-    Hodl,
+    Hodl { async_payment_recipient: bool },
 }
 
 impl_writeable_tlv_based_enum!(InvoiceType,
     (0, AutoClaim) => {},
-    (1, Hodl) => {},
+    (1, Hodl) => {
+        (0, async_payment_recipient, (default_value, false)),
+    },
 );
 
 /// Save config to database (source of truth) and sync to KVStore for rust-lightning.
@@ -343,6 +351,27 @@ impl VirtualChannelSessionStore {
             .values()
             .any(|session| session.virtual_funding_txo == *virtual_funding_txo)
     }
+}
+
+fn persist_staged_inbound_payment(
+    kv_store: &dyn KVStoreSync,
+    inbound: &mut InboundPaymentInfoStorage,
+    payment_hash: PaymentHash,
+    payment_info: PaymentInfo,
+) -> Result<(), JsonRpcErrorWire> {
+    let mut staged_inbound = InboundPaymentInfoStorage {
+        payments: inbound.payments.clone(),
+    };
+    staged_inbound.payments.insert(payment_hash, payment_info);
+    kv_store
+        .write("", "", INBOUND_PAYMENTS_KEY, staged_inbound.encode())
+        .map_err(|err| {
+            JsonRpcErrorWire::internal_error(format!(
+                "async_order_request_outbound_invoice_persist_failed: {err}"
+            ))
+        })?;
+    inbound.payments = staged_inbound.payments;
+    Ok(())
 }
 
 impl UnlockedAppState {
@@ -1008,6 +1037,140 @@ impl AsyncOrderAccessControl for VirtualChannelAccess {
             && self.channel_manager.list_channels().iter().any(|channel| {
                 channel.counterparty.node_id == *peer && channel.trusted_no_broadcast
             })
+    }
+}
+
+struct AsyncOrderRecipientInvoiceProvider {
+    channel_manager: Arc<ChannelManager>,
+    inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
+    async_payments_preimage_root: Arc<AsyncPaymentsPreimageRoot>,
+    kv_store: Arc<SyncedKvStore>,
+}
+
+impl AsyncOrderRecipientInvoiceProvider {
+    fn parse_u64_field(value: &str, field: &str) -> Result<u64, JsonRpcErrorWire> {
+        value
+            .parse::<u64>()
+            .map_err(|_| JsonRpcErrorWire::invalid_params(format!("invalid_{field}")))
+    }
+
+    fn stale_flow_error() -> JsonRpcErrorWire {
+        JsonRpcErrorWire::application_error(ASYNC_ERROR_STALE_FLOW, "stale_flow")
+    }
+}
+
+impl AsyncOrderInvoiceProvider for AsyncOrderRecipientInvoiceProvider {
+    fn request_outbound_invoice(
+        &self,
+        _sender_node_id: PublicKey,
+        params: AsyncOrderRequestInvoiceParamsWire,
+    ) -> Result<AsyncOrderOutboundInvoiceResultWire, JsonRpcErrorWire> {
+        let hash_index = Self::parse_u64_field(&params.hash_index, "hash_index")?;
+        let amount_msat = params.amount_msat;
+        if amount_msat < HTLC_MIN_MSAT {
+            return Err(JsonRpcErrorWire::invalid_params(format!(
+                "amt_msat cannot be less than {HTLC_MIN_MSAT}"
+            )));
+        }
+        if matches!(params.asset_amount, Some(0)) {
+            return Err(JsonRpcErrorWire::invalid_params("invalid_asset_amount"));
+        }
+        if params.description_hash.trim().is_empty() {
+            return Err(JsonRpcErrorWire::invalid_params("invalid_description_hash"));
+        }
+
+        let (contract_id, asset_amount) = match (&params.asset_id, params.asset_amount) {
+            (Some(asset_id), Some(asset_amount)) => (
+                Some(
+                    ContractId::from_str(asset_id)
+                        .map_err(|_| JsonRpcErrorWire::invalid_params("invalid_asset_id"))?,
+                ),
+                Some(asset_amount),
+            ),
+            (None, None) => (None, None),
+            _ => return Err(JsonRpcErrorWire::invalid_params("incomplete_rgb_info")),
+        };
+
+        let requested_payment_hash = validate_and_parse_payment_hash(&params.payment_hash)
+            .map_err(|_| {
+                JsonRpcErrorWire::application_error(
+                    ASYNC_ERROR_INVOICE_HASH_MISMATCH,
+                    "invoice_hash_mismatch",
+                )
+            })?;
+        let material = self
+            .async_payments_preimage_root
+            .derive_hash_material(hash_index)?;
+        if material.payment_hash != requested_payment_hash {
+            return Err(JsonRpcErrorWire::application_error(
+                ASYNC_ERROR_INVOICE_HASH_MISMATCH,
+                "invoice_hash_mismatch",
+            ));
+        }
+
+        let mut inbound = self.inbound_payments.lock().unwrap();
+        if let Some(existing) = inbound.payments.get(&requested_payment_hash) {
+            let expired = existing
+                .expires_at
+                .map(|expires_at| get_current_timestamp() >= expires_at)
+                .unwrap_or(false);
+            let reusable = matches!(existing.status, HTLCStatus::Failed | HTLCStatus::Cancelled)
+                || (matches!(existing.status, HTLCStatus::Pending) && expired);
+            if !reusable {
+                return Err(Self::stale_flow_error());
+            }
+        }
+
+        let description_hash = lightning_invoice::Sha256(
+            sha256::Hash::from_str(params.description_hash.trim())
+                .map_err(|_| JsonRpcErrorWire::invalid_params("invalid_description_hash"))?,
+        );
+
+        let invoice_params = Bolt11InvoiceParameters {
+            amount_msats: Some(amount_msat),
+            description: Bolt11InvoiceDescription::Hash(description_hash),
+            invoice_expiry_delta_secs: Some(params.invoice_expiry_sec),
+            min_final_cltv_expiry_delta: Some(params.min_final_cltv_expiry_delta),
+            payment_hash: Some(requested_payment_hash),
+            contract_id,
+            asset_amount,
+        };
+        let invoice = self
+            .channel_manager
+            .create_bolt11_invoice(invoice_params)
+            .map_err(|err| {
+                JsonRpcErrorWire::internal_error(format!(
+                    "async_order_request_outbound_invoice_failed: {err}"
+                ))
+            })?;
+
+        let created_at = get_current_timestamp();
+        let expires_at = created_at + params.invoice_expiry_sec as u64;
+        let result = AsyncOrderOutboundInvoiceResultWire {
+            payment_hash: hex_str(&requested_payment_hash.0),
+            bolt11: invoice.to_string(),
+        };
+        persist_staged_inbound_payment(
+            self.kv_store.as_ref(),
+            &mut inbound,
+            requested_payment_hash,
+            PaymentInfo {
+                preimage: Some(material.payment_preimage),
+                secret: Some(*invoice.payment_secret()),
+                status: HTLCStatus::Pending,
+                amt_msat: Some(amount_msat),
+                created_at,
+                updated_at: created_at,
+                payee_pubkey: self.channel_manager.get_our_node_id(),
+                expires_at: Some(expires_at),
+                claim_deadline_height: None,
+                invoice_type: Some(InvoiceType::Hodl {
+                    async_payment_recipient: true,
+                }),
+            },
+        )?;
+
+        Ok(result)
     }
 }
 
@@ -1689,17 +1852,32 @@ async fn handle_ldk_events(
                         .channel_manager
                         .claim_funds(payment_preimage.unwrap());
                 }
-                InvoiceType::Hodl => {
-                    unlocked_state.upsert_inbound_payment(
-                        payment_hash,
-                        HTLCStatus::Claimable,
-                        payment_preimage,
-                        payment_secret,
-                        Some(amount_msat),
-                        unlocked_state.channel_manager.get_our_node_id(),
-                        claim_deadline,
-                        None,
-                    );
+                InvoiceType::Hodl {
+                    async_payment_recipient,
+                } => {
+                    if async_payment_recipient {
+                        unlocked_state
+                            .channel_manager
+                            .claim_funds(payment_preimage.unwrap());
+                    } else {
+                        unlocked_state.upsert_inbound_payment(
+                            payment_hash,
+                            HTLCStatus::Claimable,
+                            payment_preimage,
+                            payment_secret,
+                            Some(amount_msat),
+                            unlocked_state.channel_manager.get_our_node_id(),
+                            claim_deadline,
+                            None,
+                        );
+                        unlocked_state
+                            .async_order_handler
+                            .notify_claimable_hodl_invoice(
+                                payment_hash,
+                                amount_msat,
+                                claim_deadline,
+                            );
+                    }
                 }
             }
         }
@@ -1811,6 +1989,9 @@ async fn handle_ldk_events(
                     HTLCStatus::Succeeded,
                     Some(payment_preimage),
                 );
+                unlocked_state
+                    .async_order_handler
+                    .notify_payment_sent(payment_hash, payment_preimage);
                 tracing::info!(
                     "EVENT: successfully sent payment of {:?} millisatoshis{} from \
                             payment hash {} with preimage {}",
@@ -3547,6 +3728,13 @@ pub(crate) async fn start_ldk(
             }
         }
     }
+
+    async_order_handler.set_invoice_provider(Arc::new(AsyncOrderRecipientInvoiceProvider {
+        channel_manager: Arc::clone(&channel_manager),
+        inbound_payments: Arc::clone(&inbound_payments),
+        async_payments_preimage_root: Arc::clone(&async_payments_preimage_root),
+        kv_store: Arc::clone(&kv_store),
+    }));
 
     let unlocked_state = Arc::new(UnlockedAppState {
         channel_manager: Arc::clone(&channel_manager),

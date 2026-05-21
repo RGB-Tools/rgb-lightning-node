@@ -444,6 +444,7 @@ def run_hodl_claim_phase(
             asset_amount=PAYMENT_ASSET_AMOUNT,
             payment_hash=payment_hash_hex,
             description_hash=None,
+            min_final_cltv_expiry_delta=None,
         )
     ).invoice
     print(f"hodl claim invoice: {invoice}")
@@ -565,6 +566,7 @@ def run_hodl_cancel_phase(
             asset_amount=PAYMENT_ASSET_AMOUNT,
             payment_hash=payment_hash_hex,
             description_hash=None,
+            min_final_cltv_expiry_delta=None,
         )
     ).invoice
     print(f"hodl cancel invoice: {invoice}")
@@ -702,6 +704,7 @@ def run_hodl_to_claimable(sender: rln.SdkNode, receiver: rln.SdkNode, asset_id, 
             asset_amount=PAYMENT_ASSET_AMOUNT,
             payment_hash=payment_hash_hex,
             description_hash=None,
+            min_final_cltv_expiry_delta=None,
         )
     ).invoice
     print(f"hodl expiry invoice: {invoice}")

@@ -172,6 +172,7 @@ fn success() {
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node B ln_invoice")
             .invoice;
@@ -238,6 +239,7 @@ fn success() {
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node A ln_invoice second")
             .invoice;
@@ -273,6 +275,7 @@ fn success() {
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node B ln_invoice third")
             .invoice;
@@ -306,6 +309,7 @@ fn success() {
                 asset_amount: Some(asset_amount),
                 payment_hash: None,
                 description_hash: None,
+                min_final_cltv_expiry_delta: None,
             })
             .expect("node A ln_invoice fourth")
             .invoice;

@@ -1148,7 +1148,9 @@ async fn ln_invoice_hodl(
         asset_amount,
         expiry_sec,
         payment_hash,
-        InvoiceType::Hodl,
+        InvoiceType::Hodl {
+            async_payment_recipient: false,
+        },
     )
     .await
 }
@@ -1172,6 +1174,7 @@ async fn ln_invoice_with_type(
         asset_amount,
         payment_hash,
         description_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/lninvoice"))
