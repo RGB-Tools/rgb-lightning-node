@@ -309,4 +309,23 @@ mod uniffi_smoke_tests {
         assert_eq!(mapped.preimage, expected_preimage);
         assert!(matches!(mapped.payment_type, PaymentType::InboundHodl));
     }
+
+    #[test]
+    fn sdk_create_rejects_invalid_vss_url() {
+        let res = SdkNode::create(SdkInitRequest {
+            storage_dir_path: "/tmp/rln_vss_validation_test".to_string(),
+            daemon_listening_port: 3001,
+            ldk_peer_listening_port: 9735,
+            network: "regtest".to_string(),
+            max_media_upload_size_mb: 1,
+            enable_virtual_channels_v0: None,
+            virtual_peer_pubkeys: None,
+            lsp_base_url: None,
+            lsp_bearer_token: None,
+            vss_url: Some("http://example.com/vss".to_string()),
+            vss_allow_http: false,
+            vss_allow_empty_restore: false,
+        });
+        assert!(matches!(res, Err(RlnError::InvalidRequest)));
+    }
 }

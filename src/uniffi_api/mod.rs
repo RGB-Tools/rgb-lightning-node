@@ -35,6 +35,16 @@ fn network_from_str(network: &str) -> Result<rgb_lib::BitcoinNetwork, RlnError> 
 
 fn handle_from_request(request: SdkInitRequest) -> Result<NodeHandle, RlnError> {
     let network = network_from_str(&request.network)?;
+    if let Some(url) = &request.vss_url {
+        #[cfg(feature = "vss")]
+        crate::utils::validate_vss_url(url, request.vss_allow_http)
+            .map_err(|_| RlnError::InvalidRequest)?;
+        #[cfg(not(feature = "vss"))]
+        {
+            let _ = url;
+            return Err(RlnError::InvalidRequest);
+        }
+    }
     let config = NodeConfig {
         storage_dir_path: std::path::PathBuf::from(request.storage_dir_path),
         daemon_listening_port: request.daemon_listening_port,
@@ -46,8 +56,8 @@ fn handle_from_request(request: SdkInitRequest) -> Result<NodeHandle, RlnError> 
         virtual_peer_pubkeys: request.virtual_peer_pubkeys.unwrap_or_default(),
         lsp_base_url: request.lsp_base_url,
         lsp_bearer_token: request.lsp_bearer_token,
-        vss_url: None,
-        vss_allow_empty_restore: false,
+        vss_url: request.vss_url,
+        vss_allow_empty_restore: request.vss_allow_empty_restore,
     };
     block_on_app(NodeHandle::new(config))
 }

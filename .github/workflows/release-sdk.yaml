@@ -110,7 +110,7 @@ jobs:
           bindgen --version
 
       - name: Build host cdylib with external signer API
-        run: cargo build --release --features "uniffi,vls" --lib
+        run: cargo build --release --features "uniffi,vls,vss" --lib
 
       - name: Generate Kotlin Android bindings
         run: ./scripts/ci/uniffi_generate_from_library.sh kotlin target/uniffi/kotlin-android target/release/librgb_lightning_node.so uniffi-android.toml
@@ -215,10 +215,10 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--sysroot=${IOS_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--sysroot=${SIM_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_ios="--sysroot=${SIM_SYSROOT}"
-          cargo build --release --features "uniffi,vls" --lib
-          cargo build --release --features "uniffi,vls" --lib --target aarch64-apple-ios
-          cargo build --release --features "uniffi,vls" --lib --target aarch64-apple-ios-sim
-          cargo build --release --features "uniffi,vls" --lib --target x86_64-apple-ios
+          cargo build --release --features "uniffi,vls,vss" --lib
+          cargo build --release --features "uniffi,vls,vss" --lib --target aarch64-apple-ios
+          cargo build --release --features "uniffi,vls,vss" --lib --target aarch64-apple-ios-sim
+          cargo build --release --features "uniffi,vls,vss" --lib --target x86_64-apple-ios
 
       - name: Generate Swift bindings
         run: ./scripts/ci/uniffi_generate_from_library.sh swift target/uniffi/swift target/release/librgb_lightning_node.dylib

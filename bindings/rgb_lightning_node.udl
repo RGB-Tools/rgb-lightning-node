@@ -531,6 +531,9 @@ dictionary SdkInitRequest {
     sequence<PublicKey>? virtual_peer_pubkeys;
     string? lsp_base_url;
     string? lsp_bearer_token;
+    string? vss_url = null;
+    boolean vss_allow_http = false;
+    boolean vss_allow_empty_restore = false;
 };
 
 dictionary SdkUnlockRequest {

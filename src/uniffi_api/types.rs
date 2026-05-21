@@ -624,6 +624,9 @@ pub struct SdkInitRequest {
     pub virtual_peer_pubkeys: Option<Vec<PublicKey>>,
     pub lsp_base_url: Option<String>,
     pub lsp_bearer_token: Option<String>,
+    pub vss_url: Option<String>,
+    pub vss_allow_http: bool,
+    pub vss_allow_empty_restore: bool,
 }
 
 pub struct SendRgbRequest {

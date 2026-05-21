@@ -28,7 +28,7 @@ jobs:
           rustflags: ""
 
       - name: Run library-only test suite
-        run: cargo test --features "uniffi,test-utils" --test lib_core
+        run: cargo test --features "uniffi,vss,test-utils" --test lib_core
 
   kotlin-jvm:
     name: Kotlin JVM (Linux host)
@@ -47,7 +47,7 @@ jobs:
           rustflags: ""
 
       - name: Build host cdylib
-        run: cargo build --release --features uniffi --lib
+        run: cargo build --release --features uniffi,vss --lib
 
       - name: Generate Kotlin bindings
         run: ./scripts/ci/uniffi_generate_kotlin.sh
@@ -195,9 +195,9 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--sysroot=${IOS_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--sysroot=${SIM_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_ios="--sysroot=${SIM_SYSROOT}"
-          cargo build --release --features uniffi --lib --target aarch64-apple-ios
-          cargo build --release --features uniffi --lib --target aarch64-apple-ios-sim
-          cargo build --release --features uniffi --lib --target x86_64-apple-ios
+          cargo build --release --features uniffi,vss --lib --target aarch64-apple-ios
+          cargo build --release --features uniffi,vss --lib --target aarch64-apple-ios-sim
+          cargo build --release --features uniffi,vss --lib --target x86_64-apple-ios
 
       - name: Generate Swift bindings
         run: ./scripts/ci/uniffi_generate_swift.sh

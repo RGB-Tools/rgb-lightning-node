@@ -36,7 +36,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build Python UniFFI library
-        run: cargo build --release --features uniffi --lib
+        run: cargo build --release --features uniffi,vss --lib
 
       - name: Generate Python bindings
         run: ./scripts/ci/uniffi_generate_python.sh

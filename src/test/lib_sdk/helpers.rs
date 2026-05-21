@@ -233,6 +233,9 @@ pub(crate) fn make_node(
         virtual_peer_pubkeys: None,
         lsp_base_url: None,
         lsp_bearer_token: None,
+        vss_url: None,
+        vss_allow_http: false,
+        vss_allow_empty_restore: false,
     })
     .expect("create SDK node")
 }
