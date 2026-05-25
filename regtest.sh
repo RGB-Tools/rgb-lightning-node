@@ -23,7 +23,9 @@ _is_port_bound() {
     local port=$1
     case "$(uname)" in
         "Linux")
-            [ -n "$(ss -HOlnt "sport = :$port")" ] && return 0
+            [ -n "$(ss -HOant "sport = :$port")" ] && return 0
+            ss -Oant "sport = :$port"
+            return 1
             ;;
         "Darwin")
             lsof -i "tcp:${port}" -sTCP:LISTEN -t >/dev/null && return 0
