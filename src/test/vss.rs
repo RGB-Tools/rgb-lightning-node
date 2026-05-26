@@ -496,4 +496,164 @@ mod tests {
         // Cleanup
         rt.block_on(client.delete_backup()).expect("cleanup");
     }
+
+    /// After a graceful shutdown the fence persists, blocking restore on a
+    /// fresh instance. `delete_fence` is the escape hatch the SDK exposes so a
+    /// legitimate operator can take over without poking VSS directly.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn vss_kv_store_delete_fence_allows_new_owner() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        let (signing_key, store_id) = generate_test_keys();
+
+        // Instance A claims the fence and then "shuts down" (drop). The fence
+        // is intentionally left behind on VSS.
+        let store_a =
+            VssKvStore::new(VSS_URL.to_string(), store_id.clone(), signing_key).expect("store a");
+        store_a.acquire_fence().expect("a acquires fence");
+        drop(store_a);
+
+        // Instance B (fresh UUID, same store_id) cannot claim the fence.
+        let store_b =
+            VssKvStore::new(VSS_URL.to_string(), store_id.clone(), signing_key).expect("store b");
+        let err = store_b
+            .acquire_fence()
+            .expect_err("b must not claim a leftover fence");
+        assert!(
+            err.to_string().contains("owned by another"),
+            "unexpected error: {err}"
+        );
+
+        // Operator clears the fence through the new instance.
+        store_b.delete_fence().expect("delete fence");
+
+        // Now B can take over.
+        store_b
+            .acquire_fence()
+            .expect("b acquires fence after clear");
+    }
+
+    /// `delete_fence` is idempotent: clearing an absent fence must not error,
+    /// so it stays safe to call defensively before unlock.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn vss_kv_store_delete_fence_idempotent() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        let (signing_key, store_id) = generate_test_keys();
+        let store = VssKvStore::new(VSS_URL.to_string(), store_id, signing_key).expect("vss store");
+
+        // No fence has been acquired yet — clear must still succeed.
+        store.delete_fence().expect("first delete on empty fence");
+        store.delete_fence().expect("second delete is no-op");
+    }
+
+    /// End-to-end happy-path that mirrors what the SDK does for a legitimate
+    /// "wipe device and restore" flow:
+    ///
+    ///   1. Original node initializes → acquires fence → writes state →
+    ///      replicates to VSS → shuts down (fence left behind).
+    ///   2. Fresh local state with the same mnemonic (same VSS identity).
+    ///   3. Unlock would fail because the leftover fence blocks the new UUID,
+    ///      so the SDK clears it (`delete_fence`).
+    ///   4. New instance acquires its own fence, runs `restore_from_vss`
+    ///      against the production default (`force = false`, which restores
+    ///      iff the local channel-manager slot is empty), and the state
+    ///      matches what the original wrote.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn vss_lifecycle_init_unlock_state_wipe_restore() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        use lightning::util::persist::{
+            CHANNEL_MANAGER_PERSISTENCE_KEY, CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+        };
+
+        // Same signing_key + store_id across both instances simulates the
+        // same mnemonic on two devices (VSS identity is derived from the
+        // mnemonic).
+        let (signing_key, store_id) = generate_test_keys();
+
+        // --- Original instance ---
+        let original_vss = Arc::new(
+            VssKvStore::new(VSS_URL.to_string(), store_id.clone(), signing_key)
+                .expect("original vss store"),
+        );
+        original_vss
+            .acquire_fence()
+            .expect("original acquires fence");
+        let original = SyncedKvStore::with_vss(
+            Arc::new(SeaOrmKvStore::from_connection(create_test_sqlite())),
+            original_vss,
+        );
+
+        let written_state = vec![
+            (
+                CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
+                CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+                CHANNEL_MANAGER_PERSISTENCE_KEY,
+                vec![0xAA; 256],
+            ),
+            (
+                "channel_monitors",
+                "funding_outpoint_0",
+                "monitor",
+                vec![0xBB; 512],
+            ),
+            ("", "", "inbound_payments", vec![0xCC; 64]),
+        ];
+        for (ns, sub, key, val) in &written_state {
+            original
+                .write(ns, sub, key, val.clone())
+                .expect("original write");
+        }
+
+        // Graceful shutdown: drop the instance. The fence is intentionally not
+        // released — this is the source of the bug the SDK escape hatch fixes.
+        drop(original);
+
+        // --- Fresh device, same mnemonic ---
+        let new_vss = Arc::new(
+            VssKvStore::new(VSS_URL.to_string(), store_id.clone(), signing_key)
+                .expect("new vss store"),
+        );
+
+        // Without an explicit clear, unlock would refuse to start: a fresh
+        // UUID can't claim a fence owned by the previous one.
+        assert!(
+            new_vss.acquire_fence().is_err(),
+            "leftover fence must block a naive takeover"
+        );
+
+        // The SDK escape hatch.
+        new_vss.delete_fence().expect("clear leftover fence");
+
+        // Now the new instance can claim its own fence and run the production
+        // restore path.
+        new_vss
+            .acquire_fence()
+            .expect("new instance acquires fence after clear");
+        let new = SyncedKvStore::with_vss(
+            Arc::new(SeaOrmKvStore::from_connection(create_test_sqlite())),
+            new_vss,
+        );
+        let restored_count = new.restore_from_vss(false).expect("restore");
+        assert_eq!(restored_count, written_state.len());
+
+        for (ns, sub, key, val) in &written_state {
+            assert_eq!(
+                &new.read(ns, sub, key).expect("post-restore read"),
+                val,
+                "post-restore state mismatch at {ns}/{sub}/{key}"
+            );
+        }
+    }
 }

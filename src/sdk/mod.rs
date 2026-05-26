@@ -13,6 +13,8 @@ use crate::core_types::async_order::{
 use crate::core_types::{FEE_RATE, MIN_CHANNEL_CONFIRMATIONS};
 use crate::disk;
 use crate::error::APIError;
+#[cfg(feature = "vss")]
+use crate::ldk::derive_vss_identity;
 use crate::ldk::{start_ldk, InvoiceType, PaymentInfo, VirtualChannelSessionStatus};
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional};
 use crate::swap::{SwapData, SwapInfo, SwapString};
@@ -358,6 +360,10 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+}
+
+pub(crate) struct VssClearFenceRequest {
+    pub(crate) password: String,
 }
 
 pub(crate) struct OpenChannelRequestData {
@@ -1703,6 +1709,54 @@ pub(crate) async fn init(
 
     encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.db())?;
     Ok(InitData { mnemonic })
+}
+
+/// Clears the VSS single-writer fence so a fresh instance can take over a
+/// store whose previous owner did not release it (the normal case after any
+/// shutdown — `acquire_fence` writes the fence but no code path deletes it).
+///
+/// Must be called on a locked node (the unlock path acquires the fence
+/// itself, so clearing it while unlocked would race against the periodic
+/// re-check and panic the running instance).
+pub(crate) async fn vss_clear_fence(
+    state: Arc<AppState>,
+    request: VssClearFenceRequest,
+) -> Result<(), APIError> {
+    let _locked_state = check_locked(&state).await?;
+
+    #[cfg(not(feature = "vss"))]
+    {
+        let _ = request;
+        Err(APIError::Unexpected(
+            "VSS support is not compiled in".to_string(),
+        ))
+    }
+
+    #[cfg(feature = "vss")]
+    {
+        let vss_url = state
+            .static_state
+            .vss_url
+            .clone()
+            .ok_or_else(|| APIError::FailedVssInit("VSS is not configured".to_string()))?;
+
+        let mnemonic = check_password_validity(&request.password, &state.db())?;
+        let identity = derive_vss_identity(&mnemonic, state.static_state.network.into())?;
+
+        tokio::task::spawn_blocking(move || {
+            let store = crate::vss_kv_store::VssKvStore::new(
+                vss_url,
+                identity.pubkey_hex,
+                identity.signing_key,
+            )?;
+            store.delete_fence()
+        })
+        .await
+        .map_err(|e| APIError::Unexpected(format!("vss_clear_fence task failed: {e}")))?
+        .map_err(|e| APIError::FailedVssInit(format!("vss_clear_fence failed: {e}")))?;
+
+        Ok(())
+    }
 }
 
 pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Result<(), APIError> {

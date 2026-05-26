@@ -79,6 +79,8 @@ use crate::core_types::async_order::{
     AsyncOrderNewRequest, AsyncOrderNewResponse, AsyncOrderOutboundInvoiceRequest,
     AsyncOrderOutboundInvoiceResponse,
 };
+#[cfg(feature = "vss")]
+use crate::ldk::derive_vss_identity;
 use crate::ldk::{
     clear_rgb_payment_pending, start_ldk, stop_ldk, LdkBackgroundServices,
     VirtualChannelSessionStatus,
@@ -1284,6 +1286,12 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+}
+
+#[cfg(feature = "vss")]
+#[derive(Deserialize, Serialize)]
+pub(crate) struct VssClearFenceRequest {
+    pub(crate) password: String,
 }
 
 impl From<UnlockRequest> for CoreUnlockRequest {
@@ -4638,4 +4646,41 @@ pub(crate) async fn vss_backup_info(
         "backup_required": info.backup_required,
         "pending_kv_writes": pending_kv_writes,
     })))
+}
+
+/// Clears the VSS single-writer fence so a fresh instance can take over a
+/// store whose previous owner did not release it. Must be called on a locked
+/// node; the subsequent `unlock` will claim a new fence and run the restore.
+#[cfg(feature = "vss")]
+pub(crate) async fn vss_clear_fence(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<VssClearFenceRequest>, APIError>,
+) -> Result<Json<EmptyResponse>, APIError> {
+    no_cancel(async move {
+        let _locked_state = state.check_locked().await?;
+
+        let vss_url = state
+            .static_state
+            .vss_url
+            .clone()
+            .ok_or_else(|| APIError::FailedVssInit("VSS is not configured".to_string()))?;
+
+        let mnemonic = check_password_validity(&payload.password, &state.db())?;
+        let identity = derive_vss_identity(&mnemonic, state.static_state.network.into())?;
+
+        tokio::task::spawn_blocking(move || {
+            let store = crate::vss_kv_store::VssKvStore::new(
+                vss_url,
+                identity.pubkey_hex,
+                identity.signing_key,
+            )?;
+            store.delete_fence()
+        })
+        .await
+        .map_err(|e| APIError::Unexpected(format!("vss_clear_fence task failed: {e}")))?
+        .map_err(|e| APIError::FailedVssInit(format!("vss_clear_fence failed: {e}")))?;
+
+        Ok(Json(EmptyResponse {}))
+    })
+    .await
 }

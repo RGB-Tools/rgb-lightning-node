@@ -243,6 +243,52 @@ impl VssKvStore {
         }
     }
 
+    /// Removes the single-writer fence key from VSS. Used by the SDK
+    /// `vss_clear_fence` entry point to let an operator take over a store_id
+    /// whose previous owner shut down without releasing the fence (the normal
+    /// state — see [`Self::acquire_fence`]). Idempotent: a missing key is not
+    /// an error.
+    pub fn delete_fence(&self) -> Result<(), io::Error> {
+        let get_req = GetObjectRequest {
+            store_id: self.store_id.clone(),
+            key: FENCE_KEY.to_string(),
+        };
+        let existing_version = match self.block_on(self.client.get_object(&get_req)) {
+            Ok(resp) => match resp.value {
+                Some(kv) => kv.version,
+                None => return Ok(()),
+            },
+            Err(VssError::NoSuchKeyError(_)) => return Ok(()),
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("VSS fence read failed: {e}"),
+                ));
+            }
+        };
+
+        let request = PutObjectRequest {
+            store_id: self.store_id.clone(),
+            global_version: None,
+            transaction_items: vec![],
+            delete_items: vec![KeyValue {
+                key: FENCE_KEY.to_string(),
+                version: existing_version,
+                value: vec![],
+            }],
+        };
+        match self.block_on(self.client.put_object(&request)) {
+            Ok(_) | Err(VssError::NoSuchKeyError(_)) => {
+                tracing::info!("VSS fence cleared");
+                Ok(())
+            }
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("VSS fence delete failed: {e}"),
+            )),
+        }
+    }
+
     /// Periodic re-check of the fence; panics if the fence has been taken over
     /// by another instance, since at that point our writes would corrupt the
     /// other instance's state.

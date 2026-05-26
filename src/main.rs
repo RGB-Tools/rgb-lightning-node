@@ -65,7 +65,7 @@ use crate::routes::{
     send_onion_message, send_payment, send_rgb, shutdown, sign_message, sync, taker, unlock,
 };
 #[cfg(feature = "vss")]
-use crate::routes::{vss_backup, vss_backup_info};
+use crate::routes::{vss_backup, vss_backup_info, vss_clear_fence};
 use crate::utils::{start_daemon, AppState, LOGS_DIR};
 
 #[tokio::main]
@@ -182,7 +182,8 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
     #[cfg(feature = "vss")]
     let router = router
         .route("/vssbackup", post(vss_backup))
-        .route("/vssbackupinfo", get(vss_backup_info));
+        .route("/vssbackupinfo", get(vss_backup_info))
+        .route("/vssclearfence", post(vss_clear_fence));
 
     let router = router
         .layer(

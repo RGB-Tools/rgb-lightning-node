@@ -1156,6 +1156,44 @@ paths:
                       indicates VSS replication is degraded.
         '503':
           description: VSS is not configured or unreachable
+  /vssclearfence:
+    post:
+      tags:
+        - Other
+      summary: Clear the VSS single-writer fence so a fresh instance can take over
+      description: >
+        Deletes the `__rln_instance__` key from VSS. The fence is acquired on
+        `/unlock` and intentionally persists across shutdowns to prevent two
+        concurrent writers from corrupting state, so a legitimate
+        wipe-and-restore on the same VSS store_id must clear it first. Must be
+        called while the node is locked; the subsequent `/unlock` will claim a
+        new fence and run the restore. Idempotent — succeeds even if no fence
+        is present.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  description: Wallet password; used to decrypt the mnemonic and
+                    derive the VSS signing key (required to authenticate the
+                    delete with the VSS server).
+      responses:
+        '200':
+          description: Fence cleared (or no fence was present)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResponse'
+        '403':
+          description: Node is unlocked or password is wrong
+        '503':
+          description: VSS is not configured or unreachable
 components:
   schemas:
     AddressResponse:

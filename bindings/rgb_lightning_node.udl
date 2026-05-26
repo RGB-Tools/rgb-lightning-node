@@ -37,6 +37,8 @@ interface SdkNode {
     [Throws=RlnError]
     void unlock(SdkUnlockRequest request);
     [Throws=RlnError]
+    void vss_clear_fence(SdkVssClearFenceRequest request);
+    [Throws=RlnError]
     void connectpeer(string peer_pubkey_and_addr);
     [Throws=RlnError]
     void disconnectpeer(SdkDisconnectPeerRequest request);
@@ -548,6 +550,10 @@ dictionary SdkUnlockRequest {
     string? proxy_endpoint;
     sequence<string> announce_addresses;
     string? announce_alias;
+};
+
+dictionary SdkVssClearFenceRequest {
+    string password;
 };
 
 dictionary SdkOpenChannelRequest {

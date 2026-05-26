@@ -275,6 +275,17 @@ impl SdkNode {
         Ok(())
     }
 
+    pub fn vss_clear_fence(&self, request: SdkVssClearFenceRequest) -> Result<(), RlnError> {
+        let state = self.handle.app_state();
+        block_on_sdk(sdk::vss_clear_fence(
+            state,
+            sdk::VssClearFenceRequest {
+                password: request.password,
+            },
+        ))?;
+        Ok(())
+    }
+
     pub fn connectpeer(&self, peer_pubkey_and_addr: String) -> Result<(), RlnError> {
         let state = self.handle.app_state();
         block_on_sdk(sdk::connect_peer(state, peer_pubkey_and_addr))?;

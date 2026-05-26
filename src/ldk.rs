@@ -2858,9 +2858,9 @@ impl OutputSpender for RgbOutputSpender {
 /// stream's `store_id` directly, and the RGB-wallet stream uses
 /// `{pubkey_hex}_rgb` to avoid key collisions within the same VSS server.
 #[cfg(feature = "vss")]
-struct VssIdentity {
-    signing_key: rgb_lib::bitcoin::secp256k1::SecretKey,
-    pubkey_hex: String,
+pub(crate) struct VssIdentity {
+    pub(crate) signing_key: rgb_lib::bitcoin::secp256k1::SecretKey,
+    pub(crate) pubkey_hex: String,
 }
 
 /// Derive the VSS identity from the wallet mnemonic at `m/535'/1'` — a
@@ -2868,7 +2868,10 @@ struct VssIdentity {
 /// prevents recovering the node seed from the VSS key, but the mnemonic
 /// compromises both.
 #[cfg(feature = "vss")]
-fn derive_vss_identity(mnemonic: &Mnemonic, network: Network) -> Result<VssIdentity, APIError> {
+pub(crate) fn derive_vss_identity(
+    mnemonic: &Mnemonic,
+    network: Network,
+) -> Result<VssIdentity, APIError> {
     let xkey: ExtendedKey = mnemonic
         .clone()
         .into_extended_key()

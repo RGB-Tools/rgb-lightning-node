@@ -436,6 +436,10 @@ pub struct SdkUnlockRequest {
     pub announce_alias: Option<String>,
 }
 
+pub struct SdkVssClearFenceRequest {
+    pub password: String,
+}
+
 pub struct SdkOpenChannelRequest {
     pub peer_pubkey_and_opt_addr: String,
     pub capacity_sat: u64,
