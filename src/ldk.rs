@@ -483,6 +483,7 @@ impl UnlockedAppState {
             None,
             None,
         );
+        clear_rgb_payment_pending(&payment_hash, true, self.kv_store.as_ref());
     }
 
     fn fail_outbound_pending_payments(&self, recent_payments_payment_ids: Vec<PaymentId>) {
@@ -831,6 +832,10 @@ impl UnlockedAppState {
                         .to_string(),
                 )
             }
+        }
+
+        if let Ok(rgb_state) = kv.read_rgb_channel_info(&channel_id_hex, false) {
+            kv.write_rgb_channel_info(&channel_id_hex, &rgb_state, true);
         }
 
         let final_rgb_state = kv.read_rgb_channel_info(&channel_id_hex, false);
@@ -2117,7 +2122,7 @@ async fn handle_ldk_events(
             ..
         } => {
             if let Some(hash) = payment_hash {
-                clear_rgb_payment_pending(&hash, unlocked_state.kv_store.as_ref());
+                clear_rgb_payment_pending(&hash, false, unlocked_state.kv_store.as_ref());
                 tracing::error!(
                     "EVENT: Failed to send payment to payment ID {}, payment hash {}: {:?}",
                     payment_id,
@@ -2164,7 +2169,8 @@ async fn handle_ldk_events(
             inbound_amount_forwarded_rgb,
             payment_hash,
         } => {
-            clear_rgb_payment_pending(&payment_hash, unlocked_state.kv_store.as_ref());
+            clear_rgb_payment_pending(&payment_hash, true, unlocked_state.kv_store.as_ref());
+            clear_rgb_payment_pending(&payment_hash, false, unlocked_state.kv_store.as_ref());
             let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
             let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
@@ -4060,17 +4066,23 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     tracing::info!("Stopped LDK");
 }
 
-pub(crate) fn clear_rgb_payment_pending(payment_hash: &PaymentHash, kv_store: &dyn KVStoreSync) {
+pub(crate) fn clear_rgb_payment_pending(
+    payment_hash: &PaymentHash,
+    inbound: bool,
+    kv_store: &dyn KVStoreSync,
+) {
     let payment_hash_str = hex_str(&payment_hash.0);
-    let raw_pending_key = format!("{payment_hash_str}_pending");
-    let pending_suffix = format!("{payment_hash_str}_pending");
-    for namespace in [RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS] {
-        let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &raw_pending_key, false);
-        if let Ok(keys) = kv_store.list(RGB_PRIMARY_NS, namespace) {
-            for key in keys {
-                if key.ends_with(&pending_suffix) && key.len() > pending_suffix.len() {
-                    let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &key, false);
-                }
+    let pending_key = format!("{payment_hash_str}_pending");
+    let namespace = if inbound {
+        RGB_PAYMENT_INFO_INBOUND_NS
+    } else {
+        RGB_PAYMENT_INFO_OUTBOUND_NS
+    };
+    let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &pending_key, false);
+    if let Ok(keys) = kv_store.list(RGB_PRIMARY_NS, namespace) {
+        for key in keys {
+            if key.ends_with(&pending_key) && key.len() > pending_key.len() {
+                let _ = kv_store.remove(RGB_PRIMARY_NS, namespace, &key, false);
             }
         }
     }

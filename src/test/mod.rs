@@ -5,7 +5,9 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
-use lightning::rgb_utils::{RgbPaymentInfo, RGB_PAYMENT_INFO_OUTBOUND_NS, RGB_PRIMARY_NS};
+use lightning::rgb_utils::{
+    RgbPaymentInfo, RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS, RGB_PRIMARY_NS,
+};
 use lightning::util::hash_tables::new_hash_map;
 use lightning::util::persist::KVStoreSync;
 use lightning::util::ser::Readable;
@@ -2046,6 +2048,48 @@ async fn wait_for_ln_payment_by_type(
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 40.0 {
             panic!("cannot find payment in status {expected_status} for type {payment_type:?}")
         }
+    }
+}
+
+async fn wait_for_no_rgb_payment_pending_artifacts(
+    test_dir: &str,
+    payment_hash: &str,
+    inbound: bool,
+) -> Result<(), APIError> {
+    let db_path = get_db_path(&PathBuf::from(test_dir));
+    let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+    let mut opt = sea_orm::ConnectOptions::new(connection_string);
+    opt.max_connections(1);
+    let db = crate::runtime::block_on(sea_orm::Database::connect(opt)).expect("connect to test db");
+    let kv_store = crate::kv_store::SeaOrmKvStore::from_connection(Arc::new(db));
+    let pending_key = format!("{payment_hash}_pending");
+    let namespace = if inbound {
+        RGB_PAYMENT_INFO_INBOUND_NS
+    } else {
+        RGB_PAYMENT_INFO_OUTBOUND_NS
+    };
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let pending_exists = kv_store
+            .read(RGB_PRIMARY_NS, namespace, &pending_key)
+            .is_ok()
+            || kv_store
+                .list(RGB_PRIMARY_NS, namespace)
+                .map_err(|e| {
+                    APIError::Unexpected(format!("failed to list RGB payment temp keys: {e}"))
+                })?
+                .iter()
+                .any(|key| key.ends_with(&pending_key) && key.len() > pending_key.len());
+
+        if !pending_exists {
+            return Ok(());
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
+            return Err(APIError::Unexpected(format!(
+                "RGB pending artifacts for {payment_hash} did not clear"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 }
 

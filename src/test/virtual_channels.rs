@@ -575,6 +575,105 @@ async fn virtual_reconciliation_ignores_orphan_pending_rgb_entries() {
 #[tokio::test]
 #[traced_test]
 #[serial_test::serial]
+async fn virtual_hodl_invoice_cancel_clears_pending_artifacts_and_allows_close() {
+    initialize();
+
+    let test_storage_root = format!("{TEST_DIR_BASE}hodl_cancel_cleanup/");
+    let host_node_peer_port = next_peer_port();
+    let client_node_peer_port = next_peer_port();
+
+    let (host_node_address, _host_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}host_node"),
+        host_node_peer_port,
+        false,
+        true,
+        vec![],
+    )
+    .await;
+    let host_node_pubkey = node_info(host_node_address).await.pubkey;
+
+    fund_and_create_utxos(host_node_address, None).await;
+    let issued_asset_id = issue_asset_nia_with_amounts(host_node_address, vec![500, 500])
+        .await
+        .asset_id;
+
+    let (client_node_address, _client_node_password) = start_node_with_virtual_options(
+        &format!("{test_storage_root}client_node"),
+        client_node_peer_port,
+        false,
+        true,
+        vec![bitcoin::secp256k1::PublicKey::from_str(&host_node_pubkey).unwrap()],
+    )
+    .await;
+    let client_node_pubkey = node_info(client_node_address).await.pubkey;
+
+    let channel_id = open_virtual_channel(
+        host_node_address,
+        &client_node_pubkey,
+        Some(client_node_peer_port),
+        Some(100_000),
+        Some(0),
+        Some(200),
+        Some(&issued_asset_id),
+        None,
+    )
+    .await
+    .channel_id;
+
+    let asset_payment_amount = 10;
+    let (_, payment_hash) = random_preimage_and_hash();
+    let LNInvoiceResponse {
+        invoice: hodl_invoice,
+    } = ln_invoice_hodl(
+        client_node_address,
+        Some(HTLC_MIN_MSAT),
+        Some(&issued_asset_id),
+        Some(asset_payment_amount),
+        3600,
+        Some(payment_hash.clone()),
+    )
+    .await;
+    let decoded_invoice = decode_ln_invoice(host_node_address, &hodl_invoice).await;
+    assert_eq!(decoded_invoice.payment_hash, payment_hash);
+
+    send_payment_with_status(host_node_address, hodl_invoice.clone(), HTLCStatus::Pending).await;
+    wait_for_ln_payment(client_node_address, &payment_hash, HTLCStatus::Claimable).await;
+
+    cancel_hodl_invoice(client_node_address, payment_hash.clone()).await;
+
+    wait_for_no_rgb_payment_pending_artifacts(
+        &format!("{test_storage_root}host_node"),
+        &payment_hash,
+        false,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("wait for host RGB pending artifacts to clear: {err}"));
+    wait_for_no_rgb_payment_pending_artifacts(
+        &format!("{test_storage_root}client_node"),
+        &payment_hash,
+        true,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("wait for client RGB pending artifacts to clear: {err}"));
+
+    let payer_failed =
+        wait_for_ln_payment(host_node_address, &payment_hash, HTLCStatus::Failed).await;
+    assert_eq!(payer_failed.asset_id, Some(issued_asset_id.clone()));
+    assert_eq!(payer_failed.asset_amount, Some(asset_payment_amount));
+
+    close_channel(host_node_address, &channel_id, &client_node_pubkey, false).await;
+
+    assert!(matches!(
+        invoice_status(client_node_address, &hodl_invoice).await,
+        InvoiceStatus::Cancelled
+    ));
+
+    shutdown(&[host_node_address, client_node_address]).await;
+}
+
+#[tokio::test]
+#[traced_test]
+#[serial_test::serial]
 async fn virtual_trusted_no_broadcast_survives_funding_timeout_and_routes_btc_and_rgb_payments() {
     initialize();
 

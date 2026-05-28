@@ -76,8 +76,6 @@ async fn run_auto_claim_invoice_regression_case(node1_addr: SocketAddr, node2_ad
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
 
     let _ = send_payment_with_status(node1_addr, invoice.clone(), HTLCStatus::Succeeded).await;
-    let _payer_payment =
-        wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
     let _payee_payment =
         wait_for_ln_payment(node2_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
     assert!(matches!(
@@ -89,6 +87,7 @@ async fn run_auto_claim_invoice_regression_case(node1_addr: SocketAddr, node2_ad
 async fn run_expire_hodl_invoice_case(
     node1_addr: SocketAddr,
     node2_addr: SocketAddr,
+    test_dir_node1: &str,
     test_dir_node2: &str,
     trigger: ExpiryTrigger,
 ) {
@@ -110,35 +109,20 @@ async fn run_expire_hodl_invoice_case(
     assert_eq!(decoded.payment_hash, payment_hash_hex);
 
     let _ = send_payment_with_status(node1_addr, invoice.clone(), HTLCStatus::Pending).await;
-    wait_for_claimable_state(test_dir_node2, &payment_hash_hex, true)
+    wait_for_inbound_payment_status(test_dir_node2, &payment_hash_hex, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let _ = wait_for_ln_payment(node2_addr, &decoded.payment_hash, HTLCStatus::Claimable).await;
+    let failure_wait = match trigger {
+        ExpiryTrigger::Time => {
+            std::time::Duration::from_secs(u64::from(expiry_sec).saturating_add(60))
+        }
+        ExpiryTrigger::Blocks => std::time::Duration::from_secs(60),
+    };
 
     match trigger {
         ExpiryTrigger::Time => {
-            let expiry_wait =
-                std::time::Duration::from_secs(u64::from(expiry_sec).saturating_add(60));
-            let _ = wait_for_ln_payment_with_timeout(
-                node2_addr,
-                &decoded.payment_hash,
-                HTLCStatus::Failed,
-                expiry_wait,
-            )
-            .await
-            .unwrap_or_else(|err| {
-                panic!("wait for payee payment to fail after time expiry: {err}")
-            });
-            let _ = wait_for_ln_payment_with_timeout(
-                node1_addr,
-                &decoded.payment_hash,
-                HTLCStatus::Failed,
-                expiry_wait,
-            )
-            .await
-            .unwrap_or_else(|err| {
-                panic!("wait for payer payment to fail after time expiry: {err}")
-            });
+            // Wall-clock expiry is now handled by the shared path below.
         }
         ExpiryTrigger::Blocks => {
             let storage = read_inbound_payments_from_kvstore(test_dir_node2);
@@ -152,57 +136,44 @@ async fn run_expire_hodl_invoice_case(
             let current_height = super::get_block_count();
             let blocks_to_mine = deadline_height.saturating_sub(current_height) + 2;
             super::mine_n_blocks(false, blocks_to_mine as u16);
-
-            let _ = wait_for_ln_payment_with_timeout(
-                node2_addr,
-                &decoded.payment_hash,
-                HTLCStatus::Failed,
-                std::time::Duration::from_secs(60),
-            )
-            .await
-            .unwrap_or_else(|err| {
-                panic!("wait for payee payment to fail after block-based expiry: {err}")
-            });
-            let _ = wait_for_ln_payment_with_timeout(
-                node1_addr,
-                &decoded.payment_hash,
-                HTLCStatus::Failed,
-                std::time::Duration::from_secs(60),
-            )
-            .await
-            .unwrap_or_else(|err| {
-                panic!("wait for payer payment to fail after block-based expiry: {err}")
-            });
         }
     }
 
-    wait_for_claimable_state(test_dir_node2, &payment_hash_hex, false)
+    let payee_failed = wait_for_ln_payment_with_timeout(
+        node2_addr,
+        &decoded.payment_hash,
+        HTLCStatus::Failed,
+        failure_wait,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("wait for payee payment to fail: {err}"));
+    assert_eq!(payee_failed.payment_type, PaymentType::InboundHodl);
+    assert_eq!(payee_failed.status, HTLCStatus::Failed);
+
+    wait_for_inbound_payment_status(test_dir_node2, &payment_hash_hex, HTLCStatus::Failed)
         .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to be removed: {err}"));
-    let payee_payment =
-        get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
+        .unwrap_or_else(|err| panic!("wait for payee payment to fail: {err}"));
+
+    wait_for_no_rgb_payment_pending_artifacts(test_dir_node1, &payment_hash_hex, false)
+        .await
+        .unwrap_or_else(|err| panic!("wait for sender RGB pending artifacts to clear: {err}"));
+    wait_for_no_rgb_payment_pending_artifacts(test_dir_node2, &payment_hash_hex, true)
+        .await
+        .unwrap_or_else(|err| panic!("wait for receiver RGB pending artifacts to clear: {err}"));
+
+    let _ = wait_for_ln_payment_with_timeout(
+        node1_addr,
+        &decoded.payment_hash,
+        HTLCStatus::Failed,
+        failure_wait,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("wait for payer payment to fail: {err}"));
+
     assert!(matches!(
         invoice_status(node2_addr, &invoice).await,
         InvoiceStatus::Failed
     ));
-    assert_eq!(payee_payment.payment_type, PaymentType::InboundHodl);
-    assert_eq!(payee_payment.status, HTLCStatus::Failed);
-    let payee_payment_from_list = list_payments(node2_addr)
-        .await
-        .into_iter()
-        .find(|payment| payment.payment_hash == decoded.payment_hash)
-        .unwrap();
-    assert_eq!(
-        payee_payment_from_list.payment_type,
-        PaymentType::InboundHodl
-    );
-    let payee_payment_again =
-        get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
-    assert_eq!(payee_payment_again.payment_type, PaymentType::InboundHodl);
-    assert_eq!(payee_payment_again.status, HTLCStatus::Failed);
-    wait_for_claimable_state(test_dir_node2, &payment_hash_hex, false)
-        .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to stay removed: {err}"));
 
     invoice_claim_expect_error(
         node2_addr,
@@ -350,28 +321,24 @@ async fn setup_three_virtual_nodes_with_hub_channels(
     )
 }
 
-async fn wait_for_claimable_state(
+async fn wait_for_inbound_payment_status(
     node_test_dir: &str,
     payment_hash: &str,
-    expected: bool,
+    expected_status: HTLCStatus,
 ) -> Result<(), APIError> {
-    let claimable_exists = || -> Result<bool, APIError> {
-        let storage = read_inbound_payments_from_kvstore(node_test_dir);
-        let hash = validate_and_parse_payment_hash(payment_hash)?;
-        Ok(matches!(
-            storage.payments.get(&hash).map(|p| p.status),
-            Some(HTLCStatus::Claimable)
-        ))
-    };
-
+    let hash = validate_and_parse_payment_hash(payment_hash)?;
     let t_0 = OffsetDateTime::now_utc();
     loop {
-        if claimable_exists()? == expected {
+        let storage = read_inbound_payments_from_kvstore(node_test_dir);
+        if matches!(
+            storage.payments.get(&hash).map(|p| p.status),
+            Some(status) if status == expected_status
+        ) {
             return Ok(());
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
             return Err(APIError::Unexpected(format!(
-                "claimable entry for {payment_hash} did not reach state {expected}"
+                "inbound entry for {payment_hash} did not reach state {expected_status:?}"
             )));
         }
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -407,15 +374,22 @@ async fn wait_for_ln_payment_with_timeout(
 async fn autoclaim_and_expire_hodl_invoice_time_and_blocks() {
     initialize();
 
-    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, _asset_id) =
+    let (node1_addr, node2_addr, test_dir_node1, test_dir_node2, _asset_id) =
         setup_two_nodes_with_asset_channel("autoclaim-expiry").await;
 
     run_auto_claim_invoice_regression_case(node1_addr, node2_addr).await;
-    run_expire_hodl_invoice_case(node1_addr, node2_addr, &test_dir_node2, ExpiryTrigger::Time)
-        .await;
     run_expire_hodl_invoice_case(
         node1_addr,
         node2_addr,
+        &test_dir_node1,
+        &test_dir_node2,
+        ExpiryTrigger::Time,
+    )
+    .await;
+    run_expire_hodl_invoice_case(
+        node1_addr,
+        node2_addr,
+        &test_dir_node1,
         &test_dir_node2,
         ExpiryTrigger::Blocks,
     )
@@ -431,7 +405,7 @@ async fn cancel_hodl_invoice_btc_rgb() {
     initialize();
 
     let asset_payment_amount = 10;
-    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, asset_id) =
+    let (node1_addr, node2_addr, test_dir_node1, test_dir_node2, asset_id) =
         setup_two_nodes_with_asset_channel("cancel-btc-rgb-rgb").await;
     let initial_ln_rgb_balance_node1 = asset_balance_offchain_outbound(node1_addr, &asset_id).await;
     let initial_ln_rgb_balance_node2 = asset_balance_offchain_outbound(node2_addr, &asset_id).await;
@@ -468,7 +442,7 @@ async fn cancel_hodl_invoice_btc_rgb() {
     ));
 
     let _ = send_payment_with_status(node1_addr, hodl_invoice.clone(), HTLCStatus::Pending).await;
-    wait_for_claimable_state(&test_dir_node2, &payment_hash, true)
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
 
@@ -483,6 +457,17 @@ async fn cancel_hodl_invoice_btc_rgb() {
 
     cancel_hodl_invoice(node2_addr, payment_hash.clone()).await;
 
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Cancelled)
+        .await
+        .unwrap_or_else(|err| panic!("wait for cancelled payment to persist: {err}"));
+
+    wait_for_no_rgb_payment_pending_artifacts(&test_dir_node1, &payment_hash, false)
+        .await
+        .unwrap_or_else(|err| panic!("wait for sender RGB pending artifacts to clear: {err}"));
+    wait_for_no_rgb_payment_pending_artifacts(&test_dir_node2, &payment_hash, true)
+        .await
+        .unwrap_or_else(|err| panic!("wait for receiver RGB pending artifacts to clear: {err}"));
+
     let payer_failed = wait_for_ln_payment(node1_addr, &payment_hash, HTLCStatus::Failed).await;
     assert_eq!(payer_failed.asset_id, Some(asset_id.clone()));
     assert_eq!(payer_failed.asset_amount, Some(asset_payment_amount));
@@ -491,10 +476,6 @@ async fn cancel_hodl_invoice_btc_rgb() {
         invoice_status(node2_addr, &hodl_invoice).await,
         InvoiceStatus::Cancelled
     ));
-
-    wait_for_claimable_state(&test_dir_node2, &payment_hash, false)
-        .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to be removed: {err}"));
 
     invoice_cancel_expect_error(
         node2_addr,
@@ -578,7 +559,7 @@ async fn claim_hodl_invoice_btc_rgb() {
     .await;
 
     let _ = send_payment_with_status(node1_addr, invoice.clone(), HTLCStatus::Pending).await;
-    wait_for_claimable_state(&test_dir_node2, &payment_hash, true)
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let payee_payment =
@@ -708,9 +689,9 @@ async fn claim_hodl_invoice_btc_rgb() {
     assert_eq!(payer_payment.asset_amount, Some(asset_payment_amount));
     assert_eq!(payer_payment.preimage, Some(preimage));
 
-    wait_for_claimable_state(&test_dir_node2, &payment_hash, false)
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Succeeded)
         .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to be removed: {err}"));
+        .unwrap_or_else(|err| panic!("wait for claimed payment to persist as succeeded: {err}"));
 
     wait_for_ln_balance(
         node1_addr,
@@ -751,8 +732,6 @@ async fn inbound_payment_blocks_outbound_btc_payment_with_same_hash() {
         _test_dir_recipient_client,
         asset_id,
     ) = setup_three_virtual_nodes_with_hub_channels("swap-hodl-btc").await;
-    let _initial_lsp_rgb_balance = asset_balance_offchain_outbound(lsp_addr, &asset_id).await;
-
     let (_, payment_hash) = random_preimage_and_hash();
     let LNInvoiceResponse {
         invoice: inbound_invoice,
@@ -774,7 +753,7 @@ async fn inbound_payment_blocks_outbound_btc_payment_with_same_hash() {
     .await;
     assert_eq!(payer_payment.payment_type, PaymentType::Outbound);
 
-    wait_for_claimable_state(&test_dir_lsp, &payment_hash, true)
+    wait_for_inbound_payment_status(&test_dir_lsp, &payment_hash, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let lsp_claimable_payment =
@@ -861,7 +840,7 @@ async fn inbound_payment_does_not_block_rgb_outbound_payment_with_same_hash() {
     .await;
     assert_eq!(payer_payment.payment_type, PaymentType::Outbound);
 
-    wait_for_claimable_state(&test_dir_lsp, &payment_hash, true)
+    wait_for_inbound_payment_status(&test_dir_lsp, &payment_hash, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let lsp_claimable_payment =
@@ -888,9 +867,13 @@ async fn inbound_payment_does_not_block_rgb_outbound_payment_with_same_hash() {
         send_payment_with_status(lsp_addr, outbound_invoice.clone(), HTLCStatus::Pending).await;
     assert_eq!(lsp_payment.payment_type, PaymentType::Outbound);
 
-    wait_for_claimable_state(&test_dir_recipient_client, &payment_hash, true)
-        .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
+    wait_for_inbound_payment_status(
+        &test_dir_recipient_client,
+        &payment_hash,
+        HTLCStatus::Claimable,
+    )
+    .await
+    .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let recipient_payment =
         wait_for_ln_payment(recipient_client_addr, &payment_hash, HTLCStatus::Claimable).await;
     assert_eq!(recipient_payment.payment_type, PaymentType::InboundHodl);

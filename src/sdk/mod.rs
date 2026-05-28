@@ -15,7 +15,9 @@ use crate::disk;
 use crate::error::APIError;
 #[cfg(feature = "vss")]
 use crate::ldk::derive_vss_identity;
-use crate::ldk::{start_ldk, InvoiceType, PaymentInfo, VirtualChannelSessionStatus};
+use crate::ldk::{
+    clear_rgb_payment_pending, start_ldk, InvoiceType, PaymentInfo, VirtualChannelSessionStatus,
+};
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
@@ -2318,6 +2320,7 @@ pub(crate) async fn keysend(
         }
         Err(e) => {
             tracing::error!("ERROR: failed to send payment: {:?}", e);
+            clear_rgb_payment_pending(&payment_hash, false, unlocked_state.kv_store.as_ref());
             unlocked_state.update_outbound_payment_status(payment_id, HtlcStatus::Failed);
             HtlcStatus::Failed
         }
@@ -2937,6 +2940,7 @@ pub(crate) async fn send_payment(
             }
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
+                clear_rgb_payment_pending(&payment_hash, false, unlocked_state.kv_store.as_ref());
                 status = HtlcStatus::Failed;
                 unlocked_state.update_outbound_payment_status(payment_id, status);
             }
@@ -3170,6 +3174,11 @@ pub(crate) async fn maker_execute(
     match err {
         None => Ok(()),
         Some(e) => {
+            clear_rgb_payment_pending(
+                &swapstring.payment_hash,
+                false,
+                unlocked_state.kv_store.as_ref(),
+            );
             unlocked_state.update_maker_swap_status(&swapstring.payment_hash, SwapStatus::Failed);
             Err(APIError::FailedPayment(format!("{e:?}")))
         }
@@ -3681,7 +3690,7 @@ pub(crate) async fn claim_hodl_invoice(
     let payment_hash = validate_and_parse_payment_hash(&request.payment_hash)?;
     let preimage = validate_and_parse_payment_preimage(&request.payment_preimage, &payment_hash)?;
 
-    {
+    let terminal_error = {
         let mut inbound = unlocked_state.get_inbound_payments();
         let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
             return Err(APIError::UnknownLNInvoice);
@@ -3714,22 +3723,35 @@ pub(crate) async fn claim_hodl_invoice(
 
         let current_height = unlocked_state.channel_manager.current_best_block().height;
         let now_ts = get_current_timestamp();
+        let mut terminal_error = None;
 
         if let Some(deadline_height) = existing_payment_mut.claim_deadline_height {
             if current_height >= deadline_height {
-                return Err(APIError::ClaimDeadlineExceeded);
+                terminal_error = Some(APIError::ClaimDeadlineExceeded);
             }
         }
 
-        if let Some(expiry) = existing_payment_mut.expires_at {
-            if now_ts >= expiry {
-                return Err(APIError::InvoiceExpired);
+        if terminal_error.is_none() {
+            if let Some(expiry) = existing_payment_mut.expires_at {
+                if now_ts >= expiry {
+                    terminal_error = Some(APIError::InvoiceExpired);
+                }
             }
         }
 
-        existing_payment_mut.status = HtlcStatus::Claiming;
-        existing_payment_mut.updated_at = now_ts;
-        unlocked_state.save_inbound_payments(inbound);
+        if terminal_error.is_none() {
+            existing_payment_mut.status = HtlcStatus::Claiming;
+            existing_payment_mut.updated_at = now_ts;
+            unlocked_state.save_inbound_payments(inbound);
+        }
+
+        terminal_error
+    };
+
+    if let Some(terminal_error) = terminal_error {
+        unlocked_state
+            .fail_htlc_backwards_and_update_inbound_payment(payment_hash, HtlcStatus::Failed);
+        return Err(terminal_error);
     }
 
     unlocked_state.channel_manager.claim_funds(preimage);

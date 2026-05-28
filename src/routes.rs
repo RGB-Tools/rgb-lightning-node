@@ -1761,7 +1761,7 @@ pub(crate) async fn claim_hodl_invoice(
         let preimage =
             validate_and_parse_payment_preimage(&payload.payment_preimage, &payment_hash)?;
 
-        {
+        let terminal_error = {
             let mut inbound = unlocked_state.get_inbound_payments();
             let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
                 return Err(APIError::UnknownLNInvoice);
@@ -1795,22 +1795,35 @@ pub(crate) async fn claim_hodl_invoice(
 
             let current_height = unlocked_state.channel_manager.current_best_block().height;
             let now_ts = get_current_timestamp();
+            let mut terminal_error = None;
 
             if let Some(deadline_height) = existing_payment_mut.claim_deadline_height {
                 if current_height >= deadline_height {
-                    return Err(APIError::ClaimDeadlineExceeded);
+                    terminal_error = Some(APIError::ClaimDeadlineExceeded);
                 }
             }
 
-            if let Some(expiry) = existing_payment_mut.expires_at {
-                if now_ts >= expiry {
-                    return Err(APIError::InvoiceExpired);
+            if terminal_error.is_none() {
+                if let Some(expiry) = existing_payment_mut.expires_at {
+                    if now_ts >= expiry {
+                        terminal_error = Some(APIError::InvoiceExpired);
+                    }
                 }
             }
 
-            existing_payment_mut.status = HTLCStatus::Claiming;
-            existing_payment_mut.updated_at = now_ts;
-            unlocked_state.save_inbound_payments(inbound);
+            if terminal_error.is_none() {
+                existing_payment_mut.status = HTLCStatus::Claiming;
+                existing_payment_mut.updated_at = now_ts;
+                unlocked_state.save_inbound_payments(inbound);
+            }
+
+            terminal_error
+        };
+
+        if let Some(terminal_error) = terminal_error {
+            unlocked_state
+                .fail_htlc_backwards_and_update_inbound_payment(payment_hash, HTLCStatus::Failed);
+            return Err(terminal_error);
         }
 
         unlocked_state.channel_manager.claim_funds(preimage);
@@ -2670,7 +2683,7 @@ pub(crate) async fn keysend(
             }
             Err(e) => {
                 tracing::error!("ERROR: failed to send payment: {:?}", e);
-                clear_rgb_payment_pending(&payment_hash, unlocked_state.kv_store.as_ref());
+                clear_rgb_payment_pending(&payment_hash, false, unlocked_state.kv_store.as_ref());
                 unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
                 HTLCStatus::Failed
             }
@@ -3427,6 +3440,7 @@ pub(crate) async fn maker_execute(
                 tracing::warn!("ERROR: failed to send payment: {:?}", e);
                 clear_rgb_payment_pending(
                     &swapstring.payment_hash,
+                    false,
                     unlocked_state.kv_store.as_ref(),
                 );
                 (HTLCStatus::Failed, Some(e))
@@ -4401,7 +4415,7 @@ pub(crate) async fn send_payment(
                 },
                 Err(e) => {
                     tracing::error!("ERROR: failed to send payment: {:?}", e);
-                    clear_rgb_payment_pending(&payment_hash, unlocked_state.kv_store.as_ref());
+                    clear_rgb_payment_pending(&payment_hash, false, unlocked_state.kv_store.as_ref());
                     status = HTLCStatus::Failed;
                     unlocked_state.update_outbound_payment_status(payment_id, status);
                 },
