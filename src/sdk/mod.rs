@@ -1711,6 +1711,46 @@ pub(crate) async fn init(
     Ok(InitData { mnemonic })
 }
 
+/// Triggers a synchronous RGB-wallet backup to VSS, returning the
+/// server-side version of the uploaded backup. Mirrors `/vssbackup`.
+///
+/// The auto-backup path runs asynchronously, so this entry point is what
+/// callers reach for when they need a *deterministic* push — e.g. before
+/// shutting a node down or in tests that verify VSS restore.
+pub(crate) async fn vss_backup(state: Arc<AppState>) -> Result<i64, APIError> {
+    let guard = check_unlocked(&state).await?;
+    let unlocked_state = guard.as_ref().unwrap().clone();
+    drop(guard);
+
+    #[cfg(not(feature = "vss"))]
+    {
+        let _ = unlocked_state;
+        Err(APIError::Unexpected(
+            "VSS support is not compiled in".to_string(),
+        ))
+    }
+
+    #[cfg(feature = "vss")]
+    {
+        let vss_client = unlocked_state
+            .rgb_wallet_wrapper
+            .vss_client()
+            .ok_or_else(|| APIError::Unexpected("VSS is not configured".to_string()))?;
+
+        let wrapper = unlocked_state.rgb_wallet_wrapper.clone();
+        let version = tokio::task::spawn_blocking(move || {
+            let wallet = wrapper.get_rgb_wallet();
+            let rt = vss_client.handle().clone();
+            rt.block_on(wallet.vss_backup(&vss_client))
+        })
+        .await
+        .map_err(|e| APIError::Unexpected(format!("VSS backup task failed: {e}")))?
+        .map_err(|e| APIError::Unexpected(format!("VSS backup failed: {e}")))?;
+
+        Ok(version)
+    }
+}
+
 /// Clears the VSS single-writer fence so a fresh instance can take over a
 /// store whose previous owner did not release it (the normal case after any
 /// shutdown — `acquire_fence` writes the fence but no code path deletes it).

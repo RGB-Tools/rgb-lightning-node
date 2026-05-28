@@ -656,4 +656,140 @@ mod tests {
             );
         }
     }
+
+    /// Happy path of the unlock-side RGB restore: VSS has a backup, the local
+    /// wallet directory is absent → the wallet is brought back from VSS so
+    /// that `RgbLibWallet::new` finds it on disk.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rgb_vss_restore_brings_back_wallet_dir() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        let (signing_key, store_id) = generate_test_keys();
+        let rgb_store_id = format!("{store_id}_rgb");
+        let fingerprint = "deadbeef";
+        let payload = b"rgb wallet bytes".to_vec();
+
+        // Pre-populate VSS with a backup for this rgb_store_id.
+        let upload_config = rgb_lib::wallet::vss::VssBackupConfig::new(
+            VSS_URL.to_string(),
+            rgb_store_id.clone(),
+            signing_key,
+        )
+        .with_encryption(true);
+        let client =
+            rgb_lib::wallet::vss::VssBackupClient::new(upload_config).expect("backup client");
+        client
+            .upload_backup(create_test_wallet_zip(fingerprint, &payload))
+            .await
+            .expect("upload backup");
+
+        // Fresh target dir on disk (simulates a wiped device).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path();
+
+        crate::ldk::maybe_restore_rgb_from_vss(
+            VSS_URL,
+            rgb_store_id,
+            signing_key,
+            target,
+            fingerprint,
+            false,
+        )
+        .await
+        .expect("restore");
+
+        let restored = target.join(fingerprint).join("test_data.bin");
+        assert!(restored.exists(), "wallet file must be restored");
+        assert_eq!(std::fs::read(&restored).expect("read"), payload);
+
+        client.delete_backup().await.expect("cleanup");
+    }
+
+    /// First-ever unlock: VSS is configured but no backup exists for this
+    /// store yet. The restore must be a no-op (fresh start) rather than an
+    /// error — otherwise legitimate first unlocks would fail.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rgb_vss_restore_is_noop_when_no_backup() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        let (signing_key, store_id) = generate_test_keys();
+        let rgb_store_id = format!("{store_id}_rgb");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path();
+        let fingerprint = "abc12345";
+
+        crate::ldk::maybe_restore_rgb_from_vss(
+            VSS_URL,
+            rgb_store_id,
+            signing_key,
+            target,
+            fingerprint,
+            false,
+        )
+        .await
+        .expect("no-backup must be tolerated");
+
+        assert!(
+            !target.join(fingerprint).exists(),
+            "no backup → no wallet dir on disk"
+        );
+    }
+
+    /// Subsequent unlocks: the local wallet directory already exists. The
+    /// restore must NOT overwrite local state with a stale VSS copy.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rgb_vss_restore_skips_when_local_exists() {
+        if !vss_server_available() {
+            eprintln!("SKIP: VSS server not available at {VSS_URL}");
+            return;
+        }
+
+        let (signing_key, store_id) = generate_test_keys();
+        let rgb_store_id = format!("{store_id}_rgb");
+        let fingerprint = "feedface";
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let local = tmp.path().join(fingerprint);
+        std::fs::create_dir_all(&local).expect("mkdir local wallet");
+        let sentinel = local.join("sentinel.bin");
+        std::fs::write(&sentinel, b"local-state-must-survive").expect("write sentinel");
+
+        // Even if VSS has a stale backup, the local copy wins.
+        let upload_config = rgb_lib::wallet::vss::VssBackupConfig::new(
+            VSS_URL.to_string(),
+            rgb_store_id.clone(),
+            signing_key,
+        )
+        .with_encryption(true);
+        let client =
+            rgb_lib::wallet::vss::VssBackupClient::new(upload_config).expect("backup client");
+        client
+            .upload_backup(create_test_wallet_zip(fingerprint, b"stale-vss-bytes"))
+            .await
+            .expect("upload stale backup");
+
+        crate::ldk::maybe_restore_rgb_from_vss(
+            VSS_URL,
+            rgb_store_id,
+            signing_key,
+            tmp.path(),
+            fingerprint,
+            false,
+        )
+        .await
+        .expect("noop");
+
+        assert_eq!(
+            std::fs::read(&sentinel).expect("read sentinel"),
+            b"local-state-must-survive",
+        );
+
+        client.delete_backup().await.expect("cleanup");
+    }
 }

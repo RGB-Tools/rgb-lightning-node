@@ -39,6 +39,8 @@ interface SdkNode {
     [Throws=RlnError]
     void vss_clear_fence(SdkVssClearFenceRequest request);
     [Throws=RlnError]
+    i64 vss_backup();
+    [Throws=RlnError]
     void connectpeer(string peer_pubkey_and_addr);
     [Throws=RlnError]
     void disconnectpeer(SdkDisconnectPeerRequest request);

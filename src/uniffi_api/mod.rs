@@ -286,6 +286,12 @@ impl SdkNode {
         Ok(())
     }
 
+    pub fn vss_backup(&self) -> Result<i64, RlnError> {
+        let state = self.handle.app_state();
+        let version = block_on_sdk(sdk::vss_backup(state))?;
+        Ok(version)
+    }
+
     pub fn connectpeer(&self, peer_pubkey_and_addr: String) -> Result<(), RlnError> {
         let state = self.handle.app_state();
         block_on_sdk(sdk::connect_peer(state, peer_pubkey_and_addr))?;

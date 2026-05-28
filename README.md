@@ -266,6 +266,7 @@ The node currently exposes the following APIs:
 - `/unlock` (POST)
 - `/vssbackup` (POST) — requires the `vss` feature
 - `/vssbackupinfo` (GET) — requires the `vss` feature
+- `/vssclearfence` (POST) — requires the `vss` feature
 
 
 To get more details about the available APIs see the [OpenAPI specification].
@@ -455,11 +456,23 @@ read and restored by a node initialized with the same mnemonic.
 
 ### Recovery
 
-On a fresh start, if the local database has no channel-manager state but the
-VSS server has data, the node automatically restores from VSS before
-initializing. Each VSS store is owned by a single running node instance; a
-second node pointed at the same store refuses to start to avoid corrupting
-state.
+On a fresh start `unlock` restores both replicated streams from VSS before
+the node finishes coming up:
+
+- the **KV stream** (channel manager, monitors, payments, scorer, swap data,
+  RGB channel info) is restored when the local database has no
+  channel-manager state;
+- the **RGB wallet directory** (assets, transfers, allocations) is restored
+  when the local wallet directory for this mnemonic's fingerprint is absent.
+
+Together these recover BTC balance, channels, and RGB assets without any
+extra calls — `unlock` is the only entry point. Each VSS store is owned by a
+single running node instance, so a second node pointed at the same store
+refuses to start to avoid corrupting state. After a previous owner shuts
+down its fence is intentionally left behind; on a legitimate device wipe and
+restore the operator must call `POST /vssclearfence` (or
+`SdkNode::vss_clear_fence`) once between `init` and `unlock` to take over
+the store.
 
 VSS replication is best-effort: a write that fails to reach the server is
 queued and retried on later successful writes. The number of pending writes is
@@ -469,6 +482,8 @@ staleness.
 ### API endpoints (when VSS is enabled)
 - `POST /vssbackup` — trigger a manual RGB wallet backup
 - `GET /vssbackupinfo` — check backup status (includes pending write count)
+- `POST /vssclearfence` — clear the single-writer fence to take over a store
+  after a previous owner shut down without releasing it
 
 [VSS]: https://github.com/lightningdevkit/vss-server
 [Biscuit tokens]: https://www.biscuitsec.org/

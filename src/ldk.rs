@@ -2897,6 +2897,65 @@ pub(crate) fn derive_vss_identity(
     })
 }
 
+/// Restore the RGB wallet directory from VSS if (a) VSS is configured for this
+/// node, (b) the local wallet directory for `expected_fingerprint` is absent,
+/// and (c) VSS has a backup for the given store. Mirrors the KV-side
+/// auto-restore policy at `start_ldk`'s top: silent no-op when nothing is on
+/// VSS, hard error otherwise unless `allow_empty_restore` is set.
+#[cfg(feature = "vss")]
+pub(crate) async fn maybe_restore_rgb_from_vss(
+    vss_url: &str,
+    rgb_store_id: String,
+    signing_key: rgb_lib::bitcoin::secp256k1::SecretKey,
+    data_dir: &std::path::Path,
+    expected_fingerprint: &str,
+    allow_empty_restore: bool,
+) -> Result<(), APIError> {
+    if data_dir.join(expected_fingerprint).exists() {
+        // Local wallet already present — never clobber it with a VSS copy
+        // that may be stale.
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(data_dir).map_err(|e| {
+        APIError::FailedVssInit(format!(
+            "RGB VSS restore: failed to create data_dir {}: {e}",
+            data_dir.display()
+        ))
+    })?;
+
+    let config =
+        rgb_lib::wallet::vss::VssBackupConfig::new(vss_url.to_string(), rgb_store_id, signing_key)
+            .with_encryption(true);
+    let data_dir_str = data_dir.to_string_lossy().to_string();
+
+    match rgb_lib::wallet::vss::restore_from_vss(config, &data_dir_str).await {
+        Ok(path) => {
+            tracing::info!(restored_path = %path.display(), "Restored RGB wallet from VSS");
+            Ok(())
+        }
+        Err(rgb_lib::Error::VssBackupNotFound) => {
+            tracing::info!("No RGB VSS backup found, starting fresh");
+            Ok(())
+        }
+        Err(e) => {
+            if allow_empty_restore {
+                tracing::warn!(
+                    error = %e,
+                    "RGB VSS restore failed; starting fresh due to --vss-allow-empty-restore"
+                );
+                Ok(())
+            } else {
+                Err(APIError::FailedVssInit(format!(
+                    "RGB VSS restore failed: {e}. Pass --vss-allow-empty-restore \
+                     to start with an empty RGB wallet instead (UNSAFE if you \
+                     previously had RGB assets)."
+                )))
+            }
+        }
+    }
+}
+
 pub(crate) async fn start_ldk(
     app_state: Arc<AppState>,
     mnemonic: Mnemonic,
@@ -3268,6 +3327,26 @@ pub(crate) async fn start_ldk(
         .clone()
         .to_string_lossy()
         .to_string();
+
+    // Pull the RGB wallet down from VSS before constructing it locally, when
+    // VSS is configured and the local wallet directory for this mnemonic's
+    // fingerprint is absent. Mirrors the KV-side auto-restore at the top of
+    // this function — together they make `unlock` recover the full node
+    // state (channels + assets + on-chain) on a fresh device.
+    #[cfg(feature = "vss")]
+    if let (Some(ref vss_url), Some(ref identity)) = (&static_state.vss_url, &vss_identity) {
+        let rgb_store_id = format!("{}_rgb", identity.pubkey_hex);
+        maybe_restore_rgb_from_vss(
+            vss_url,
+            rgb_store_id,
+            identity.signing_key,
+            &static_state.storage_dir_path,
+            &master_fingerprint.to_string(),
+            static_state.vss_allow_empty_restore,
+        )
+        .await?;
+    }
+
     let keys = SinglesigKeys {
         account_xpub_vanilla: account_xpub_vanilla.to_string(),
         account_xpub_colored: account_xpub_colored.to_string(),

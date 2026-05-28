@@ -6,7 +6,8 @@ pub(crate) use rgb_lightning_node::{
     SdkCloseChannelRequest, SdkCreateUtxosRequest, SdkInitRequest, SdkIssueAssetCfaRequest,
     SdkIssueAssetNiaRequest, SdkKeysendRequest, SdkNode, SdkOpenChannelRequest,
     SdkRefreshTransfersRequest, SdkRgbInvoiceRequest, SdkSendBtcRequest, SdkSendPaymentRequest,
-    SdkUnlockRequest, SendRgbRequest, TransactionType, TransportEndpoint, WitnessData,
+    SdkUnlockRequest, SdkVssClearFenceRequest, SendRgbRequest, TransactionType, TransportEndpoint,
+    WitnessData,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -222,6 +223,35 @@ pub(crate) fn make_node(
     daemon_listening_port: u16,
     ldk_peer_listening_port: u16,
 ) -> SdkNode {
+    make_node_inner(
+        storage_dir_path,
+        daemon_listening_port,
+        ldk_peer_listening_port,
+        None,
+    )
+}
+
+#[allow(dead_code)] // used by VSS-only tests
+pub(crate) fn make_node_with_vss(
+    storage_dir_path: &Path,
+    daemon_listening_port: u16,
+    ldk_peer_listening_port: u16,
+    vss_url: &str,
+) -> SdkNode {
+    make_node_inner(
+        storage_dir_path,
+        daemon_listening_port,
+        ldk_peer_listening_port,
+        Some(vss_url.to_string()),
+    )
+}
+
+fn make_node_inner(
+    storage_dir_path: &Path,
+    daemon_listening_port: u16,
+    ldk_peer_listening_port: u16,
+    vss_url: Option<String>,
+) -> SdkNode {
     fs::create_dir_all(storage_dir_path).expect("create storage dir");
     SdkNode::create(SdkInitRequest {
         storage_dir_path: storage_dir_path.display().to_string(),
@@ -233,8 +263,8 @@ pub(crate) fn make_node(
         virtual_peer_pubkeys: None,
         lsp_base_url: None,
         lsp_bearer_token: None,
-        vss_url: None,
-        vss_allow_http: false,
+        vss_url,
+        vss_allow_http: true,
         vss_allow_empty_restore: false,
     })
     .expect("create SDK node")

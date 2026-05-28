@@ -12,3 +12,5 @@ mod restart;
 mod send_receive;
 mod swap_roundtrip_buy;
 mod vanilla_payment_on_rgb_channel;
+#[cfg(feature = "vss")]
+mod vss_restore;
