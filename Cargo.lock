@@ -3935,6 +3935,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rgb-lib",
  "rln-migration",
+ "rustls 0.23.39",
  "scrypt",
  "sea-orm",
  "serde",

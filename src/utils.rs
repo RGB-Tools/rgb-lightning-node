@@ -458,6 +458,10 @@ pub(crate) async fn open_database_pool(
 }
 
 pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppError> {
+    // rustls 0.23 (via rgb-lib/reqwest 0.13) needs a process-level provider
+    // before any TLS use, and rgb-lib only installs one inside `go_online`.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));

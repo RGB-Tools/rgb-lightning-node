@@ -49,6 +49,7 @@ rgb-lib = { git = "https://github.com/UTEXO-Protocol/rgb-lib.git", branch = "dev
     "esplora",
 ] }
 rln-migration = { path = "migration" }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 sea-orm = { version = "1.1.19", default-features = false, features = [
     "macros",
     "runtime-tokio-rustls",
