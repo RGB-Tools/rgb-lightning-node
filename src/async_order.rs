@@ -99,9 +99,9 @@ struct AsyncOrderEnvelope {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct AsyncOrderNewHashWire {
-    pub(crate) hash_index: u64,
-    pub(crate) payment_hash: String,
+pub struct AsyncOrderNewHashWire {
+    pub hash_index: u64,
+    pub payment_hash: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

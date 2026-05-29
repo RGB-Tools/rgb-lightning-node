@@ -1,8 +1,8 @@
 pub(crate) mod state;
 mod types;
 
-use std::str::FromStr;
-
+use crate::async_order::AsyncOrderNewHashWire;
+use crate::core_types::async_order::{AsyncOrderNewRequest, AsyncOrderNewResponse};
 use crate::sdk;
 use crate::{NodeConfig, NodeHandle};
 use bitcoin::hex::DisplayHex;
@@ -12,6 +12,7 @@ use state::{
     is_uniffi_app_state_initialized, set_uniffi_node_handle,
 };
 pub(crate) use state::{clear_uniffi_app_state, set_uniffi_app_state};
+use std::str::FromStr;
 pub use types::*;
 
 pub fn uniffi_healthcheck() -> String {
@@ -1335,6 +1336,15 @@ impl SdkNode {
     pub fn send_rgb(&self, request: SendRgbRequest) -> Result<SendRgbResponse, RlnError> {
         send_rgb_from_state(self.handle.app_state(), request)
     }
+
+    pub fn apay_new(&self, host_node_id: String) -> Result<AsyncOrderNewResponse, RlnError> {
+        let state = self.handle.app_state();
+        let response = block_on_sdk(sdk::async_order_new(
+            state,
+            AsyncOrderNewRequest { host_node_id },
+        ))?;
+        Ok(response)
+    }
 }
 
 pub fn sdk_initialize(request: SdkInitRequest) -> Result<(), RlnError> {
@@ -1508,6 +1518,11 @@ pub fn sdk_inflate(request: InflateRequest) -> Result<InflateResponse, RlnError>
 pub fn sdk_send_rgb(request: SendRgbRequest) -> Result<SendRgbResponse, RlnError> {
     let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
     SdkNode { handle }.send_rgb(request)
+}
+
+pub fn sdk_apay_new(host_node_id: String) -> Result<AsyncOrderNewResponse, RlnError> {
+    let handle = NodeHandle::from_app_state(get_uniffi_app_state()?);
+    SdkNode { handle }.apay_new(host_node_id)
 }
 
 uniffi::include_scaffolding!("rgb_lightning_node");

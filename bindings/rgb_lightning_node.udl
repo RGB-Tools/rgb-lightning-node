@@ -116,6 +116,8 @@ interface SdkNode {
     InflateResponse inflate(InflateRequest request);
     [Throws=RlnError]
     SendRgbResponse send_rgb(SendRgbRequest request);
+    [Throws=RlnError]
+    AsyncOrderNewResponse apay_new(string host_node_id);
 };
 
 [Error]
@@ -770,6 +772,26 @@ enum AssignmentKind {
     "InflationRight",
     "ReplaceRight",
     "Any",
+};
+
+dictionary AsyncOrderNewHashWire {
+    u64 hash_index;
+    string payment_hash;
+};
+
+dictionary AsyncOrderNewResponse {
+    string request_id;
+    string host_node_id;
+    u64 protocol_version;
+    string order_id;
+    string status;
+    u64 accepted_through_index;
+    u64 next_index_expected;
+    u64 unused_hashes;
+    u64 refill_batch_size;
+    u64 first_hash_index;
+    u64 last_hash_index;
+    sequence<AsyncOrderNewHashWire> hashes;
 };
 
 [Custom]
