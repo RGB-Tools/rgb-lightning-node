@@ -10,6 +10,8 @@
 !regtest.sh
 !rust-lightning/
 !src/
+!migration/
+!build.rs
 
 # but still ignore these
 rust-lightning/.git
