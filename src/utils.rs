@@ -153,6 +153,7 @@ impl StaticState {
 
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
+    pub(crate) gossip_source: Arc<crate::gossip::GossipSource>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     pub(crate) signer: ActiveSignerRef,
     pub(crate) entropy_source: Arc<dyn RlnEntropySource>,

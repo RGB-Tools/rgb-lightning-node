@@ -915,6 +915,7 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) channel_asset_max_amount: u64,
     pub(crate) network_nodes: usize,
     pub(crate) network_channels: usize,
+    pub(crate) latest_rgs_snapshot_timestamp: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1285,6 +1286,8 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+    #[serde(default)]
+    pub(crate) gossip_source: Option<crate::gossip::GossipSourceConfig>,
 }
 
 #[cfg(feature = "vss")]
@@ -1304,6 +1307,7 @@ impl From<UnlockRequest> for CoreUnlockRequest {
             proxy_endpoint: value.proxy_endpoint,
             announce_addresses: value.announce_addresses,
             announce_alias: value.announce_alias,
+            gossip_source: value.gossip_source,
         }
     }
 }
@@ -3653,6 +3657,11 @@ pub(crate) async fn node_info(
     let network_nodes = graph_lock.nodes().len();
     let network_channels = graph_lock.channels().len();
 
+    let latest_rgs_snapshot_timestamp = unlocked_state
+        .network_graph
+        .get_last_rapid_gossip_sync_timestamp()
+        .map(|val| val as u64);
+
     Ok(Json(NodeInfoResponse {
         pubkey: unlocked_state.runtime_node_pubkey(),
         num_channels: chans.len(),
@@ -3672,6 +3681,7 @@ pub(crate) async fn node_info(
         channel_asset_max_amount: u64::MAX,
         network_nodes,
         network_channels,
+        latest_rgs_snapshot_timestamp,
     }))
 }
 
@@ -4817,4 +4827,78 @@ pub(crate) async fn vss_clear_fence(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    use crate::gossip::GossipSourceConfig;
+
+    #[test]
+    fn unlock_request_with_gossip_source_deserializes() {
+        let json = r#"{
+            "password": "x",
+            "bitcoind_rpc_username": "u",
+            "bitcoind_rpc_password": "p",
+            "bitcoind_rpc_host": "127.0.0.1",
+            "bitcoind_rpc_port": 18443,
+            "announce_addresses": [],
+            "gossip_source": { "type": "rgs", "server_url": "https://example.invalid" }
+        }"#;
+        let req: UnlockRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            req.gossip_source,
+            Some(GossipSourceConfig::RapidGossipSync { .. })
+        ));
+    }
+
+    #[test]
+    fn unlock_request_without_gossip_source_defaults_to_none() {
+        let json = r#"{
+            "password": "x",
+            "bitcoind_rpc_username": "u",
+            "bitcoind_rpc_password": "p",
+            "bitcoind_rpc_host": "127.0.0.1",
+            "bitcoind_rpc_port": 18443,
+            "announce_addresses": []
+        }"#;
+        let req: UnlockRequest = serde_json::from_str(json).unwrap();
+        assert!(req.gossip_source.is_none());
+    }
+
+    fn sample_node_info(latest_rgs_snapshot_timestamp: Option<u64>) -> NodeInfoResponse {
+        NodeInfoResponse {
+            pubkey: "02aa".to_string(),
+            num_channels: 0,
+            num_usable_channels: 0,
+            local_balance_sat: 0,
+            eventual_close_fees_sat: 0,
+            pending_outbound_payments_sat: 0,
+            num_peers: 0,
+            account_xpub_vanilla: String::new(),
+            account_xpub_colored: String::new(),
+            max_media_upload_size_mb: 0,
+            rgb_htlc_min_msat: 0,
+            rgb_channel_capacity_min_sat: 0,
+            channel_capacity_min_sat: 0,
+            channel_capacity_max_sat: 0,
+            channel_asset_min_amount: 0,
+            channel_asset_max_amount: 0,
+            network_nodes: 0,
+            network_channels: 0,
+            latest_rgs_snapshot_timestamp,
+        }
+    }
+
+    #[test]
+    fn node_info_response_includes_rgs_timestamp() {
+        let json = serde_json::to_value(sample_node_info(Some(1234))).unwrap();
+        assert_eq!(json["latest_rgs_snapshot_timestamp"], 1234);
+    }
+
+    #[test]
+    fn node_info_response_rgs_timestamp_null_when_absent() {
+        let json = serde_json::to_value(sample_node_info(None)).unwrap();
+        assert!(json["latest_rgs_snapshot_timestamp"].is_null());
+    }
 }

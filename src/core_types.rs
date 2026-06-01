@@ -109,6 +109,7 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+    pub(crate) gossip_source: Option<crate::gossip::GossipSourceConfig>,
 }
 
 #[derive(Clone)]

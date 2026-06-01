@@ -66,7 +66,7 @@ _wait_for_electrs() {
 _start_services() {
     _stop_services
 
-    mkdir -p data{core,index,ldk0,ldk1,ldk2}
+    mkdir -p data{core,index,ldk0,ldk1,ldk2,rgs}
     # see compose.yaml for the exposed ports
     EXPOSED_PORTS=(3000 50001)
     for port in "${EXPOSED_PORTS[@]}"; do
@@ -93,8 +93,8 @@ _start_services() {
 }
 
 _stop_services() {
-    $COMPOSE down -v --remove-orphans
-    rm -rf data{core,index,ldk0,ldk1,ldk2} 2>/dev/null || sudo rm -rf data{core,index,ldk0,ldk1,ldk2}
+    $COMPOSE --profile gossip down -v --remove-orphans
+    rm -rf data{core,index,ldk0,ldk1,ldk2,rgs} 2>/dev/null || sudo rm -rf data{core,index,ldk0,ldk1,ldk2,rgs}
 }
 
 _mine() {

@@ -58,6 +58,60 @@ final class SwiftUniffiE2ESmokeTests: XCTestCase {
         XCTAssertTrue(address.address.hasPrefix("bcrt") || address.address.hasPrefix("tb1"))
     }
 
+    // Smoke test for the gossipRgsServerUrl field on SdkUnlockRequest.
+    // Pointing at a closed port keeps the test hermetic — the background
+    // sync task fails on connect, so latestRgsSnapshotTimestamp stays nil
+    // and we exercise the FFI plumbing without needing a real RGS server.
+    func testUnlockAcceptsGossipRgsServerUrl() throws {
+        let env = ProcessInfo.processInfo.environment
+
+        let bitcoindUser = try requireEnv("BITCOIND_RPC_USERNAME", in: env)
+        let bitcoindPassword = try requireEnv("BITCOIND_RPC_PASSWORD", in: env)
+        let bitcoindHost = try requireEnv("BITCOIND_RPC_HOST", in: env)
+        let bitcoindPort = try UInt16(requireEnv("BITCOIND_RPC_PORT", in: env))
+            .unwrap(or: "BITCOIND_RPC_PORT must be a valid UInt16")
+
+        let storageDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("swift-uniffi-rgs-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: storageDir) }
+
+        let node = try SdkNode.create(
+            request: SdkInitRequest(
+                storageDirPath: storageDir.path,
+                daemonListeningPort: randomPort(),
+                ldkPeerListeningPort: randomPort(),
+                network: "regtest",
+                maxMediaUploadSizeMb: 5,
+                enableVirtualChannelsV0: false,
+                virtualPeerPubkeys: nil,
+                lspBaseUrl: nil,
+                lspBearerToken: nil
+            )
+        )
+        defer { node.shutdown() }
+
+        let _ = try node.`init`(password: "swift-rgs-pass", mnemonic: nil)
+
+        try node.unlock(
+            request: SdkUnlockRequest(
+                password: "swift-rgs-pass",
+                bitcoindRpcUsername: bitcoindUser,
+                bitcoindRpcPassword: bitcoindPassword,
+                bitcoindRpcHost: bitcoindHost,
+                bitcoindRpcPort: bitcoindPort,
+                indexerUrl: env["INDEXER_URL"],
+                proxyEndpoint: env["PROXY_ENDPOINT"],
+                announceAddresses: [],
+                announceAlias: nil,
+                gossipRgsServerUrl: "http://127.0.0.1:1"
+            )
+        )
+
+        let info = try node.nodeInfo()
+        XCTAssertNil(info.latestRgsSnapshotTimestamp)
+    }
+
     private func requireEnv(_ name: String, in env: [String: String]) throws -> String {
         guard let value = env[name], !value.isEmpty else {
             throw XCTSkip("missing required environment variable: \(name)")

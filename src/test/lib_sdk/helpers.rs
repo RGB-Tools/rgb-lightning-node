@@ -281,6 +281,7 @@ pub(crate) fn unlock_request(password: &str) -> SdkUnlockRequest {
         proxy_endpoint: Some(PROXY_ENDPOINT_LOCAL.to_string()),
         announce_addresses: vec![],
         announce_alias: Some("RLN_alias".to_string()),
+        gossip_rgs_server_url: None,
     }
 }
 

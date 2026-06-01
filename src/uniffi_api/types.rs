@@ -79,6 +79,7 @@ pub struct NodeInfo {
     pub channel_asset_max_amount: u64,
     pub network_nodes: u64,
     pub network_channels: u64,
+    pub latest_rgs_snapshot_timestamp: Option<u64>,
 }
 
 pub struct NetworkInfo {
@@ -466,6 +467,8 @@ pub struct SdkUnlockRequest {
     pub proxy_endpoint: Option<String>,
     pub announce_addresses: Vec<String>,
     pub announce_alias: Option<String>,
+    // None → P2P gossip (default). Some(url) → Rapid Gossip Sync against url.
+    pub gossip_rgs_server_url: Option<String>,
 }
 
 pub struct SdkExternalSignerBootstrap {

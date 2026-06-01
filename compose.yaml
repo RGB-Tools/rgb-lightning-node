@@ -1,7 +1,7 @@
 services:
   bitcoind:
     image: registry.gitlab.com/hashbeam/docker/bitcoind:30.0
-    command: "-fallbackfee=0.0002"
+    command: ["-fallbackfee=0.0002", "-rest"]
     environment:
       MYUID: 1000
       MYGID: 1000
@@ -56,3 +56,53 @@ services:
     depends_on:
       vss-postgres:
         condition: service_healthy
+  rgs-postgres:
+    image: postgres:16-alpine
+    profiles: ['gossip']
+    environment:
+      POSTGRES_DB: ln_graph_sync
+      POSTGRES_USER: alice
+      POSTGRES_PASSWORD: rgspass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alice -d ln_graph_sync"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+  rgs-server:
+    build:
+      context: ./docker/rgs-server
+      dockerfile: ./Dockerfile
+    image: rgs-server:local
+    profiles: ['gossip']
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      RAPID_GOSSIP_SYNC_SERVER_NETWORK: regtest
+      RAPID_GOSSIP_SYNC_SERVER_LOG_LEVEL: info
+      RAPID_GOSSIP_SYNC_SERVER_SNAPSHOT_INTERVAL: "10800"
+      RAPID_GOSSIP_SYNC_SERVER_CACHES_PATH: /srv/cache
+      RAPID_GOSSIP_SYNC_SERVER_DB_HOST: rgs-postgres
+      RAPID_GOSSIP_SYNC_SERVER_DB_USER: alice
+      RAPID_GOSSIP_SYNC_SERVER_DB_PASSWORD: rgspass
+      RAPID_GOSSIP_SYNC_SERVER_DB_NAME: ln_graph_sync
+      BITCOIN_REST_DOMAIN: bitcoind
+      BITCOIN_REST_PORT: "18443"
+      BITCOIN_REST_PATH: "/rest/"
+      LN_PEERS: ${RGS_LN_PEERS:-}
+    volumes:
+      - ./datargs:/srv/cache
+    depends_on:
+      rgs-postgres:
+        condition: service_healthy
+      bitcoind:
+        condition: service_started
+  rgs-http:
+    image: nginx:1.27-alpine
+    profiles: ['gossip']
+    ports:
+      - 8002:80
+    volumes:
+      - ./datargs:/srv/cache:ro
+      - ./docker/rgs-server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - rgs-server

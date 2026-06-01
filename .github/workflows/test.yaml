@@ -81,7 +81,7 @@ jobs:
         with:
           rustflags: ""
       - name: Tests
-        run: cargo test -- --test-threads=1
+        run: cargo test -- --test-threads=1 --skip test::gossip_
       - name: UniFFI SDK smoke tests
         run: cargo test --features uniffi --lib 'uniffi_smoke_tests::' -- --test-threads=1
 
@@ -139,3 +139,29 @@ jobs:
       - name: Stop regtest and VSS services
         if: always()
         run: docker compose --profile vss down -v --remove-orphans
+
+  gossip-tests:
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+      - name: Pre-build RGS server image
+        run: docker compose --profile gossip build rgs-server
+      - name: Start regtest services
+        run: ./regtest.sh start
+      - name: Run gossip tests (e2e against regtest + RGS server)
+        run: cargo test "test::gossip_" -- --test-threads=1
+      - name: Dump gossip service logs (on failure)
+        if: failure()
+        run: |
+          echo "===== rgs-server ====="; docker logs $(docker ps -a --filter "name=rgs-server" -q) 2>&1 || true
+          echo "===== rgs-postgres ====="; docker logs $(docker ps -a --filter "name=rgs-postgres" -q) 2>&1 || true
+          echo "===== rgs-http ====="; docker logs $(docker ps -a --filter "name=rgs-http" -q) 2>&1 || true
+      - name: Stop regtest and gossip services
+        if: always()
+        run: docker compose --profile gossip down -v --remove-orphans

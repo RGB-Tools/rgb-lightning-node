@@ -327,6 +327,7 @@ impl SdkNode {
                 proxy_endpoint: request.proxy_endpoint,
                 announce_addresses: request.announce_addresses,
                 announce_alias: request.announce_alias,
+                gossip_rgs_server_url: request.gossip_rgs_server_url,
             },
         ))?;
         Ok(())
@@ -805,6 +806,7 @@ impl SdkNode {
             channel_asset_max_amount: data.channel_asset_max_amount,
             network_nodes: data.network_nodes as u64,
             network_channels: data.network_channels as u64,
+            latest_rgs_snapshot_timestamp: data.latest_rgs_snapshot_timestamp,
         })
     }
 
@@ -1444,6 +1446,7 @@ impl SdkNode {
                 proxy_endpoint,
                 announce_addresses,
                 announce_alias,
+                gossip_rgs_server_url: None,
             },
         ))?;
         Ok(())

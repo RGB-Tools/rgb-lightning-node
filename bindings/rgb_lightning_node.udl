@@ -163,6 +163,7 @@ dictionary NodeInfo {
     u64 channel_asset_max_amount;
     u64 network_nodes;
     u64 network_channels;
+    u64? latest_rgs_snapshot_timestamp = null;
 };
 
 dictionary NetworkInfo {
@@ -569,6 +570,7 @@ dictionary SdkUnlockRequest {
     string? proxy_endpoint;
     sequence<string> announce_addresses;
     string? announce_alias;
+    string? gossip_rgs_server_url = null;
 };
 
 dictionary SdkExternalSignerBootstrap {

@@ -38,7 +38,7 @@ use lightning::rgb_utils::{
 };
 use lightning::rgb_utils::{RgbPaymentInfo, STATIC_BLINDING};
 use lightning::routing::gossip;
-use lightning::routing::gossip::{NodeId, P2PGossipSync};
+use lightning::routing::gossip::NodeId;
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use lightning::sign::{KeysManager, NodeSigner, OutputSpender, SpendableOutputDescriptor};
@@ -55,7 +55,7 @@ use lightning::util::persist::{
 use lightning::util::ser::{Readable, ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
 use lightning::{chain, impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
-use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lightning_background_processor::{process_events_async, NO_LIQUIDITY_MANAGER};
 use lightning_block_sync::gossip::TokioSpawner;
 use lightning_block_sync::init;
 use lightning_block_sync::poll;
@@ -106,6 +106,7 @@ use crate::core_types::{
 };
 use crate::database::RlnDatabase;
 use crate::disk::{self, FilesystemLogger};
+use crate::gossip::{GossipSource, GossipSourceConfig};
 
 pub(crate) const INBOUND_PAYMENTS_KEY: &str = "inbound_payments";
 const OUTBOUND_PAYMENTS_KEY: &str = "outbound_payments";
@@ -226,6 +227,7 @@ fn sync_config_to_kvstore(
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
+    gossip_shutdown: Arc<tokio::sync::Notify>,
     peer_manager: Arc<PeerManager>,
     bp_exit: Sender<()>,
     background_processor: Option<JoinHandle<Result<(), io::Error>>>,
@@ -952,10 +954,13 @@ pub(crate) type GossipVerifier = lightning_block_sync::gossip::GossipVerifier<
     Arc<FilesystemLogger>,
 >;
 
+pub(crate) type RoutingMessageHandler =
+    dyn lightning::ln::msgs::RoutingMessageHandler + Send + Sync;
+
 pub(crate) type PeerManager = LdkPeerManager<
     SocketDescriptor,
     Arc<ChannelManager>,
-    Arc<P2PGossipSync<Arc<NetworkGraph>, Arc<GossipVerifier>, Arc<FilesystemLogger>>>,
+    Arc<RoutingMessageHandler>,
     Arc<OnionMessenger>,
     Arc<FilesystemLogger>,
     Arc<AsyncOrderMessageHandler>,
@@ -989,6 +994,23 @@ pub(crate) type ChannelManager = channelmanager::ChannelManager<
 >;
 
 pub(crate) type NetworkGraph = gossip::NetworkGraph<Arc<FilesystemLogger>>;
+
+pub(crate) type P2PGossipSync = lightning::routing::gossip::P2PGossipSync<
+    Arc<NetworkGraph>,
+    Arc<GossipVerifier>,
+    Arc<FilesystemLogger>,
+>;
+
+pub(crate) type RapidGossipSync =
+    lightning_rapid_gossip_sync::RapidGossipSync<Arc<NetworkGraph>, Arc<FilesystemLogger>>;
+
+pub(crate) type GossipSync = lightning_background_processor::GossipSync<
+    Arc<P2PGossipSync>,
+    Arc<RapidGossipSync>,
+    Arc<NetworkGraph>,
+    Arc<GossipVerifier>,
+    Arc<FilesystemLogger>,
+>;
 
 pub(crate) type OnionMessenger = LdkOnionMessenger<
     Arc<LightningEntropySource>,
@@ -3038,6 +3060,7 @@ pub(crate) async fn start_ldk(
     key_source: NodeKeySource,
     unlock_request: UnlockRequest,
 ) -> Result<(LdkBackgroundServices, Arc<UnlockedAppState>), APIError> {
+    let gossip_source_config = unlock_request.gossip_source.clone().unwrap_or_default();
     let static_state = &app_state.static_state;
     let (
         internal_mnemonic,
@@ -3723,12 +3746,39 @@ pub(crate) async fn start_ldk(
         );
     }
 
-    // Optional: Initialize the P2PGossipSync
-    let gossip_sync = Arc::new(P2PGossipSync::new(
-        Arc::clone(&network_graph),
-        None,
-        Arc::clone(&logger),
-    ));
+    // Build the gossip source from the operator's choice (defaults to P2P).
+    let gossip_source = Arc::new(match gossip_source_config {
+        GossipSourceConfig::P2PNetwork => {
+            GossipSource::new_p2p(Arc::clone(&network_graph), None, Arc::clone(&logger))
+        }
+        GossipSourceConfig::RapidGossipSync { server_url } => {
+            let latest_sync_timestamp = network_graph
+                .get_last_rapid_gossip_sync_timestamp()
+                .unwrap_or(0);
+            GossipSource::new_rgs(
+                server_url,
+                latest_sync_timestamp,
+                Arc::clone(&network_graph),
+                Arc::clone(&logger),
+            )
+        }
+    });
+
+    // The UTXO verifier can only attach to a P2P sync, and only after PeerManager
+    // is built (the verifier holds an Arc<PeerManager>). RGS mode skips it.
+    let (p2p_gossip_sync_for_verifier, route_handler): (
+        Option<Arc<P2PGossipSync>>,
+        Arc<RoutingMessageHandler>,
+    ) = match &*gossip_source {
+        GossipSource::P2PNetwork { gossip_sync } => (
+            Some(Arc::clone(gossip_sync)),
+            Arc::clone(gossip_sync) as Arc<RoutingMessageHandler>,
+        ),
+        GossipSource::RapidGossipSync { .. } => (
+            None,
+            Arc::new(IgnoringMessageHandler {}) as Arc<RoutingMessageHandler>,
+        ),
+    };
 
     // Initialize an OMDomainResolver as a service to other nodes.
     // As a service to other LDK users, using an `OMDomainResolver` allows others to resolve BIP
@@ -3798,7 +3848,7 @@ pub(crate) async fn start_ldk(
 
     let lightning_msg_handler = MessageHandler {
         chan_handler: channel_manager.clone(),
-        route_handler: gossip_sync.clone(),
+        route_handler: Arc::clone(&route_handler),
         onion_message_handler: onion_messenger.clone(),
         custom_message_handler: Arc::clone(&async_order_handler),
         send_only_message_handler: Arc::clone(&chain_monitor),
@@ -3811,14 +3861,16 @@ pub(crate) async fn start_ldk(
         Arc::clone(&keys_manager),
     ));
 
-    // Install a GossipVerifier in in the P2PGossipSync
-    let utxo_lookup = GossipVerifier::new(
-        Arc::clone(&bitcoind_client.bitcoind_rpc_client),
-        TokioSpawner,
-        Arc::clone(&gossip_sync),
-        Arc::clone(&peer_manager),
-    );
-    gossip_sync.add_utxo_lookup(Some(Arc::new(utxo_lookup)));
+    // Install a GossipVerifier in the P2PGossipSync (P2P mode only).
+    if let Some(p2p) = &p2p_gossip_sync_for_verifier {
+        let utxo_lookup = GossipVerifier::new(
+            Arc::clone(&bitcoind_client.bitcoind_rpc_client),
+            TokioSpawner,
+            Arc::clone(p2p),
+            Arc::clone(&peer_manager),
+        );
+        p2p.add_utxo_lookup(Some(Arc::new(utxo_lookup)));
+    }
 
     // ## Running LDK
     // Initialize networking
@@ -4002,6 +4054,7 @@ pub(crate) async fn start_ldk(
 
     let unlocked_state = Arc::new(UnlockedAppState {
         channel_manager: Arc::clone(&channel_manager),
+        gossip_source: Arc::clone(&gossip_source),
         inbound_payments,
         signer: keys_manager,
         entropy_source,
@@ -4028,6 +4081,17 @@ pub(crate) async fn start_ldk(
         virtual_channel_draft_store,
         virtual_channel_session_store,
     });
+
+    // Refresh the RGS snapshot on a fixed interval (RGS mode only). The first
+    // tick fires immediately, so a freshly unlocked node syncs right away.
+    let gossip_shutdown = Arc::new(tokio::sync::Notify::new());
+    if unlocked_state.gossip_source.is_rgs() {
+        tokio::spawn(crate::gossip::run_rgs_sync_loop(
+            Arc::clone(&unlocked_state.gossip_source),
+            Arc::clone(&gossip_shutdown),
+            crate::gossip::RGS_SYNC_INTERVAL,
+        ));
+    }
 
     let recent_payments_payment_ids = channel_manager
         .list_recent_payments()
@@ -4058,7 +4122,7 @@ pub(crate) async fn start_ldk(
         chain_monitor.clone(),
         channel_manager.clone(),
         Some(onion_messenger),
-        GossipSync::p2p(gossip_sync),
+        gossip_source.as_gossip_sync(),
         peer_manager.clone(),
         NO_LIQUIDITY_MANAGER,
         Some(Arc::clone(&output_sweeper)),
@@ -4183,6 +4247,7 @@ pub(crate) async fn start_ldk(
     Ok((
         LdkBackgroundServices {
             stop_processing,
+            gossip_shutdown,
             peer_manager: peer_manager.clone(),
             bp_exit,
             background_processor: Some(background_processor),
@@ -4228,6 +4293,7 @@ impl AppState {
         ldk_background_services
             .stop_processing
             .store(true, Ordering::Release);
+        ldk_background_services.gossip_shutdown.notify_one();
         ldk_background_services.peer_manager.disconnect_all_peers();
 
         // Stop the background processor.

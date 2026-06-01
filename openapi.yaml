@@ -2784,6 +2784,15 @@ components:
         network_channels:
           type: integer
           example: 7812821
+        latest_rgs_snapshot_timestamp:
+          type:
+            - integer
+            - 'null'
+          description: >-
+            Unix timestamp of the most recently applied Rapid Gossip Sync
+            snapshot. Null when the node sources gossip via P2P or has not yet
+            applied an RGS snapshot.
+          example: 1715731200
     OpenChannelRequest:
       type: object
       required:
@@ -3537,6 +3546,36 @@ components:
             - string
             - 'null'
           example: nodeAlias
+        gossip_source:
+          description: >-
+            Selects how the node sources Lightning network gossip. Omit for the
+            default (P2P gossip with UTXO verification against the configured
+            bitcoind). In RGS mode the node downloads a compact snapshot from a
+            trusted server hourly and drops inbound P2P gossip; outbound node
+            announcements still work. Sync freshness is exposed via
+            latest_rgs_snapshot_timestamp on /nodeinfo.
+          oneOf:
+            - type: 'null'
+            - type: object
+              required:
+                - type
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - p2p
+            - type: object
+              required:
+                - type
+                - server_url
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - rgs
+                server_url:
+                  type: string
+                  example: https://rapidsync.lightningdevkit.org/testnet/v2/snapshot
     Unspent:
       type: object
       required:

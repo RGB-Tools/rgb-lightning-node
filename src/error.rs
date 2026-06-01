@@ -106,6 +106,12 @@ pub enum APIError {
     #[error("Failed to send onion message: {0}")]
     FailedSendingOnionMessage(String),
 
+    #[error("Gossip update failed: {0}")]
+    GossipUpdateFailed(String),
+
+    #[error("Gossip update timed out")]
+    GossipUpdateTimeout,
+
     #[error("For an RGB operation both the asset ID and amount are necessary")]
     IncompleteRGBInfo,
 
@@ -597,10 +603,12 @@ impl IntoResponse for APIError {
                 (StatusCode::CONFLICT, self.to_string(), self.name())
             }
             APIError::InvoiceNotClaimable => (StatusCode::NOT_FOUND, self.to_string(), self.name()),
-            APIError::Network(_)
-            | APIError::NoValidTransportEndpoint
+            APIError::ExternalSignerProtocolError(_)
             | APIError::ExternalSignerUnavailable(_)
-            | APIError::ExternalSignerProtocolError(_) => (
+            | APIError::GossipUpdateFailed(_)
+            | APIError::GossipUpdateTimeout
+            | APIError::Network(_)
+            | APIError::NoValidTransportEndpoint => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),
                 self.name(),

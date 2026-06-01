@@ -10,6 +10,7 @@ mod error;
 #[cfg(test)]
 #[path = "test/fee_mock.rs"]
 mod fee_mock;
+mod gossip;
 mod kv_store;
 mod ldk;
 mod rgb;

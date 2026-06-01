@@ -1926,6 +1926,7 @@ fn unlock_req(password: &str) -> UnlockRequest {
         proxy_endpoint: Some(PROXY_ENDPOINT_LOCAL.to_string()),
         announce_addresses: vec![],
         announce_alias: Some(s!("RLN_alias")),
+        gossip_source: None,
     }
 }
 
@@ -1938,6 +1939,27 @@ async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
         .send()
         .await
         .unwrap()
+}
+
+async fn unlock_with_gossip_source(
+    node_address: SocketAddr,
+    password: &str,
+    gossip_source: Option<crate::gossip::GossipSourceConfig>,
+) {
+    println!("unlocking node {node_address} with custom gossip source");
+    let mut payload = unlock_req(password);
+    payload.gossip_source = gossip_source;
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/unlock"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    _check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 async fn unlock(node_address: SocketAddr, password: &str) {
@@ -2312,6 +2334,8 @@ mod concurrent_btc_payments;
 mod concurrent_openchannel;
 mod fail_transfers;
 mod getchannelid;
+mod gossip_p2p;
+mod gossip_rgs;
 mod hodl_invoice;
 mod htlc_amount_checks;
 mod inflate;

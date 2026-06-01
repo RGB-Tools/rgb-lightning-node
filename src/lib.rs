@@ -16,6 +16,7 @@ mod error;
 mod fee_mock;
 #[cfg(feature = "uniffi")]
 pub mod ffi;
+mod gossip;
 mod kv_store;
 mod ldk;
 mod node;
