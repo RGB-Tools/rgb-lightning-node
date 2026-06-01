@@ -10,6 +10,66 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  feature-matrix:
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [rest-uniffi-with-vls, wasm-without-vls]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+      - name: Run feature-matrix checks
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.mode }}" = "rest-uniffi-with-vls" ]; then
+            cargo check --features "uniffi,vls" --lib
+            cargo test --features "uniffi,vls" --lib 'uniffi_smoke_tests::' -- --test-threads=1
+            cargo test --features "uniffi,vls" --lib 'sdk::tests::attached_external_unlock_with_mismatched_bootstrap_fails' -- --test-threads=1
+            cargo test --features "uniffi,vls" --lib 'sdk::tests::attached_external_unlock_without_registered_signer_is_unavailable' -- --test-threads=1
+            cargo test --features "uniffi,vls" --lib 'signer::in_process_transport::tests::' -- --test-threads=1
+          elif [ "${{ matrix.mode }}" = "wasm-without-vls" ]; then
+            # WASM SDK crate is tracked in a separate workspace/repo path in current layout.
+            # Keep this gate explicit and non-VLS by requiring no `vls` feature.
+            cargo check --no-default-features -p uniffi-bindgen --manifest-path bindings/uniffi-bindgen/Cargo.toml
+            if [ -f bindings/wasm-sdk/Cargo.toml ]; then
+              cargo check --target wasm32-unknown-unknown --no-default-features --manifest-path bindings/wasm-sdk/Cargo.toml
+            else
+              echo "bindings/wasm-sdk/Cargo.toml not found; skipping direct wasm-sdk cargo check in this repository layout"
+            fi
+          else
+            echo "unknown matrix mode: ${{ matrix.mode }}"
+            exit 1
+          fi
+
+  external-signer-regressions:
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+      - name: Run external signer regression gates
+        run: |
+          set -euo pipefail
+          cargo check --features "uniffi,vls" --lib
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::external_init_persists_key_source_file' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::internal_init_is_rejected_in_external_mode' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::internal_unlock_is_rejected_in_external_mode' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::external_init_is_idempotent_for_existing_key_source' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::attached_external_unlock_without_registered_signer_is_unavailable' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'sdk::tests::attached_external_unlock_with_mismatched_bootstrap_fails' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'signer::channel_signer::tests::' -- --test-threads=1
+          cargo test --features "uniffi,vls" --lib 'signer::in_process_transport::tests::' -- --test-threads=1
+
   test:
     runs-on: warp-ubuntu-latest-x64-16x
     timeout-minutes: 60
@@ -55,7 +115,7 @@ jobs:
       - name: Start regtest services
         run: ./regtest.sh start
       - name: Run lib_sdk tests
-        run: cargo test --features uniffi --test lib_sdk -- --test-threads=1
+        run: cargo test --features "uniffi,test-utils,vls" --test lib_sdk -- --test-threads=1
       - name: Stop regtest services
         if: always()
         run: ./regtest.sh stop

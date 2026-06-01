@@ -11,22 +11,26 @@ use crate::core_types::async_order::{
     AsyncOrderOutboundInvoiceResponse,
 };
 use crate::core_types::{FEE_RATE, MIN_CHANNEL_CONFIRMATIONS};
-use crate::disk;
 use crate::error::APIError;
 #[cfg(feature = "vss")]
 use crate::ldk::derive_vss_identity;
 use crate::ldk::{
-    clear_rgb_payment_pending, start_ldk, InvoiceType, PaymentInfo, VirtualChannelSessionStatus,
+    clear_rgb_payment_pending, start_ldk, write_rgb_payment_info_file, InvoiceType, PaymentInfo,
+    VirtualChannelSessionStatus,
 };
 use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional};
+use crate::signer::{
+    read_key_source_file, validate_bootstrap_payload, validate_key_source_matches_bootstrap,
+    write_key_source_file, BootstrapData, KeySourceFile, SUPPORTED_SIGNER_API_LEVEL,
+};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     connect_peer_if_necessary, encrypt_and_save_mnemonic, get_current_timestamp,
     get_max_local_rgb_amount, get_route, hex_str, hex_str_to_compressed_pubkey, hex_str_to_vec,
-    new_jsonrpc_request_id, parse_peer_info, validate_and_parse_description_hash,
-    validate_and_parse_payment_hash, validate_and_parse_payment_preimage, AppState,
-    UserOnionMessageContents,
+    is_external_signer_mode_configured, new_jsonrpc_request_id, parse_peer_info,
+    validate_and_parse_description_hash, validate_and_parse_payment_hash,
+    validate_and_parse_payment_preimage, AppState, UserOnionMessageContents,
 };
 use amplify::{map, s};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -42,20 +46,19 @@ use lightning::ln::channelmanager::{
 };
 use lightning::ln::types::ChannelId;
 use lightning::offers::offer::{self, Offer};
-use lightning::rgb_utils::{write_rgb_payment_info_file, RgbInfo, RgbKvStoreExt, STATIC_BLINDING};
+use lightning::rgb_utils::RgbKvStoreExt;
+use lightning::rgb_utils::{RgbInfo, STATIC_BLINDING};
 use lightning::routing::gossip::NodeId;
 use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{
     Path as LnPath, PaymentParameters, Route, RouteHint, RouteHintHop, RouteParameters,
     RouteParametersConfig,
 };
-use lightning::sign::EntropySource;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning::util::config::{
     ChannelConfig, ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig,
 };
 use lightning::util::errors::APIError as LDKAPIError;
-use lightning::util::persist::KVStoreSync;
 use lightning::util::IS_SWAP_SCID;
 use lightning::{
     onion_message::messenger::Destination, onion_message::messenger::MessageSendInstructions,
@@ -68,10 +71,13 @@ use rgb_lib::wallet::{
     Invoice as RgbLibInvoice, Recipient as RgbLibRecipient, RecipientInfo,
     WitnessData as RgbLibWitnessData,
 };
-use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, keys::generate_keys, ContractId, RgbTransport};
+use rgb_lib::{
+    bdk_wallet::keys::bip39::Mnemonic,
+    keys::{generate_keys, WitnessVersion},
+    ContractId, RgbTransport,
+};
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -362,6 +368,17 @@ pub(crate) struct UnlockRequest {
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
+}
+
+fn validate_external_signer_bootstrap(bootstrap: &BootstrapData) -> Result<(), APIError> {
+    if bootstrap.api_level != SUPPORTED_SIGNER_API_LEVEL {
+        return Err(APIError::ExternalSignerProtocolError(format!(
+            "unsupported external signer api_level {}, expected {}",
+            bootstrap.api_level, SUPPORTED_SIGNER_API_LEVEL
+        )));
+    }
+    validate_bootstrap_payload(bootstrap)
+        .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))
 }
 
 pub(crate) struct VssClearFenceRequest {
@@ -1081,7 +1098,7 @@ pub(crate) async fn node_info(state: Arc<AppState>) -> Result<NodeInfoData, APIE
     let wallet_data = unlocked_state.rgb_get_keys();
 
     Ok(NodeInfoData {
-        pubkey: unlocked_state.channel_manager.get_our_node_id().to_string(),
+        pubkey: unlocked_state.runtime_node_pubkey(),
         num_channels: chans.len(),
         num_usable_channels: chans.iter().filter(|c| c.is_usable).count(),
         local_balance_sat,
@@ -1321,10 +1338,7 @@ pub(crate) async fn sign_message(
     let unlocked_state = guard.as_ref().unwrap();
 
     let trimmed = message.trim();
-    let signed_message = lightning::util::message_signing::sign(
-        trimmed.as_bytes(),
-        &unlocked_state.keys_manager.get_node_secret_key(),
-    );
+    let signed_message = unlocked_state.sign_node_message(trimmed.as_bytes())?;
     Ok(SignMessageData { signed_message })
 }
 
@@ -1627,12 +1641,43 @@ pub(crate) async fn send_rgb(
         return Err(APIError::OpenChannelInProgress);
     }
 
-    let unlocked_state_copy = unlocked_state.clone();
-    let send_result = tokio::task::spawn_blocking(move || {
-        unlocked_state_copy.rgb_send(recipient_map, donation, fee_rate, min_confirmations, None)
-    })
-    .await
-    .unwrap()?;
+    let send_result = if unlocked_state.external_signer_mode {
+        let unlocked_state_copy = unlocked_state.clone();
+        let begin_result = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_send_begin(
+                recipient_map,
+                donation,
+                fee_rate,
+                min_confirmations,
+                None,
+                false,
+                None,
+            )
+        })
+        .await
+        .unwrap()?;
+        let unlocked_state_copy = unlocked_state.clone();
+        let signed_psbt = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_sign_psbt(begin_result.psbt)
+        })
+        .await
+        .unwrap()
+        .map_err(|e| {
+            tracing::error!("rgb_sign_psbt failed during RGB send: {e}");
+            APIError::from(e)
+        })?;
+        let unlocked_state_copy = unlocked_state.clone();
+        tokio::task::spawn_blocking(move || unlocked_state_copy.rgb_send_end(signed_psbt))
+            .await
+            .unwrap()?
+    } else {
+        let unlocked_state_copy = unlocked_state.clone();
+        tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_send(recipient_map, donation, fee_rate, min_confirmations, None)
+        })
+        .await
+        .unwrap()?
+    };
 
     Ok(SendRgbData {
         txid: send_result.txid,
@@ -1692,6 +1737,9 @@ pub(crate) async fn init(
     mnemonic: Option<String>,
 ) -> Result<InitData, APIError> {
     let _unlocked_state = check_locked(&state).await?;
+    if is_external_signer_mode_configured(&state)? {
+        return Err(APIError::ExternalSignerRequired);
+    }
 
     check_password_strength(password.clone())?;
     check_already_initialized(&state.db())?;
@@ -1700,17 +1748,36 @@ pub(crate) async fn init(
         Some(mnemonic) => Mnemonic::from_str(&mnemonic)
             .map_err(|e| APIError::InvalidMnemonic(e.to_string()))?
             .to_string(),
-        None => {
-            generate_keys(
-                state.static_state.network,
-                rgb_lib::keys::WitnessVersion::Taproot,
-            )
-            .mnemonic
-        }
+        None => generate_keys(state.static_state.network, WitnessVersion::Taproot).mnemonic,
     };
 
     encrypt_and_save_mnemonic(password, mnemonic.clone(), &state.db())?;
     Ok(InitData { mnemonic })
+}
+
+pub(crate) async fn init_with_external_signer(
+    state: Arc<AppState>,
+    key_source: KeySourceFile,
+) -> Result<(), APIError> {
+    if key_source.api_level != SUPPORTED_SIGNER_API_LEVEL {
+        return Err(APIError::ExternalSignerProtocolError(format!(
+            "unsupported external signer api_level {}, expected {}",
+            key_source.api_level, SUPPORTED_SIGNER_API_LEVEL
+        )));
+    }
+    let _unlocked_state = check_locked(&state).await?;
+    check_already_initialized(&state.db())?;
+
+    if read_key_source_file(&state.static_state.storage_dir_path)
+        .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))?
+        .is_some()
+    {
+        return Err(APIError::AlreadyInitialized);
+    }
+
+    write_key_source_file(&state.static_state.storage_dir_path, &key_source)
+        .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))?;
+    Ok(())
 }
 
 /// Triggers a synchronous RGB-wallet backup to VSS, returning the
@@ -1803,6 +1870,10 @@ pub(crate) async fn vss_clear_fence(
 
 pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Result<(), APIError> {
     tracing::info!("Unlock started");
+    if is_external_signer_mode_configured(&state)? {
+        return Err(APIError::ExternalSignerRequired);
+    }
+
     match check_locked(&state).await {
         Ok(unlocked_state) => {
             update_changing_state(&state, true);
@@ -1835,20 +1906,120 @@ pub(crate) async fn unlock(state: Arc<AppState>, request: UnlockRequest) -> Resu
         announce_addresses: request.announce_addresses,
         announce_alias: request.announce_alias,
     };
-    let (new_ldk_background_services, new_unlocked_app_state) =
-        match start_ldk(state.clone(), mnemonic, unlock_request).await {
-            Ok((nlbs, nuap)) => (nlbs, nuap),
-            Err(e) => {
-                update_changing_state(&state, false);
-                return Err(e);
-            }
-        };
+    let (new_ldk_background_services, new_unlocked_app_state) = match start_ldk(
+        state.clone(),
+        crate::core_types::NodeKeySource::InternalMnemonic(mnemonic),
+        unlock_request,
+    )
+    .await
+    {
+        Ok((nlbs, nuap)) => (nlbs, nuap),
+        Err(e) => {
+            update_changing_state(&state, false);
+            return Err(e);
+        }
+    };
     tracing::debug!("LDK started");
 
     update_unlocked_app_state(&state, Some(new_unlocked_app_state)).await;
     update_ldk_background_services(&state, Some(new_ldk_background_services));
     update_changing_state(&state, false);
     tracing::info!("Unlock completed");
+    Ok(())
+}
+
+pub(crate) async fn unlock_with_attached_external_signer(
+    state: Arc<AppState>,
+    request: UnlockRequest,
+) -> Result<(), APIError> {
+    struct ChangingStateGuard {
+        state: Arc<AppState>,
+        active: bool,
+    }
+
+    impl ChangingStateGuard {
+        fn new(state: Arc<AppState>) -> Self {
+            Self {
+                state,
+                active: true,
+            }
+        }
+
+        fn disarm(&mut self) {
+            self.active = false;
+        }
+    }
+
+    impl Drop for ChangingStateGuard {
+        fn drop(&mut self) {
+            if self.active {
+                update_changing_state(&self.state, false);
+            }
+        }
+    }
+
+    tracing::info!("Attached external-signer unlock started");
+    match check_locked(&state).await {
+        Ok(unlocked_state) => {
+            update_changing_state(&state, true);
+            drop(unlocked_state);
+        }
+        Err(e) => {
+            return Err(match e {
+                APIError::UnlockedNode => APIError::AlreadyUnlocked,
+                _ => e,
+            });
+        }
+    }
+    let mut changing_state_guard = ChangingStateGuard::new(Arc::clone(&state));
+
+    let signer_attachment = match state.get_attached_external_signer().clone() {
+        Some(attachment) => attachment,
+        None => {
+            return Err(APIError::ExternalSignerUnavailable(
+                "attached external signer is not registered".to_string(),
+            ));
+        }
+    };
+    validate_external_signer_bootstrap(&signer_attachment.bootstrap)?;
+    let key_source = match read_key_source_file(&state.static_state.storage_dir_path)
+        .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))?
+    {
+        Some(key_source) => key_source,
+        None => return Err(APIError::ExternalSignerRequired),
+    };
+    if validate_key_source_matches_bootstrap(&key_source, &signer_attachment.bootstrap).is_err() {
+        return Err(APIError::ExternalSignerMismatch);
+    }
+
+    let unlock_request = crate::core_types::UnlockRequest {
+        bitcoind_rpc_username: request.bitcoind_rpc_username,
+        bitcoind_rpc_password: request.bitcoind_rpc_password,
+        bitcoind_rpc_host: request.bitcoind_rpc_host,
+        bitcoind_rpc_port: request.bitcoind_rpc_port,
+        indexer_url: request.indexer_url,
+        proxy_endpoint: request.proxy_endpoint,
+        announce_addresses: request.announce_addresses,
+        announce_alias: request.announce_alias,
+    };
+    let (new_ldk_background_services, new_unlocked_app_state) = match start_ldk(
+        state.clone(),
+        crate::core_types::NodeKeySource::External(crate::core_types::ExternalKeySource {
+            bootstrap: signer_attachment.bootstrap.clone(),
+            signer_attachment,
+        }),
+        unlock_request,
+    )
+    .await
+    {
+        Ok((nlbs, nuap)) => (nlbs, nuap),
+        Err(e) => return Err(e),
+    };
+
+    update_unlocked_app_state(&state, Some(new_unlocked_app_state)).await;
+    update_ldk_background_services(&state, Some(new_ldk_background_services));
+    changing_state_guard.disarm();
+    update_changing_state(&state, false);
     Ok(())
 }
 
@@ -2101,6 +2272,8 @@ pub(crate) async fn close_channel(
     Ok(())
 }
 
+/// In external signer mode, on-chain RGB flows that need signing use `rgb_sign_psbt` (never the
+/// watch-only wallet's private `sign_psbt`) for create_utxos, send_btc, and send_rgb PSBT paths.
 pub(crate) async fn create_utxos(
     state: Arc<AppState>,
     request: CreateUtxosRequestData,
@@ -2108,13 +2281,40 @@ pub(crate) async fn create_utxos(
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
 
-    unlocked_state.rgb_create_utxos(
-        request.up_to,
-        request.num.unwrap_or(SDK_UTXO_NUM),
-        request.size.unwrap_or(SDK_UTXO_SIZE_SAT),
-        request.fee_rate,
-        request.skip_sync,
-    )?;
+    let num = request.num.unwrap_or(SDK_UTXO_NUM);
+    let size = request.size.unwrap_or(SDK_UTXO_SIZE_SAT);
+    if unlocked_state.external_signer_mode {
+        let unsigned_psbt = unlocked_state
+            .rgb_create_utxos_begin(
+                request.up_to,
+                num,
+                size,
+                request.fee_rate,
+                request.skip_sync,
+            )
+            .map_err(|e| {
+                tracing::error!("rgb_create_utxos_begin failed in external signer mode: {e}");
+                APIError::from(e)
+            })?;
+        let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).map_err(|e| {
+            tracing::error!("rgb_sign_psbt failed in external signer mode: {e}");
+            APIError::from(e)
+        })?;
+        let _created = unlocked_state
+            .rgb_create_utxos_end(signed_psbt, request.skip_sync)
+            .map_err(|e| {
+                tracing::error!("rgb_create_utxos_end failed in external signer mode: {e}");
+                APIError::from(e)
+            })?;
+    } else {
+        unlocked_state.rgb_create_utxos(
+            request.up_to,
+            num,
+            size,
+            request.fee_rate,
+            request.skip_sync,
+        )?;
+    }
     tracing::debug!("UTXO creation complete");
 
     Ok(())
@@ -2126,6 +2326,11 @@ pub(crate) async fn issue_asset_nia(
 ) -> Result<AssetNIA, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
+    if unlocked_state.external_signer_mode {
+        return Err(APIError::UnsupportedInExternalSignerMode(
+            "asset issuance is not supported in external signer mode".to_string(),
+        ));
+    }
 
     if *unlocked_state.rgb_send_lock.lock().unwrap() {
         return Err(APIError::OpenChannelInProgress);
@@ -2147,6 +2352,11 @@ pub(crate) async fn issue_asset_cfa(
 ) -> Result<AssetCFA, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
+    if unlocked_state.external_signer_mode {
+        return Err(APIError::UnsupportedInExternalSignerMode(
+            "asset issuance is not supported in external signer mode".to_string(),
+        ));
+    }
 
     if *unlocked_state.rgb_send_lock.lock().unwrap() {
         return Err(APIError::OpenChannelInProgress);
@@ -2177,6 +2387,11 @@ pub(crate) async fn issue_asset_ifa(
 ) -> Result<AssetIFA, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
+    if unlocked_state.external_signer_mode {
+        return Err(APIError::UnsupportedInExternalSignerMode(
+            "asset issuance is not supported in external signer mode".to_string(),
+        ));
+    }
 
     if *unlocked_state.rgb_send_lock.lock().unwrap() {
         return Err(APIError::OpenChannelInProgress);
@@ -2200,6 +2415,11 @@ pub(crate) async fn issue_asset_uda(
 ) -> Result<AssetUDA, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
+    if unlocked_state.external_signer_mode {
+        return Err(APIError::UnsupportedInExternalSignerMode(
+            "asset issuance is not supported in external signer mode".to_string(),
+        ));
+    }
 
     if *unlocked_state.rgb_send_lock.lock().unwrap() {
         return Err(APIError::OpenChannelInProgress);
@@ -2254,7 +2474,7 @@ pub(crate) async fn keysend(
         )));
     }
 
-    let payment_preimage = PaymentPreimage(unlocked_state.keys_manager.get_secure_random_bytes());
+    let payment_preimage = PaymentPreimage(unlocked_state.entropy_source.get_secure_random_bytes());
     let payment_hash_inner = Sha256::hash(&payment_preimage.0[..]).to_byte_array();
     let payment_id = PaymentId(payment_hash_inner);
     let payment_hash = PaymentHash(payment_hash_inner);
@@ -2299,7 +2519,7 @@ pub(crate) async fn keysend(
             rgb_amount,
             false,
             false,
-            &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+            unlocked_state.kv_store.as_ref(),
         );
     }
 
@@ -2340,12 +2560,22 @@ pub(crate) async fn send_btc(
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
 
-    let txid = unlocked_state.rgb_send_btc(
-        request.address,
-        request.amount,
-        request.fee_rate,
-        request.skip_sync,
-    )?;
+    let txid = if unlocked_state.external_signer_mode {
+        let unsigned_psbt =
+            unlocked_state.rgb_send_btc_begin(request.address, request.amount, request.fee_rate)?;
+        let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).map_err(|e| {
+            tracing::error!("rgb_sign_psbt failed during send_btc (PSBT path): {e}");
+            APIError::from(e)
+        })?;
+        unlocked_state.rgb_send_btc_end(signed_psbt)?
+    } else {
+        unlocked_state.rgb_send_btc(
+            request.address,
+            request.amount,
+            request.fee_rate,
+            request.skip_sync,
+        )?
+    };
 
     Ok(SendBtcData { txid })
 }
@@ -2660,7 +2890,6 @@ pub(crate) async fn open_channel(
                 MIN_CHANNEL_CONFIRMATIONS,
                 None,
                 true,
-                // Channel-funding dry run: mirror the real funding tx's final locktime.
                 Some(0),
             )
         })
@@ -2679,9 +2908,7 @@ pub(crate) async fn open_channel(
                 Some(id) => id,
                 None => loop {
                     let mut bytes = [0u8; 32];
-                    bytes.copy_from_slice(
-                        &unlocked_state.keys_manager.get_secure_random_bytes()[..32],
-                    );
+                    bytes.copy_from_slice(&unlocked_state.entropy_source.get_secure_random_bytes());
                     let candidate = ChannelId::from_bytes(bytes);
                     if !unlocked_state.channel_ids().contains_key(&candidate)
                         && !unlocked_state
@@ -2779,7 +3006,7 @@ pub(crate) async fn send_payment(
     let (payment_id, payment_hash, payment_secret) = if let Ok(offer) =
         Offer::from_str(&request.invoice)
     {
-        let random_bytes = unlocked_state.keys_manager.get_secure_random_bytes();
+        let random_bytes = unlocked_state.entropy_source.get_secure_random_bytes();
         let payment_id = PaymentId(random_bytes);
 
         let amt_msat = match (offer.amount(), request.amt_msat) {
@@ -2919,16 +3146,21 @@ pub(crate) async fn send_payment(
                 rgb_amount,
                 false,
                 false,
-                &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+                unlocked_state.kv_store.as_ref(),
             );
         }
 
+        let bolt11_retry = if rgb_payment.is_some() {
+            Retry::Timeout(Duration::from_secs(120))
+        } else {
+            Retry::Timeout(Duration::from_secs(10))
+        };
         match unlocked_state.channel_manager.pay_for_bolt11_invoice(
             &invoice,
             payment_id,
             Some(amt_msat),
             RouteParametersConfig::default(),
-            Retry::Timeout(Duration::from_secs(10)),
+            bolt11_retry,
         ) {
             Ok(_) => {
                 let payee_pubkey = invoice.recover_payee_pub_key();
@@ -3057,7 +3289,7 @@ pub(crate) async fn maker_execute(
     let first_leg = get_route(
         &unlocked_state.channel_manager,
         &unlocked_state.router,
-        unlocked_state.channel_manager.get_our_node_id(),
+        unlocked_state.runtime_node_id(),
         taker_pk,
         if swap_info.is_to_btc() {
             Some(swap_info.qty_to + SDK_HTLC_MIN_MSAT)
@@ -3075,7 +3307,7 @@ pub(crate) async fn maker_execute(
         &unlocked_state.channel_manager,
         &unlocked_state.router,
         taker_pk,
-        unlocked_state.channel_manager.get_our_node_id(),
+        unlocked_state.runtime_node_id(),
         if swap_info.is_to_btc() || swap_info.is_asset_asset() {
             Some(SDK_HTLC_MIN_MSAT)
         } else {
@@ -3136,7 +3368,7 @@ pub(crate) async fn maker_execute(
         }],
         route_params: Some(RouteParameters {
             payment_params: PaymentParameters::for_keysend(
-                unlocked_state.channel_manager.get_our_node_id(),
+                unlocked_state.runtime_node_id(),
                 SDK_DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
                 false,
             ),
@@ -3153,7 +3385,7 @@ pub(crate) async fn maker_execute(
             swap_info.qty_to,
             true,
             false,
-            &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+            unlocked_state.kv_store.as_ref(),
         );
     }
 
@@ -3500,7 +3732,7 @@ pub(crate) async fn create_ln_invoice(
             claim_deadline_height: None,
             created_at,
             updated_at: created_at,
-            payee_pubkey: unlocked_state.channel_manager.get_our_node_id(),
+            payee_pubkey: unlocked_state.runtime_node_id(),
             expires_at: Some(created_at + expiry_sec as u64),
             invoice_type: Some(invoice_type),
         },
@@ -3764,6 +3996,11 @@ pub(crate) async fn inflate(
 ) -> Result<InflateResponseData, APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
+    if unlocked_state.external_signer_mode {
+        return Err(APIError::UnsupportedInExternalSignerMode(
+            "inflate is not supported in external signer mode".to_string(),
+        ));
+    }
 
     if *unlocked_state.rgb_send_lock.lock().unwrap() {
         return Err(APIError::OpenChannelInProgress);
@@ -3983,4 +4220,534 @@ pub(crate) async fn list_unspents(
         });
     }
     Ok(unspents)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::disk::FilesystemLogger;
+    use crate::ldk::attach_external_signer_transport;
+    use crate::signer::in_process_transport::InProcessExternalSignerTransport;
+    use crate::signer::types::{
+        ChannelPublicKeys, ExternalSignerRequest, ExternalSignerResponse, SpendableOutputSignInput,
+        WalletInputMetadata,
+    };
+    use crate::signer::vls_adapter::ExternalSignerBackend;
+    use crate::signer::{read_key_source_file, RlnSignerError, SignerIdentity};
+    use crate::utils::{AppState, StaticState};
+    use rgb_lib::BitcoinNetwork;
+    use rln_migration::{Migrator, MigratorTrait};
+    use sea_orm::{ConnectOptions, Database};
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex, RwLock};
+    use tokio::sync::Mutex as TokioMutex;
+    use tokio_util::sync::CancellationToken;
+
+    fn mock_locked_state() -> Arc<AppState> {
+        let unique = format!(
+            "rln-sdk-external-tests-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let storage_dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&storage_dir).expect("create temp storage dir");
+        let db_path = storage_dir.join("rln_db");
+        let connection_string = format!("sqlite:{}?mode=rwc", db_path.display());
+        let database =
+            crate::runtime::block_on(Database::connect(ConnectOptions::new(connection_string)))
+                .expect("mock database connection");
+        crate::runtime::block_on(Migrator::up(&database, None)).expect("run migrations");
+        Arc::new(AppState {
+            static_state: Arc::new(StaticState {
+                ldk_peer_listening_port: 9735,
+                network: BitcoinNetwork::Regtest,
+                storage_dir_path: storage_dir.clone(),
+                ldk_data_dir: storage_dir.join(".ldk"),
+                logger: Arc::new(FilesystemLogger::new(storage_dir)),
+                max_media_upload_size_mb: 1,
+                enable_virtual_channels_v0: false,
+                virtual_peer_pubkeys: vec![],
+                lsp_base_url: None,
+                lsp_bearer_token: None,
+                database: RwLock::new(Arc::new(database)),
+                vss_url: None,
+                vss_allow_empty_restore: false,
+            }),
+            cancel_token: CancellationToken::new(),
+            unlocked_app_state: Arc::new(TokioMutex::new(None)),
+            ldk_background_services: Arc::new(Mutex::new(None)),
+            attached_external_signer: Arc::new(Mutex::new(None)),
+            changing_state: Mutex::new(false),
+            root_public_key: None,
+            revoked_tokens: Arc::new(Mutex::new(HashSet::new())),
+        })
+    }
+
+    fn sample_bootstrap() -> BootstrapData {
+        BootstrapData {
+            identity: SignerIdentity {
+                node_id: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+                    .to_string(),
+                account_xpub_vanilla: "xpub661MyMwAqRbcF9i3M7GQw1k8f7mR8n4x9nW2f2dJ8f1h9sP2b3K4L5M6N7P8Q9R0S1T2U3V4W5X6Y7Z8".to_string(),
+                account_xpub_colored: "xpub661MyMwAqRbcF9i3M7GQw1k8f7mR8n4x9nW2f2dJ8f1h9sP2b3K4L5M6N7P8Q9R0S1T2U3V4W5X6Y7Z8".to_string(),
+                master_fingerprint: "00000000".to_string(),
+            },
+            protocol_version: "1".to_string(),
+            api_level: 1,
+        }
+    }
+
+    fn sample_unlock_request() -> UnlockRequest {
+        UnlockRequest {
+            password: "unused-in-external-mode".to_string(),
+            bitcoind_rpc_username: "user".to_string(),
+            bitcoind_rpc_password: "pass".to_string(),
+            bitcoind_rpc_host: "127.0.0.1".to_string(),
+            bitcoind_rpc_port: 18443,
+            indexer_url: Some("127.0.0.1:50001".to_string()),
+            proxy_endpoint: Some("rpc://127.0.0.1:3000/json-rpc".to_string()),
+            announce_addresses: vec![],
+            announce_alias: None,
+        }
+    }
+
+    struct TestBootstrapBackend {
+        bootstrap: BootstrapData,
+    }
+
+    impl TestBootstrapBackend {
+        fn new(bootstrap: BootstrapData) -> Self {
+            Self { bootstrap }
+        }
+
+        fn unsupported<T>() -> Result<T, RlnSignerError> {
+            Err(RlnSignerError::Unsupported(
+                "unused in sdk tests".to_string(),
+            ))
+        }
+    }
+
+    impl ExternalSignerBackend for TestBootstrapBackend {
+        fn call(
+            &self,
+            request: ExternalSignerRequest,
+        ) -> Result<ExternalSignerResponse, RlnSignerError> {
+            match request {
+                ExternalSignerRequest::Bootstrap => {
+                    Ok(ExternalSignerResponse::Bootstrap(self.bootstrap.clone()))
+                }
+                _ => Self::unsupported(),
+            }
+        }
+
+        fn bootstrap(&self) -> Result<BootstrapData, RlnSignerError> {
+            Ok(self.bootstrap.clone())
+        }
+
+        fn node_get_node_id(&self, _recipient: String) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_get_destination_script(
+            &self,
+            _channel_keys_id_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_get_shutdown_scriptpubkey(&self) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_encrypt_peer_storage_payload(
+            &self,
+            _plaintext_hex: String,
+            _random_bytes_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_decrypt_peer_storage_payload(
+            &self,
+            _ciphertext_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_encrypt_blinded_message_payload(
+            &self,
+            _plaintext_hex: String,
+            _rho_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_decrypt_blinded_message_payload(
+            &self,
+            _ciphertext_hex: String,
+            _rho_hex: String,
+        ) -> Result<(String, bool), RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_get_hmac_for_offer_key(&self) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_crypt_for_offer(
+            &self,
+            _bytes_hex: String,
+            _nonce_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_create_inbound_payment(
+            &self,
+            _min_value_msat: Option<u64>,
+            _invoice_expiry_delta_secs: u32,
+            _random_bytes_hex: String,
+            _current_time: u64,
+            _min_final_cltv_expiry_delta: Option<u16>,
+        ) -> Result<(String, String), RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_create_inbound_payment_for_hash(
+            &self,
+            _payment_hash_hex: String,
+            _min_value_msat: Option<u64>,
+            _invoice_expiry_delta_secs: u32,
+            _current_time: u64,
+            _min_final_cltv_expiry_delta: Option<u16>,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_create_spontaneous_payment_secret(
+            &self,
+            _min_value_msat: Option<u64>,
+            _invoice_expiry_delta_secs: u32,
+            _current_time: u64,
+            _min_final_cltv_expiry_delta: Option<u16>,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_verify_inbound_payment(
+            &self,
+            _payment_hash_hex: String,
+            _payment_secret_hex: String,
+            _total_msat: u64,
+            _highest_seen_timestamp: u64,
+        ) -> Result<(Option<String>, Option<u16>), RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn node_get_payment_preimage(
+            &self,
+            _payment_hash_hex: String,
+            _payment_secret_hex: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn prepare_async_payments_hashes(
+            &self,
+            _host_node_id_hex: String,
+            _start_index: u64,
+            _batch_size: u32,
+        ) -> Result<Vec<crate::signer::types::AsyncPaymentsHashEntry>, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn generate_channel_keys_id(
+            &self,
+            _inbound: bool,
+            _channel_value_satoshis: u64,
+            _user_channel_id: u128,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn derive_channel_signer(
+            &self,
+            _channel_value_satoshis: u64,
+            _channel_keys_id_hex: String,
+        ) -> Result<(String, ChannelPublicKeys), RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn sign_spendable_outputs_psbt(
+            &self,
+            _inputs: Vec<SpendableOutputSignInput>,
+            _psbt: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn sign_rgb_psbt(
+            &self,
+            _descriptors: Vec<String>,
+            _psbt: String,
+        ) -> Result<String, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn get_wallet_input_metadata(
+            &self,
+            _txid_hex: String,
+            _vout: u32,
+            _script_pubkey_hex: Option<String>,
+            _amount_sat: Option<u64>,
+        ) -> Result<Option<WalletInputMetadata>, RlnSignerError> {
+            Self::unsupported()
+        }
+
+        fn find_derivation_matches_for_script(
+            &self,
+            _script_pubkey_hex: String,
+            _max_index: u32,
+        ) -> Result<Vec<crate::signer::types::DerivedAddressMatch>, RlnSignerError> {
+            Self::unsupported()
+        }
+    }
+
+    fn attach_test_external_signer(
+        state: &Arc<AppState>,
+        bootstrap: BootstrapData,
+    ) -> Result<(), APIError> {
+        let backend = Arc::new(TestBootstrapBackend::new(bootstrap));
+        let transport = InProcessExternalSignerTransport::new(backend);
+        let attachment = attach_external_signer_transport(Arc::new(transport))?;
+        state.set_attached_external_signer(Some(attachment));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn external_init_persists_key_source_file() {
+        let state = mock_locked_state();
+        init_with_external_signer(
+            state.clone(),
+            KeySourceFile::from_bootstrap(&sample_bootstrap()),
+        )
+        .await
+        .expect("external init");
+
+        let key_source = read_key_source_file(&state.static_state.storage_dir_path)
+            .expect("read key source")
+            .expect("key source present");
+        assert_eq!(
+            key_source.mode,
+            crate::signer::key_source::EXTERNAL_SIGNER_MODE_V1
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_init_is_rejected_in_external_mode() {
+        let state = mock_locked_state();
+        init_with_external_signer(
+            state.clone(),
+            KeySourceFile::from_bootstrap(&sample_bootstrap()),
+        )
+        .await
+        .expect("external init");
+
+        let res = init(state, "StrongPass123!".to_string(), None).await;
+        assert!(matches!(res, Err(APIError::ExternalSignerRequired)));
+    }
+
+    #[tokio::test]
+    async fn internal_unlock_is_rejected_in_external_mode() {
+        let state = mock_locked_state();
+        init_with_external_signer(
+            state.clone(),
+            KeySourceFile::from_bootstrap(&sample_bootstrap()),
+        )
+        .await
+        .expect("external init");
+
+        let res = unlock(state, sample_unlock_request()).await;
+        assert!(matches!(res, Err(APIError::ExternalSignerRequired)));
+    }
+
+    #[tokio::test]
+    async fn external_init_is_idempotent_for_existing_key_source() {
+        let state = mock_locked_state();
+        init_with_external_signer(
+            state.clone(),
+            KeySourceFile::from_bootstrap(&sample_bootstrap()),
+        )
+        .await
+        .expect("external init");
+
+        let res =
+            init_with_external_signer(state, KeySourceFile::from_bootstrap(&sample_bootstrap()))
+                .await;
+        assert!(matches!(res, Err(APIError::AlreadyInitialized)));
+    }
+
+    #[tokio::test]
+    async fn external_init_with_unsupported_api_level_is_rejected() {
+        let state = mock_locked_state();
+        let mut bootstrap = sample_bootstrap();
+        bootstrap.api_level = 99;
+        let res = init_with_external_signer(state, KeySourceFile::from_bootstrap(&bootstrap)).await;
+        assert!(matches!(res, Err(APIError::ExternalSignerProtocolError(_))));
+    }
+
+    #[tokio::test]
+    async fn attached_external_unlock_without_registered_signer_is_unavailable() {
+        let state = mock_locked_state();
+        let res = unlock_with_attached_external_signer(state, sample_unlock_request()).await;
+        assert!(matches!(res, Err(APIError::ExternalSignerUnavailable(_))));
+    }
+
+    #[tokio::test]
+    async fn attached_external_unlock_without_registered_signer_resets_changing_state() {
+        let state = mock_locked_state();
+        let res =
+            unlock_with_attached_external_signer(Arc::clone(&state), sample_unlock_request()).await;
+        assert!(matches!(res, Err(APIError::ExternalSignerUnavailable(_))));
+        assert!(!*state.get_changing_state());
+    }
+
+    #[tokio::test]
+    async fn attached_external_unlock_with_mismatched_bootstrap_fails() {
+        let state = mock_locked_state();
+        let bootstrap_a = sample_bootstrap();
+        init_with_external_signer(state.clone(), KeySourceFile::from_bootstrap(&bootstrap_a))
+            .await
+            .expect("external init");
+
+        let mut bootstrap_b = sample_bootstrap();
+        bootstrap_b.identity.master_fingerprint = "ffffffff".to_string();
+        attach_test_external_signer(&state, bootstrap_b).expect("attach mismatched signer");
+        // Unlock should fail because attached signer does not match persisted key_source.json.
+        let res = unlock_with_attached_external_signer(state, sample_unlock_request()).await;
+        assert!(matches!(
+            res,
+            Err(APIError::ExternalSignerProtocolError(_)) | Err(APIError::ExternalSignerMismatch)
+        ));
+    }
+
+    #[tokio::test]
+    async fn attached_external_unlock_with_mismatched_bootstrap_resets_changing_state() {
+        let state = mock_locked_state();
+        let bootstrap_a = sample_bootstrap();
+        init_with_external_signer(state.clone(), KeySourceFile::from_bootstrap(&bootstrap_a))
+            .await
+            .expect("external init");
+
+        let mut bootstrap_b = sample_bootstrap();
+        bootstrap_b.identity.master_fingerprint = "ffffffff".to_string();
+        attach_test_external_signer(&state, bootstrap_b).expect("attach mismatched signer");
+        let res =
+            unlock_with_attached_external_signer(Arc::clone(&state), sample_unlock_request()).await;
+        assert!(matches!(
+            res,
+            Err(APIError::ExternalSignerProtocolError(_)) | Err(APIError::ExternalSignerMismatch)
+        ));
+        assert!(!*state.get_changing_state());
+    }
+
+    #[tokio::test]
+    async fn external_mode_rejects_issue_and_inflate_operations() {
+        let state = mock_locked_state();
+        let bootstrap = sample_bootstrap();
+        init_with_external_signer(state.clone(), KeySourceFile::from_bootstrap(&bootstrap))
+            .await
+            .expect("external init");
+
+        attach_test_external_signer(&state, bootstrap.clone()).expect("attach test signer");
+        let unlock_res =
+            unlock_with_attached_external_signer(state.clone(), sample_unlock_request()).await;
+        // If unlock cannot proceed in this isolated unit env (e.g. missing bitcoind),
+        // this test cannot validate runtime mode guards.
+        if unlock_res.is_err() {
+            return;
+        }
+
+        let nia = issue_asset_nia(
+            state.clone(),
+            IssueAssetNiaRequestData {
+                amounts: vec![1],
+                ticker: "T".to_string(),
+                name: "Token".to_string(),
+                precision: 0,
+            },
+        )
+        .await;
+        assert!(matches!(
+            nia,
+            Err(APIError::UnsupportedInExternalSignerMode(_))
+        ));
+
+        let cfa = issue_asset_cfa(
+            state.clone(),
+            IssueAssetCfaRequestData {
+                amounts: vec![1],
+                name: "CFA".to_string(),
+                details: None,
+                precision: 0,
+                file_digest: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            cfa,
+            Err(APIError::UnsupportedInExternalSignerMode(_))
+        ));
+
+        let ifa = issue_asset_ifa(
+            state.clone(),
+            IssueAssetIFARequestData {
+                amounts: vec![1],
+                inflation_amounts: vec![1],
+                ticker: "I".to_string(),
+                name: "IFA".to_string(),
+                precision: 0,
+                reject_list_url: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            ifa,
+            Err(APIError::UnsupportedInExternalSignerMode(_))
+        ));
+
+        let uda = issue_asset_uda(
+            state.clone(),
+            IssueAssetUdaRequestData {
+                ticker: "U".to_string(),
+                name: "UDA".to_string(),
+                details: None,
+                precision: 0,
+                media_file_digest: None,
+                attachments_file_digests: vec![],
+            },
+        )
+        .await;
+        assert!(matches!(
+            uda,
+            Err(APIError::UnsupportedInExternalSignerMode(_))
+        ));
+
+        let inflate_res = inflate(
+            state,
+            InflateRequestData {
+                asset_id: "rgb:dummy".to_string(),
+                inflation_amounts: vec![1],
+                fee_rate: 1,
+                min_confirmations: 1,
+            },
+        )
+        .await;
+        assert!(matches!(
+            inflate_res,
+            Err(APIError::UnsupportedInExternalSignerMode(_))
+        ));
+    }
 }

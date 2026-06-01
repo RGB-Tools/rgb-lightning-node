@@ -33,6 +33,10 @@ RESET_DATA = os.getenv("RESET_DATA", "1") == "1"
 
 RGB_MIN_HTLC_MSAT = 3_000_000
 PROXY_ENDPOINT_LOCAL = "rpc://127.0.0.1:3000/json-rpc"
+INBOUND_PAYMENTS_FNAME = "inbound_payments"
+LDK_DIR = ".ldk"
+PAYMENT_HASH_LEN = 32
+RLN_DB_FNAME = "rln_db"
 
 
 def scenario_storage(scenario: str, node_name: str) -> Path:

@@ -7,6 +7,24 @@ use crate::NodeHandle;
 
 use super::types::{uniffi_state_slot, RlnError};
 
+// Stash the rich `APIError` display before `map_api_error` collapses it
+// into the coarse `RlnError` for FFI. Thread-local so concurrent calls on
+// different threads can't clobber each other's detail between stash and
+// drain (the stash and the drain in `format_error_for_ffi` both run on
+// the caller thread).
+thread_local! {
+    static LAST_API_ERROR_DETAIL: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub fn take_last_api_error_detail() -> Option<String> {
+    LAST_API_ERROR_DETAIL.with(|slot| slot.borrow_mut().take())
+}
+
+fn stash_api_error_detail(detail: String) {
+    LAST_API_ERROR_DETAIL.with(|slot| *slot.borrow_mut() = Some(detail));
+}
+
 fn lock_uniffi_state_slot() -> Result<std::sync::MutexGuard<'static, Option<NodeHandle>>, RlnError>
 {
     uniffi_state_slot().lock().map_err(|_| {
@@ -108,6 +126,7 @@ fn shared_uniffi_runtime() -> &'static tokio::runtime::Runtime {
 }
 
 pub(crate) fn map_api_error(err: APIError) -> RlnError {
+    stash_api_error_detail(format!("{err}"));
     match err {
         APIError::LockedNode | APIError::NotInitialized => RlnError::NotInitialized,
         APIError::PaymentNotFound(_)
@@ -126,27 +145,30 @@ pub(crate) fn map_api_error(err: APIError) -> RlnError {
         | APIError::CannotEstimateFees
         | APIError::ChangingState
         | APIError::OpenChannelInProgress
-        | APIError::FailedBdkSync(_)
-        | APIError::FailedBitcoindConnection(_)
-        | APIError::FailedBroadcast(_)
-        | APIError::FailedPeerConnection
         | APIError::InsufficientAssets
-        | APIError::InsufficientCapacity(_)
-        | APIError::InsufficientFunds(_)
         | APIError::InvalidIndexer(_)
         | APIError::InvalidProxyEndpoint
         | APIError::InvalidProxyProtocol(_)
         | APIError::MaxFeeExceeded(_)
         | APIError::MinFeeNotMet(_)
         | APIError::NetworkMismatch(_, _)
-        | APIError::NoAvailableUtxos
-        | APIError::NoRoute
         | APIError::DuplicatePayment(_)
         | APIError::RecipientIDAlreadyUsed
         | APIError::TemporaryChannelIdAlreadyUsed
         | APIError::UnsupportedLayer1(_)
         | APIError::UnsupportedTransportType
         | APIError::CannotFailBatchTransfer => RlnError::Conflict,
+        APIError::FailedBdkSync(_) => RlnError::FailedBdkSync,
+        APIError::FailedBitcoindConnection(_) => RlnError::FailedBitcoindConnection,
+        APIError::FailedBroadcast(_) => RlnError::FailedBroadcast,
+        APIError::FailedPeerConnection => RlnError::FailedPeerConnection,
+        APIError::InsufficientCapacity(_) => RlnError::InsufficientCapacity,
+        APIError::InsufficientFunds(_) => RlnError::InsufficientFunds,
+        APIError::NoAvailableUtxos => RlnError::NoAvailableUtxos,
+        APIError::NoRoute => RlnError::NoRoute,
+        APIError::ExternalSignerRequired => RlnError::ExternalSignerRequired,
+        APIError::ExternalSignerMismatch => RlnError::ExternalSignerMismatch,
+        APIError::UnsupportedInExternalSignerMode(_) => RlnError::UnsupportedInExternalSignerMode,
         APIError::AnchorsRequired
         | APIError::ExpiredSwapOffer
         | APIError::IncompleteRGBInfo
@@ -193,15 +215,24 @@ pub(crate) fn map_api_error(err: APIError) -> RlnError {
         | APIError::WrongPassword
         | APIError::UnsupportedBackupVersion { .. } => RlnError::InvalidRequest,
         APIError::Network(_) | APIError::NoValidTransportEndpoint => RlnError::Conflict,
-        _ => RlnError::Internal,
+        APIError::ExternalSignerUnavailable(_) => RlnError::ExternalSignerUnavailable,
+        APIError::ExternalSignerProtocolError(_) => RlnError::ExternalSignerProtocolError,
+        other => {
+            tracing::error!("UniFFI API error mapped to internal: {:?}", other);
+            RlnError::Internal
+        }
     }
 }
 
 pub(super) fn map_app_error(err: AppError) -> RlnError {
+    stash_api_error_detail(format!("{err}"));
     match err {
         AppError::UnavailablePort(_) | AppError::InvalidAuthenticationArgs => {
             RlnError::InvalidRequest
         }
-        _ => RlnError::Internal,
+        other => {
+            tracing::error!("UniFFI app error mapped to internal: {:?}", other);
+            RlnError::Internal
+        }
     }
 }

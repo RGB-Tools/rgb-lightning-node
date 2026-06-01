@@ -36,7 +36,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build Python UniFFI library
-        run: cargo build --release --features uniffi,vss --lib
+        run: cargo build --release --features "uniffi,vls,vss" --lib
 
       - name: Generate Python bindings
         run: ./scripts/ci/uniffi_generate_python.sh
@@ -118,6 +118,117 @@ jobs:
           path: target/uniffi/python-e2e/data/**
           include-hidden-files: true
           if-no-files-found: ignore
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  python-external-signer-regular:
+    name: Python E2E (external-signer-regular-flow-real)
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run native external signer E2E
+        env:
+          RESET_DATA: "1"
+          EXTERNAL_SIGNER_SCENARIO: "regular-flow-real"
+        run: ./scripts/ci/external_signer_real_e2e.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  python-external-signer-mismatch:
+    name: Python E2E (external-signer-restart-mismatch-real)
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run native external signer mismatch E2E
+        env:
+          RESET_DATA: "1"
+          EXTERNAL_SIGNER_SCENARIO: "restart-mismatch-real"
+        run: ./scripts/ci/external_signer_real_e2e.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  python-external-signer-recovery:
+    name: Python E2E (external-signer-connection-loss-real)
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run native external signer recovery E2E
+        env:
+          RESET_DATA: "1"
+          EXTERNAL_SIGNER_SCENARIO: "connection-loss-real"
+        run: ./scripts/ci/external_signer_real_e2e.sh
 
       - name: Stop regtest services
         if: always()
@@ -231,6 +342,68 @@ jobs:
         if: always()
         run: ./regtest.sh stop
 
+  kotlin-external-signer-smoke:
+    name: Kotlin UniFFI external signer smoke
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 40
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Kotlin build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjna-java unzip
+
+      - name: Setup Kotlin compiler
+        run: |
+          KOTLIN_VERSION=1.9.24
+          curl -L -o /tmp/kotlin-compiler.zip "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip"
+          unzip -q /tmp/kotlin-compiler.zip -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/kotlinc/bin" >> "$GITHUB_PATH"
+          kotlinc -version
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Build Kotlin external-signer smoke
+        env:
+          JNA_JAR: /usr/share/java/jna.jar
+        run: ./scripts/ci/build_kotlin_external_signer_smoke.sh
+
+      - name: Run Kotlin external-signer smoke
+        env:
+          JNA_JAR: /usr/share/java/jna.jar
+          RESET_DATA: "1"
+          BITCOIND_RPC_USERNAME: user
+          BITCOIND_RPC_PASSWORD: password
+          BITCOIND_RPC_HOST: 127.0.0.1
+          BITCOIND_RPC_PORT: "18443"
+          INDEXER_URL: 127.0.0.1:50001
+          PROXY_ENDPOINT: rpc://127.0.0.1:3000/json-rpc
+        run: ./scripts/ci/run_kotlin_external_signer_smoke.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
   android-build:
     name: Android E2E Build
     runs-on: warp-ubuntu-latest-x64-16x
@@ -296,13 +469,17 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           bindgen --version
 
+      - name: Build host cdylib
+        run: cargo build --release --features "uniffi,vls,vss" --lib
+
       - name: Generate Kotlin Android bindings
-        run: ./scripts/ci/uniffi_generate_kotlin_android.sh
+        run: ./scripts/ci/uniffi_generate_from_library.sh kotlin target/uniffi/kotlin-android target/release/librgb_lightning_node.so uniffi-android.toml
 
       - name: Build Android JNI libs
         env:
           AWS_LC_SYS_EXTERNAL_BINDGEN: "1"
           CMAKE: /usr/bin/cmake
+          UNIFFI_CARGO_FEATURES: "uniffi,vls,vss"
         run: |
           export BINDGEN_EXTRA_CLANG_ARGS_x86_64_linux_android="--sysroot=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           ./scripts/ci/build_android_jni_x86_64.sh
@@ -317,7 +494,7 @@ jobs:
   android-e2e:
     name: Android E2E (${{ matrix.test_class }})
     runs-on: warp-ubuntu-latest-x64-16x
-    timeout-minutes: 60
+    timeout-minutes: 75
     needs: android-build
     strategy:
       fail-fast: false
@@ -369,11 +546,11 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot-save -noaudio -no-boot-anim -camera-back none -memory 4096
           disable-animations: true
           working-directory: android-e2e
           script: |
-            ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=${{ matrix.test_class }}
+            ./gradlew connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.class=${{ matrix.test_class }}
             TEST_EXIT=$?
             adb logcat -d > logcat.txt
             exit $TEST_EXIT
@@ -433,6 +610,47 @@ jobs:
           INDEXER_URL: 127.0.0.1:50001
           PROXY_ENDPOINT: rpc://127.0.0.1:3000/json-rpc
         run: ./scripts/swift_uniffi_e2e.sh
+
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
+
+  swift-external-signer-smoke:
+    name: Swift UniFFI external signer smoke
+    runs-on: warp-ubuntu-latest-x64-16x
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.88.0
+          rustflags: ""
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Start regtest services
+        run: ./regtest.sh start
+
+      - name: Run Swift UniFFI external signer smoke test
+        env:
+          BITCOIND_RPC_USERNAME: user
+          BITCOIND_RPC_PASSWORD: password
+          BITCOIND_RPC_HOST: 127.0.0.1
+          BITCOIND_RPC_PORT: "18443"
+          INDEXER_URL: 127.0.0.1:50001
+          PROXY_ENDPOINT: rpc://127.0.0.1:3000/json-rpc
+        run: ./scripts/ci/swift_uniffi_external_signer_smoke.sh
 
       - name: Stop regtest services
         if: always()

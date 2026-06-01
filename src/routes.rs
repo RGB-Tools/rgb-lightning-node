@@ -1,3 +1,4 @@
+use crate::ldk::write_rgb_payment_info_file;
 use amplify::{map, s};
 use axum::{
     extract::{Multipart, State},
@@ -14,12 +15,10 @@ use lightning::chain::channelmonitor::Balance;
 use lightning::ln::{channelmanager::OptionalOfferPaymentParams, types::ChannelId};
 use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
-use lightning::rgb_utils::{RgbKvStoreExt, STATIC_BLINDING};
+use lightning::rgb_utils::{RgbInfo, RgbKvStoreExt, STATIC_BLINDING};
 use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
-use lightning::sign::EntropySource;
 use lightning::util::config::ChannelConfig;
-use lightning::util::persist::KVStoreSync;
 use lightning::{
     ln::channel_state::ChannelShutdownState, onion_message::messenger::MessageSendInstructions,
 };
@@ -30,7 +29,6 @@ use lightning::{
 };
 use lightning::{
     ln::channelmanager::{PaymentId, RecipientOnionFields, Retry},
-    rgb_utils::{write_rgb_payment_info_file, RgbInfo},
     routing::{
         gossip::NodeId,
         router::{PaymentParameters, RouteParameters},
@@ -40,10 +38,10 @@ use lightning::{
 };
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description, PaymentSecret};
 use regex::Regex;
+use rgb_lib::utils::recipient_id_from_script_buf;
 use rgb_lib::{
     bdk_wallet::keys::bip39::Mnemonic,
-    keys::generate_keys,
-    utils::recipient_id_from_script_buf,
+    keys::{generate_keys, WitnessVersion},
     wallet::{
         rust_only::{
             check_indexer_url as rgb_lib_check_indexer_url,
@@ -72,8 +70,8 @@ use tokio::{
 
 use crate::async_order::{
     read_async_payments_next_hash_index, write_async_payments_next_hash_index,
-    AsyncOrderNewResultWire, AsyncOrderOutboundInvoiceResultWire, ASYNC_ORDER_MAX_HASH_BATCH_SIZE,
-    ASYNC_ORDER_RESPONSE_TIMEOUT_SECS,
+    AsyncOrderNewParamsWire, AsyncOrderNewResultWire, AsyncOrderOutboundInvoiceResultWire,
+    ASYNC_ORDER_MAX_HASH_BATCH_SIZE, ASYNC_ORDER_RESPONSE_TIMEOUT_SECS,
 };
 use crate::core_types::async_order::{
     AsyncOrderNewRequest, AsyncOrderNewResponse, AsyncOrderOutboundInvoiceRequest,
@@ -89,9 +87,10 @@ use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_route, hex_str,
-    hex_str_to_compressed_pubkey, hex_str_to_vec, new_jsonrpc_request_id, open_database_pool,
-    validate_and_parse_description_hash, validate_and_parse_payment_hash,
-    validate_and_parse_payment_preimage, UnlockedAppState, UserOnionMessageContents,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, is_external_signer_mode_configured,
+    new_jsonrpc_request_id, open_database_pool, validate_and_parse_description_hash,
+    validate_and_parse_payment_hash, validate_and_parse_payment_preimage, UnlockedAppState,
+    UserOnionMessageContents,
 };
 use crate::{
     backup::{do_backup, restore_backup},
@@ -1416,14 +1415,37 @@ pub(crate) async fn async_order_new(
         )));
     }
 
-    let params = unlocked_state
-        .async_payments_preimage_root
-        .prepare_async_order_new_params(
-            read_async_payments_next_hash_index(unlocked_state.kv_store.as_ref(), &host_node_id)
-                .map_err(|err| APIError::Unexpected(err.message))?,
-            ASYNC_ORDER_MAX_HASH_BATCH_SIZE,
-        )
-        .map_err(|err| APIError::InvalidRequest(err.message))?;
+    let start_index =
+        read_async_payments_next_hash_index(unlocked_state.kv_store.as_ref(), &host_node_id)
+            .map_err(|err| APIError::Unexpected(err.message))?;
+    let params = if unlocked_state.external_signer_mode {
+        let external_signer = unlocked_state
+            .external_signer
+            .as_ref()
+            .ok_or_else(|| APIError::Unexpected("external signer missing".to_string()))?;
+        let hashes = external_signer
+            .prepare_async_payments_hashes(
+                hex_str(&host_node_id.serialize()),
+                start_index,
+                ASYNC_ORDER_MAX_HASH_BATCH_SIZE as u32,
+            )
+            .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))?;
+        AsyncOrderNewParamsWire {
+            protocol_version: 1,
+            hashes: hashes
+                .into_iter()
+                .map(|entry| crate::async_order::AsyncOrderNewHashWire {
+                    hash_index: entry.hash_index,
+                    payment_hash: entry.payment_hash_hex,
+                })
+                .collect(),
+        }
+    } else {
+        unlocked_state
+            .async_payments_preimage_root
+            .prepare_async_order_new_params(start_index, ASYNC_ORDER_MAX_HASH_BATCH_SIZE)
+            .map_err(|err| APIError::InvalidRequest(err.message))?
+    };
     let hashes = params.hashes.clone();
     let first_hash_index = hashes
         .first()
@@ -1719,6 +1741,11 @@ pub(crate) async fn change_password(
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let _guard = state.check_locked().await?;
+        if is_external_signer_mode_configured(&state)? {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "change_password".to_string(),
+            ));
+        }
 
         check_password_strength(payload.new_password.clone())?;
 
@@ -2053,13 +2080,30 @@ pub(crate) async fn create_utxos(
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        unlocked_state.rgb_create_utxos(
-            payload.up_to,
-            payload.num.unwrap_or(UTXO_NUM),
-            payload.size.unwrap_or(UTXO_SIZE_SAT),
-            payload.fee_rate,
-            payload.skip_sync,
-        )?;
+        let num = payload.num.unwrap_or(UTXO_NUM);
+        let size = payload.size.unwrap_or(UTXO_SIZE_SAT);
+        if unlocked_state.external_signer_mode {
+            let unsigned_psbt = unlocked_state.rgb_create_utxos_begin(
+                payload.up_to,
+                num,
+                size,
+                payload.fee_rate,
+                payload.skip_sync,
+            )?;
+            let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).map_err(|e| {
+                tracing::error!("rgb_sign_psbt failed in external signer mode (create_utxos): {e}");
+                APIError::from(e)
+            })?;
+            unlocked_state.rgb_create_utxos_end(signed_psbt, payload.skip_sync)?;
+        } else {
+            unlocked_state.rgb_create_utxos(
+                payload.up_to,
+                num,
+                size,
+                payload.fee_rate,
+                payload.skip_sync,
+            )?;
+        }
         tracing::debug!("UTXO creation complete");
 
         Ok(Json(EmptyResponse {}))
@@ -2380,6 +2424,11 @@ pub(crate) async fn inflate(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+        if unlocked_state.external_signer_mode {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "inflate is not supported in external signer mode".to_string(),
+            ));
+        }
 
         if *unlocked_state.rgb_send_lock.lock().unwrap() {
             return Err(APIError::OpenChannelInProgress);
@@ -2410,6 +2459,9 @@ pub(crate) async fn init(
 ) -> Result<Json<InitResponse>, APIError> {
     no_cancel(async move {
         let _unlocked_state = state.check_locked().await?;
+        if is_external_signer_mode_configured(&state)? {
+            return Err(APIError::ExternalSignerRequired);
+        }
 
         check_password_strength(payload.password.clone())?;
 
@@ -2419,13 +2471,7 @@ pub(crate) async fn init(
             Some(mnemonic) => Mnemonic::from_str(&mnemonic)
                 .map_err(|e| APIError::InvalidMnemonic(e.to_string()))?
                 .to_string(),
-            None => {
-                generate_keys(
-                    state.static_state.network,
-                    rgb_lib::keys::WitnessVersion::Taproot,
-                )
-                .mnemonic
-            }
+            None => generate_keys(state.static_state.network, WitnessVersion::Taproot).mnemonic,
         };
 
         encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &state.db())?;
@@ -2471,6 +2517,11 @@ pub(crate) async fn issue_asset_cfa(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+        if unlocked_state.external_signer_mode {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "asset issuance is not supported in external signer mode".to_string(),
+            ));
+        }
 
         if *unlocked_state.rgb_send_lock.lock().unwrap() {
             return Err(APIError::OpenChannelInProgress);
@@ -2506,6 +2557,11 @@ pub(crate) async fn issue_asset_ifa(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+        if unlocked_state.external_signer_mode {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "asset issuance is not supported in external signer mode".to_string(),
+            ));
+        }
 
         if *unlocked_state.rgb_send_lock.lock().unwrap() {
             return Err(APIError::OpenChannelInProgress);
@@ -2534,6 +2590,11 @@ pub(crate) async fn issue_asset_nia(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+        if unlocked_state.external_signer_mode {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "asset issuance is not supported in external signer mode".to_string(),
+            ));
+        }
 
         if *unlocked_state.rgb_send_lock.lock().unwrap() {
             return Err(APIError::OpenChannelInProgress);
@@ -2560,6 +2621,11 @@ pub(crate) async fn issue_asset_uda(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+        if unlocked_state.external_signer_mode {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "asset issuance is not supported in external signer mode".to_string(),
+            ));
+        }
 
         if *unlocked_state.rgb_send_lock.lock().unwrap() {
             return Err(APIError::OpenChannelInProgress);
@@ -2616,7 +2682,7 @@ pub(crate) async fn keysend(
         }
 
         let payment_preimage =
-            PaymentPreimage(unlocked_state.keys_manager.get_secure_random_bytes());
+            PaymentPreimage(unlocked_state.entropy_source.get_secure_random_bytes());
         let payment_hash_inner = Sha256::hash(&payment_preimage.0[..]).to_byte_array();
         let payment_id = PaymentId(payment_hash_inner);
         let payment_hash = PaymentHash(payment_hash_inner);
@@ -2662,7 +2728,7 @@ pub(crate) async fn keysend(
                 rgb_amount,
                 false,
                 false,
-                &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+                unlocked_state.kv_store.as_ref(),
             );
         }
 
@@ -3197,7 +3263,7 @@ pub(crate) async fn ln_invoice(
                 amt_msat: payload.amt_msat,
                 created_at,
                 updated_at: created_at,
-                payee_pubkey: unlocked_state.channel_manager.get_our_node_id(),
+                payee_pubkey: unlocked_state.runtime_node_id(),
                 expires_at: Some(created_at + payload.expiry_sec as u64),
                 claim_deadline_height: None,
                 invoice_type: Some(invoice_type),
@@ -3310,7 +3376,7 @@ pub(crate) async fn maker_execute(
         let first_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
-            unlocked_state.channel_manager.get_our_node_id(),
+            unlocked_state.runtime_node_id(),
             taker_pk,
             if swap_info.is_to_btc() {
                 Some(swap_info.qty_to + HTLC_MIN_MSAT)
@@ -3328,7 +3394,7 @@ pub(crate) async fn maker_execute(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
             taker_pk,
-            unlocked_state.channel_manager.get_our_node_id(),
+            unlocked_state.runtime_node_id(),
             if swap_info.is_to_btc() || swap_info.is_asset_asset() {
                 Some(HTLC_MIN_MSAT)
             } else {
@@ -3395,7 +3461,7 @@ pub(crate) async fn maker_execute(
             }],
             route_params: Some(RouteParameters {
                 payment_params: PaymentParameters::for_keysend(
-                    unlocked_state.channel_manager.get_our_node_id(),
+                    unlocked_state.runtime_node_id(),
                     DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
                     false,
                 ),
@@ -3416,7 +3482,7 @@ pub(crate) async fn maker_execute(
                 swap_info.qty_to,
                 true,
                 false,
-                &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+                unlocked_state.kv_store.as_ref(),
             );
         }
 
@@ -3588,7 +3654,7 @@ pub(crate) async fn node_info(
     let network_channels = graph_lock.channels().len();
 
     Ok(Json(NodeInfoResponse {
-        pubkey: unlocked_state.channel_manager.get_our_node_id().to_string(),
+        pubkey: unlocked_state.runtime_node_pubkey(),
         num_channels: chans.len(),
         num_usable_channels: chans.iter().filter(|c| c.is_usable).count(),
         local_balance_sat,
@@ -3849,13 +3915,14 @@ pub(crate) async fn open_channel(
                 let mut fake_p2wsh: [u8; 34] = [0; 34];
                 fake_p2wsh[1] = 32;
                 let script_buf = ScriptBuf::from_bytes(fake_p2wsh.to_vec());
-                let recipient_id = recipient_id_from_script_buf(script_buf, state.static_state.network);
+                let recipient_id =
+                    recipient_id_from_script_buf(script_buf, state.static_state.network);
                 let asset_id = contract_id.to_string();
                 let assignment = match schema {
                     RgbLibAssetSchema::Nia | RgbLibAssetSchema::Cfa | RgbLibAssetSchema::Ifa => {
-                        Assignment::Fungible(*asset_amount)
+                        RgbLibAssignment::Fungible(*asset_amount)
                     }
-                    RgbLibAssetSchema::Uda => Assignment::NonFungible,
+                    RgbLibAssetSchema::Uda => RgbLibAssignment::NonFungible,
                 };
 
                 let recipient_map = map! {
@@ -3865,7 +3932,7 @@ pub(crate) async fn open_channel(
                             amount_sat: payload.capacity_sat,
                             blinding: Some(STATIC_BLINDING + 1),
                         }),
-                        assignment: assignment.into(),
+                        assignment,
                         transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
                 }]};
 
@@ -3900,9 +3967,7 @@ pub(crate) async fn open_channel(
                 Some(id) => id,
                 None => loop {
                     let mut bytes = [0u8; 32];
-                    bytes.copy_from_slice(
-                        &unlocked_state.keys_manager.get_secure_random_bytes()[..32],
-                    );
+                    bytes.copy_from_slice(&unlocked_state.entropy_source.get_secure_random_bytes());
                     let candidate = ChannelId::from_bytes(bytes);
                     if !unlocked_state.channel_ids().contains_key(&candidate)
                         && !unlocked_state
@@ -4063,6 +4128,11 @@ pub(crate) async fn restore(
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let _unlocked_state = state.check_locked().await?;
+        if is_external_signer_mode_configured(&state)? {
+            return Err(APIError::UnsupportedInExternalSignerMode(
+                "restore".to_string(),
+            ));
+        }
 
         check_already_initialized(&state.db())?;
 
@@ -4154,12 +4224,25 @@ pub(crate) async fn send_btc(
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        let txid = unlocked_state.rgb_send_btc(
-            payload.address,
-            payload.amount,
-            payload.fee_rate,
-            payload.skip_sync,
-        )?;
+        let txid = if unlocked_state.external_signer_mode {
+            let unsigned_psbt = unlocked_state.rgb_send_btc_begin(
+                payload.address,
+                payload.amount,
+                payload.fee_rate,
+            )?;
+            let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).map_err(|e| {
+                tracing::error!("rgb_sign_psbt failed during send_btc (PSBT path): {e}");
+                APIError::from(e)
+            })?;
+            unlocked_state.rgb_send_btc_end(signed_psbt)?
+        } else {
+            unlocked_state.rgb_send_btc(
+                payload.address,
+                payload.amount,
+                payload.fee_rate,
+                payload.skip_sync,
+            )?
+        };
 
         Ok(Json(SendBtcResponse { txid }))
     })
@@ -4243,7 +4326,7 @@ pub(crate) async fn send_payment(
         let created_at = get_current_timestamp();
 
         let (payment_id, payment_hash, payment_secret) = if let Ok(offer) = Offer::from_str(&payload.invoice) {
-            let random_bytes = unlocked_state.keys_manager.get_secure_random_bytes();
+            let random_bytes = unlocked_state.entropy_source.get_secure_random_bytes();
             let payment_id = PaymentId(random_bytes);
 
             let amt_msat = match (offer.amount(), payload.amt_msat) {
@@ -4394,7 +4477,7 @@ pub(crate) async fn send_payment(
                     rgb_amount,
                     false,
                     false,
-                    &(Arc::clone(&unlocked_state.kv_store) as Arc<dyn KVStoreSync + Send + Sync>),
+                    unlocked_state.kv_store.as_ref(),
                 );
             }
 
@@ -4454,18 +4537,49 @@ pub(crate) async fn send_rgb(
             })
             .collect();
 
-        let unlocked_state_copy = unlocked_state.clone();
-        let send_result = tokio::task::spawn_blocking(move || {
-            unlocked_state_copy.rgb_send(
-                recipient_map,
-                payload.donation,
-                payload.fee_rate,
-                payload.min_confirmations,
-                payload.expiration_timestamp,
-            )
-        })
-        .await
-        .unwrap()?;
+        let send_result = if unlocked_state.external_signer_mode {
+            let unlocked_state_copy = unlocked_state.clone();
+            let begin_result = tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_send_begin(
+                    recipient_map,
+                    payload.donation,
+                    payload.fee_rate,
+                    payload.min_confirmations,
+                    payload.expiration_timestamp,
+                    false,
+                    None,
+                )
+            })
+            .await
+            .unwrap()?;
+            let unlocked_state_copy = unlocked_state.clone();
+            let signed_psbt = tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_sign_psbt(begin_result.psbt)
+            })
+            .await
+            .unwrap()
+            .map_err(|e| {
+                tracing::error!("rgb_sign_psbt failed during RGB send: {e}");
+                APIError::from(e)
+            })?;
+            let unlocked_state_copy = unlocked_state.clone();
+            tokio::task::spawn_blocking(move || unlocked_state_copy.rgb_send_end(signed_psbt))
+                .await
+                .unwrap()?
+        } else {
+            let unlocked_state_copy = unlocked_state.clone();
+            tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_send(
+                    recipient_map,
+                    payload.donation,
+                    payload.fee_rate,
+                    payload.min_confirmations,
+                    payload.expiration_timestamp,
+                )
+            })
+            .await
+            .unwrap()?
+        };
 
         Ok(Json(SendRgbResponse {
             txid: send_result.txid,
@@ -4495,10 +4609,7 @@ pub(crate) async fn sign_message(
     let unlocked_state = guard.as_ref().unwrap();
 
     let message = payload.message.trim();
-    let signed_message = lightning::util::message_signing::sign(
-        &message.as_bytes()[message.len()..],
-        &unlocked_state.keys_manager.get_node_secret_key(),
-    );
+    let signed_message = unlocked_state.sign_node_message(message.as_bytes())?;
 
     Ok(Json(SignMessageResponse { signed_message }))
 }
@@ -4557,6 +4668,10 @@ pub(crate) async fn unlock(
 ) -> Result<Json<EmptyResponse>, APIError> {
     tracing::info!("Unlock started");
     no_cancel(async move {
+        if is_external_signer_mode_configured(&state)? {
+            return Err(APIError::ExternalSignerRequired);
+        }
+
         match state.check_locked().await {
             Ok(unlocked_state) => {
                 state.update_changing_state(true);
@@ -4579,14 +4694,19 @@ pub(crate) async fn unlock(
         };
 
         tracing::debug!("Starting LDK...");
-        let (new_ldk_background_services, new_unlocked_app_state) =
-            match start_ldk(state.clone(), mnemonic, payload.into()).await {
-                Ok((nlbs, nuap)) => (nlbs, nuap),
-                Err(e) => {
-                    state.update_changing_state(false);
-                    return Err(e);
-                }
-            };
+        let (new_ldk_background_services, new_unlocked_app_state) = match start_ldk(
+            state.clone(),
+            crate::core_types::NodeKeySource::InternalMnemonic(mnemonic),
+            payload.into(),
+        )
+        .await
+        {
+            Ok((nlbs, nuap)) => (nlbs, nuap),
+            Err(e) => {
+                state.update_changing_state(false);
+                return Err(e);
+            }
+        };
         tracing::debug!("LDK started");
 
         state

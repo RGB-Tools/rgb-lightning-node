@@ -11,6 +11,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [features]
 default = []
 test-utils = []
+vls = ["signer-external/with-vls"]
 vss = ["rgb-lib/vss", "dep:vss-client"]
 
 [dependencies]
@@ -26,20 +27,21 @@ biscuit-auth = "6.0.0"
 bitcoin = "0.32"
 bitcoin-bech32 = "0.13"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
+chacha20 = "0.9.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = "4.5.20"
 dirs = "5.0.1"
 futures = "0.3"
 hex = { package = "hex-conservative", version = "0.3.0", default-features = false }
-lightning = { version = "0.2.0", path = "./rust-lightning/lightning", features = ["dnssec"] }
-lightning-background-processor = { version = "0.2.0", path = "./rust-lightning/lightning-background-processor" }
+lightning = { version = "0.2.0", features = ["dnssec"] }
+lightning-background-processor = { version = "0.2.0" }
 lightning-block-sync = { version = "0.2.0", features = ["rpc-client", "tokio"] }
-lightning-dns-resolver = { version = "0.3.0", path = "./rust-lightning/lightning-dns-resolver" }
-lightning-invoice = { version = "0.34.0", features = ["std"], path = "./rust-lightning/lightning-invoice" }
+lightning-dns-resolver = { version = "0.3.0" }
+lightning-invoice = { version = "0.34.0", features = ["std"] }
 lightning-macros = { version = "0.2.0" }
 lightning-net-tokio = { version = "0.2.0" }
-lightning-persister = { version = "0.2.0", path = "./rust-lightning/lightning-persister", features = ["tokio"] }
-lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/lightning-rapid-gossip-sync" }
+lightning-persister = { version = "0.2.0", features = ["tokio"] }
+lightning-rapid-gossip-sync = { version = "0.2.0" }
 magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
@@ -48,7 +50,10 @@ rgb-lib = { git = "https://github.com/UTEXO-Protocol/rgb-lib.git", branch = "dev
     "electrum",
     "esplora",
 ] }
+psrgbt = { package = "rgb-psbt-utils", version = "=0.11.1-rc.10", default-features = false }
 rln-migration = { path = "migration" }
+# Pinned fork/branch for RGB compatibility work; CI and clones do not require a sibling checkout.
+signer-external = { git = "https://github.com/UTEXO-Protocol/rln-external-signer.git", branch = "main", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 sea-orm = { version = "1.1.19", default-features = false, features = [
     "macros",
@@ -59,6 +64,7 @@ sea-orm = { version = "1.1.19", default-features = false, features = [
 scrypt = "0.11.0"
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"
+prost = "0.13"
 tempfile = "3.14.0"
 thiserror = "2.0"
 time = { version = "0.3.36", features = ["std"] }
@@ -70,6 +76,13 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 typenum = "1.17.0"
 uuid = { version = "1.11.0", default-features = false, features = ["v4"] }
+# `vls-protocol` remains on crates.io; only `vls-core` and
+# `vls-protocol-signer` need the RGB compatibility forks.
+vls-protocol = "0.14.0"
+vls-protocol-client = "0.14.0"
+vls-protocol-signer = "0.14.0"
+# Use the remote RGB compatibility fork for `vls-core`.
+lightning-signer = { package = "vls-core", version = "0.14.0", features = ["rgb-commitment-compat"] }
 walkdir = "2.5.0"
 uniffi = { version = "0.28.3", features = ["build"], optional = true }
 vss-client = { package = "vss-client-ng", git = "https://github.com/lightningdevkit/vss-client", rev = "ad63805047561dcf3117cd992ad6d8bc3881adef", default-features = false, features = ["sigs-auth"], optional = true }
@@ -89,8 +102,16 @@ uniffi = { version = "0.28.3", features = ["build"], optional = true }
 
 [patch.crates-io]
 lightning = { path = "./rust-lightning/lightning" }
-lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
-rgb-lib = { git = "https://github.com/UTEXO-Protocol/rgb-lib", branch = "dev" }
+lightning-background-processor = { path = "./rust-lightning/lightning-background-processor" }
+lightning-block-sync = { path = "./rust-lightning/lightning-block-sync" }
+lightning-dns-resolver = { path = "./rust-lightning/lightning-dns-resolver" }
+lightning-invoice = { path = "./rust-lightning/lightning-invoice" }
+lightning-net-tokio = { path = "./rust-lightning/lightning-net-tokio" }
+lightning-persister = { path = "./rust-lightning/lightning-persister" }
+lightning-rapid-gossip-sync = { path = "./rust-lightning/lightning-rapid-gossip-sync" }
+# Use the UTEXO RGB compatibility branches; no sibling local checkout required.
+vls-core = { git = "https://github.com/UTEXO-Protocol/vls-core.git", branch = "feat/rgb-compatibility" }
+vls-protocol-signer = { git = "https://github.com/UTEXO-Protocol/vls-protocol-signer.git", branch = "feat/rgb-compatibility" }
 
 [lints.rust.unexpected_cfgs]
 level = "allow"
@@ -104,7 +125,9 @@ name = "lib_core"
 path = "src/test/lib_core.rs"
 required-features = ["uniffi", "test-utils"]
 
+# Needs `uniffi` + `test-utils` + `vls`: external-signer `lib_sdk` tests use `NativeExternalSigner`
+# (real PSBT signing) behind a tunable `ExternalSignerHost` (same protobuf wire as production).
 [[test]]
 name = "lib_sdk"
 path = "src/test/lib_sdk/mod.rs"
-required-features = ["uniffi"]
+required-features = ["uniffi", "test-utils", "vls"]

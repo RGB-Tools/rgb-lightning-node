@@ -24,8 +24,40 @@ pub enum RlnError {
     NotFound,
     #[error("conflict with current node state")]
     Conflict,
+    #[error("failed bitcoind connection")]
+    FailedBitcoindConnection,
+    #[error("failed bdk sync")]
+    FailedBdkSync,
+    #[error("failed broadcast")]
+    FailedBroadcast,
+    #[error("failed peer connection")]
+    FailedPeerConnection,
+    #[error("insufficient capacity")]
+    InsufficientCapacity,
+    #[error("insufficient funds")]
+    InsufficientFunds,
+    #[error("no available utxos")]
+    NoAvailableUtxos,
+    #[error("no route")]
+    NoRoute,
+    #[error("external signer required")]
+    ExternalSignerRequired,
+    #[error("external signer mismatch")]
+    ExternalSignerMismatch,
+    #[error("external signer unavailable")]
+    ExternalSignerUnavailable,
+    #[error("external signer protocol error")]
+    ExternalSignerProtocolError,
+    #[error("unsupported in external signer mode")]
+    UnsupportedInExternalSignerMode,
     #[error("internal error")]
     Internal,
+}
+
+impl From<uniffi::UnexpectedUniFFICallbackError> for RlnError {
+    fn from(_: uniffi::UnexpectedUniFFICallbackError) -> Self {
+        Self::Internal
+    }
 }
 
 pub struct NodeInfo {
@@ -434,6 +466,15 @@ pub struct SdkUnlockRequest {
     pub proxy_endpoint: Option<String>,
     pub announce_addresses: Vec<String>,
     pub announce_alias: Option<String>,
+}
+
+pub struct SdkExternalSignerBootstrap {
+    pub node_id: String,
+    pub account_xpub_vanilla: String,
+    pub account_xpub_colored: String,
+    pub master_fingerprint: String,
+    pub protocol_version: String,
+    pub api_level: u32,
 }
 
 pub struct SdkVssClearFenceRequest {

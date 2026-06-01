@@ -35,6 +35,8 @@ interface SdkNode {
     [Throws=RlnError]
     string init(string password, string? mnemonic);
     [Throws=RlnError]
+    void init_with_external_signer(SdkExternalSignerBootstrap bootstrap);
+    [Throws=RlnError]
     void unlock(SdkUnlockRequest request);
     [Throws=RlnError]
     void vss_clear_fence(SdkVssClearFenceRequest request);
@@ -126,6 +128,19 @@ enum RlnError {
     "InvalidRequest",
     "NotFound",
     "Conflict",
+    "FailedBitcoindConnection",
+    "FailedBdkSync",
+    "FailedBroadcast",
+    "FailedPeerConnection",
+    "InsufficientCapacity",
+    "InsufficientFunds",
+    "NoAvailableUtxos",
+    "NoRoute",
+    "ExternalSignerRequired",
+    "ExternalSignerMismatch",
+    "ExternalSignerUnavailable",
+    "ExternalSignerProtocolError",
+    "UnsupportedInExternalSignerMode",
     "Internal",
 };
 
@@ -554,6 +569,15 @@ dictionary SdkUnlockRequest {
     string? proxy_endpoint;
     sequence<string> announce_addresses;
     string? announce_alias;
+};
+
+dictionary SdkExternalSignerBootstrap {
+    string node_id;
+    string account_xpub_vanilla;
+    string account_xpub_colored;
+    string master_fingerprint;
+    string protocol_version;
+    u32 api_level;
 };
 
 dictionary SdkVssClearFenceRequest {

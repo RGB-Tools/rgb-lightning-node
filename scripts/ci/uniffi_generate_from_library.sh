@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate Kotlin or Swift bindings from a built rgb_lightning_node library so that
 # proc-macro-only exports (e.g. NativeExternalSigner behind `vls`) are included.
-# Requires: `cargo build --release --features "uniffi,vls" --lib` first.
+# Requires: `cargo build --release --features "uniffi,vls,vss" --lib` first.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

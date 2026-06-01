@@ -12,9 +12,9 @@ use lightning::routing::router::{
     Payee, PaymentParameters, Route, RouteHint, RouteParameters, Router as _,
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA, MAX_PATH_LENGTH_ESTIMATE,
 };
+use lightning::sign::NodeSigner;
 use lightning::{
     onion_message::packet::OnionMessageContents,
-    sign::KeysManager,
     types::payment::{PaymentHash, PaymentPreimage},
     util::persist::KVStoreSync,
     util::ser::{Writeable, Writer},
@@ -40,6 +40,10 @@ use crate::async_order::{AsyncOrderMessageHandler, AsyncPaymentsPreimageRoot};
 use crate::core_types::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::ldk::{ChannelIdsMap, Router, VirtualChannelDraftStore, VirtualChannelSessionStore};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::signer::{
+    read_key_source_file, ActiveSignerRef, ExternalSigner, ExternalSignerAttachment,
+    RlnEntropySource,
+};
 use crate::{
     args::UserArgs,
     disk::FilesystemLogger,
@@ -67,6 +71,8 @@ pub(crate) struct AppState {
     pub(crate) cancel_token: CancellationToken,
     pub(crate) unlocked_app_state: Arc<TokioMutex<Option<Arc<UnlockedAppState>>>>,
     pub(crate) ldk_background_services: Arc<Mutex<Option<LdkBackgroundServices>>>,
+    #[allow(dead_code)]
+    pub(crate) attached_external_signer: Arc<Mutex<Option<ExternalSignerAttachment>>>,
     pub(crate) changing_state: Mutex<bool>,
     pub(crate) root_public_key: Option<biscuit_auth::PublicKey>,
     pub(crate) revoked_tokens: Arc<Mutex<HashSet<Vec<u8>>>>,
@@ -89,6 +95,19 @@ impl AppState {
         &self,
     ) -> MutexGuard<'_, Option<LdkBackgroundServices>> {
         self.ldk_background_services.lock().unwrap()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_attached_external_signer(
+        &self,
+    ) -> MutexGuard<'_, Option<ExternalSignerAttachment>> {
+        self.attached_external_signer.lock().unwrap()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_attached_external_signer(&self, updated: Option<ExternalSignerAttachment>) {
+        let mut attached_external_signer = self.get_attached_external_signer();
+        *attached_external_signer = updated;
     }
 
     pub(crate) async fn get_unlocked_app_state(
@@ -135,7 +154,8 @@ impl StaticState {
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
-    pub(crate) keys_manager: Arc<KeysManager>,
+    pub(crate) signer: ActiveSignerRef,
+    pub(crate) entropy_source: Arc<dyn RlnEntropySource>,
     pub(crate) network_graph: Arc<NetworkGraph>,
     pub(crate) chain_monitor: Arc<ChainMonitor>,
     pub(crate) onion_messenger: Arc<OnionMessenger>,
@@ -153,6 +173,9 @@ pub(crate) struct UnlockedAppState {
     pub(crate) rgb_send_lock: Arc<Mutex<bool>>,
     pub(crate) channel_ids_map: Arc<Mutex<ChannelIdsMap>>,
     pub(crate) proxy_endpoint: String,
+    pub(crate) external_signer_mode: bool,
+    pub(crate) external_signer: Option<Arc<ExternalSigner>>,
+    pub(crate) external_node_id: Option<String>,
     pub(crate) virtual_channel_draft_store: Arc<Mutex<VirtualChannelDraftStore>>,
     pub(crate) virtual_channel_session_store: Arc<Mutex<VirtualChannelSessionStore>>,
 }
@@ -189,6 +212,27 @@ impl UnlockedAppState {
     ) -> MutexGuard<'_, VirtualChannelSessionStore> {
         self.virtual_channel_session_store.lock().unwrap()
     }
+
+    pub(crate) fn sign_node_message(&self, message: &[u8]) -> Result<String, APIError> {
+        self.signer
+            .sign_message(message)
+            .map_err(|_| APIError::Unexpected("failed to sign message".to_string()))
+    }
+
+    pub(crate) fn runtime_node_pubkey(&self) -> String {
+        self.external_node_id
+            .clone()
+            .unwrap_or_else(|| self.channel_manager.get_our_node_id().to_string())
+    }
+
+    pub(crate) fn runtime_node_id(&self) -> PublicKey {
+        if let Some(node_id) = &self.external_node_id {
+            if let Ok(pubkey) = PublicKey::from_str(node_id) {
+                return pubkey;
+            }
+        }
+        self.channel_manager.get_our_node_id()
+    }
 }
 
 #[derive(Debug)]
@@ -210,6 +254,12 @@ impl Writeable for UserOnionMessageContents {
     fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
         w.write_all(&self.data)
     }
+}
+
+pub(crate) fn is_external_signer_mode_configured(state: &Arc<AppState>) -> Result<bool, APIError> {
+    Ok(read_key_source_file(&state.static_state.storage_dir_path)
+        .map_err(|e| APIError::ExternalSignerProtocolError(e.to_string()))?
+        .is_some())
 }
 
 pub(crate) fn check_already_initialized(database: &DatabaseConnection) -> Result<(), APIError> {
@@ -502,6 +552,7 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         cancel_token,
         unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
+        attached_external_signer: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
         root_public_key: args.root_public_key,
         revoked_tokens: Arc::new(Mutex::new(HashSet::new())),

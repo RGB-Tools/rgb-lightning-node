@@ -3,11 +3,11 @@ use once_cell::sync::Lazy;
 pub(crate) use rgb_lightning_node::{
     AssetBalanceInfo, AssetRecipients, AssignmentKind, Channel, ContractId, HtlcStatus,
     InvoiceStatus, LnInvoiceRequest, Payment, PaymentHash, RecipientId, RgbRecipient,
-    SdkCloseChannelRequest, SdkCreateUtxosRequest, SdkInitRequest, SdkIssueAssetCfaRequest,
-    SdkIssueAssetNiaRequest, SdkKeysendRequest, SdkNode, SdkOpenChannelRequest,
-    SdkRefreshTransfersRequest, SdkRgbInvoiceRequest, SdkSendBtcRequest, SdkSendPaymentRequest,
-    SdkUnlockRequest, SdkVssClearFenceRequest, SendRgbRequest, TransactionType, TransportEndpoint,
-    WitnessData,
+    SdkCloseChannelRequest, SdkCreateUtxosRequest, SdkExternalSignerBootstrap, SdkInitRequest,
+    SdkIssueAssetCfaRequest, SdkIssueAssetNiaRequest, SdkKeysendRequest, SdkNode,
+    SdkOpenChannelRequest, SdkRefreshTransfersRequest, SdkRgbInvoiceRequest, SdkSendBtcRequest,
+    SdkSendPaymentRequest, SdkUnlockRequest, SdkVssClearFenceRequest, SendRgbRequest,
+    TransactionType, TransportEndpoint, WitnessData,
 };
 use std::fs;
 use std::path::{Path, PathBuf};

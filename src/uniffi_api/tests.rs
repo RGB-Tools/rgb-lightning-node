@@ -30,6 +30,17 @@ mod uniffi_smoke_tests {
         assert!(matches!(payment, Err(RlnError::NotInitialized)));
         let swap = sdk_get_swap(lightning::types::payment::PaymentHash([0u8; 32]), true);
         assert!(matches!(swap, Err(RlnError::NotInitialized)));
+        let bootstrap = SdkExternalSignerBootstrap {
+            node_id: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+                .to_string(),
+            account_xpub_vanilla: "xpub661MyMwAqRbcF9i3M7GQw1k8f7mR8n4x9nW2f2dJ8f1h9sP2b3K4L5M6N7P8Q9R0S1T2U3V4W5X6Y7Z8".to_string(),
+            account_xpub_colored: "xpub661MyMwAqRbcF9i3M7GQw1k8f7mR8n4x9nW2f2dJ8f1h9sP2b3K4L5M6N7P8Q9R0S1T2U3V4W5X6Y7Z8".to_string(),
+            master_fingerprint: "00000000".to_string(),
+            protocol_version: "1".to_string(),
+            api_level: 1,
+        };
+        let init_external = sdk_init_with_external_signer(bootstrap);
+        assert!(matches!(init_external, Err(RlnError::NotInitialized)));
 
         let invoice = sdk_ln_invoice(LnInvoiceRequest {
             amt_msat: Some(1000),
@@ -103,6 +114,7 @@ mod uniffi_smoke_tests {
             cancel_token: CancellationToken::new(),
             unlocked_app_state: Arc::new(TokioMutex::new(None)),
             ldk_background_services: Arc::new(Mutex::new(None)),
+            attached_external_signer: Arc::new(Mutex::new(None)),
             changing_state: Mutex::new(false),
             root_public_key: None,
             revoked_tokens: Arc::new(Mutex::new(HashSet::new())),
@@ -262,6 +274,28 @@ mod uniffi_smoke_tests {
             RlnError::Conflict
         ));
         assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::FailedBitcoindConnection(
+                "down".to_string()
+            )),
+            RlnError::FailedBitcoindConnection
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::FailedBdkSync(
+                "sync".to_string()
+            )),
+            RlnError::FailedBdkSync
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::FailedBroadcast(
+                "broadcast".to_string()
+            )),
+            RlnError::FailedBroadcast
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::FailedPeerConnection),
+            RlnError::FailedPeerConnection
+        ));
+        assert!(matches!(
             super::super::state::map_api_error(crate::error::APIError::IO(std::io::Error::other(
                 "invalid"
             ))),
@@ -275,11 +309,49 @@ mod uniffi_smoke_tests {
         ));
         assert!(matches!(
             super::super::state::map_api_error(crate::error::APIError::NoAvailableUtxos),
-            RlnError::Conflict
+            RlnError::NoAvailableUtxos
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::InsufficientFunds(42)),
+            RlnError::InsufficientFunds
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::InsufficientCapacity(42)),
+            RlnError::InsufficientCapacity
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::NoRoute),
+            RlnError::NoRoute
         ));
         assert!(matches!(
             super::super::state::map_api_error(crate::error::APIError::NoValidTransportEndpoint),
             RlnError::Conflict
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::ExternalSignerRequired),
+            RlnError::ExternalSignerRequired
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::ExternalSignerMismatch),
+            RlnError::ExternalSignerMismatch
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(crate::error::APIError::ExternalSignerUnavailable(
+                "down".to_string()
+            )),
+            RlnError::ExternalSignerUnavailable
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(
+                crate::error::APIError::ExternalSignerProtocolError("decode".to_string())
+            ),
+            RlnError::ExternalSignerProtocolError
+        ));
+        assert!(matches!(
+            super::super::state::map_api_error(
+                crate::error::APIError::UnsupportedInExternalSignerMode("x".to_string())
+            ),
+            RlnError::UnsupportedInExternalSignerMode
         ));
         assert!(matches!(
             super::super::state::map_api_error(crate::error::APIError::WrongPassword),

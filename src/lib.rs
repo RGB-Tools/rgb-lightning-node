@@ -23,6 +23,9 @@ mod rgb;
 mod routes;
 mod runtime;
 mod sdk;
+mod signer;
+#[cfg(all(feature = "uniffi", feature = "test-utils"))]
+pub mod signer_integration_wire;
 mod swap;
 mod synced_kv_store;
 #[cfg(feature = "test-utils")]

@@ -8,8 +8,14 @@ plugins {
     id("org.jreleaser") version "1.19.0"
 }
 
-group = providers.gradleProperty("GROUP_ID").orElse("org.utexo").get()
+group = providers.gradleProperty("GROUP_ID").orElse("com.utexo").get()
 version = providers.gradleProperty("VERSION_NAME").orElse("0.0.0-dev").get()
+
+dependencies {
+    // UniFFI Kotlin bindings reference Pointer via JNA and Android API annotations.
+    api("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("androidx.annotation:annotation:1.9.1")
+}
 
 val generatedBindingsDir = layout.projectDirectory.dir("../../target/uniffi/kotlin-android")
 val generatedJniDir = layout.projectDirectory.dir("../../target/uniffi/kotlin-android/jniLibs")
@@ -17,6 +23,15 @@ val generatedJniDir = layout.projectDirectory.dir("../../target/uniffi/kotlin-an
 android {
     namespace = "org.utexo.rgblightningnode"
     compileSdk = 34
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
     defaultConfig {
         minSdk = 24
@@ -98,7 +113,7 @@ jreleaser {
         licenseUrl.set("https://spdx.org/licenses/MIT.html")
 
         java {
-            groupId.set(providers.gradleProperty("GROUP_ID").orElse("org.utexo"))
+            groupId.set(providers.gradleProperty("GROUP_ID").orElse("com.utexo"))
             version.set("17")
         }
     }

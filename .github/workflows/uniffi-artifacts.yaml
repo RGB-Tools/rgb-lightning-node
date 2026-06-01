@@ -28,7 +28,7 @@ jobs:
           rustflags: ""
 
       - name: Run library-only test suite
-        run: cargo test --features "uniffi,vss,test-utils" --test lib_core
+        run: cargo test --features "uniffi,vls,vss,test-utils" --test lib_core
 
   kotlin-jvm:
     name: Kotlin JVM (Linux host)
@@ -47,7 +47,7 @@ jobs:
           rustflags: ""
 
       - name: Build host cdylib
-        run: cargo build --release --features uniffi,vss --lib
+        run: cargo build --release --features "uniffi,vls,vss" --lib
 
       - name: Generate Kotlin bindings
         run: ./scripts/ci/uniffi_generate_kotlin.sh
@@ -122,8 +122,11 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           bindgen --version
 
+      - name: Build host cdylib with external signer API
+        run: cargo build --release --features "uniffi,vls,vss" --lib
+
       - name: Generate Kotlin Android bindings
-        run: ./scripts/ci/uniffi_generate_kotlin_android.sh
+        run: ./scripts/ci/uniffi_generate_from_library.sh kotlin target/uniffi/kotlin-android target/release/librgb_lightning_node.so uniffi-android.toml
 
       - name: Build Android JNI libs
         env:
@@ -132,6 +135,7 @@ jobs:
           ANDROID_NDK: /usr/local/lib/android/sdk/ndk/27.3.13750724
           AWS_LC_SYS_EXTERNAL_BINDGEN: "1"
           CMAKE: /usr/bin/cmake
+          UNIFFI_CARGO_FEATURES: "uniffi,vls,vss"
         run: |
           echo "Using NDK_HOME=${ANDROID_NDK_HOME}"
           echo "Using NDK_ROOT=${ANDROID_NDK_ROOT}"
@@ -195,12 +199,13 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--sysroot=${IOS_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim="--sysroot=${SIM_SYSROOT}"
           export BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_ios="--sysroot=${SIM_SYSROOT}"
-          cargo build --release --features uniffi,vss --lib --target aarch64-apple-ios
-          cargo build --release --features uniffi,vss --lib --target aarch64-apple-ios-sim
-          cargo build --release --features uniffi,vss --lib --target x86_64-apple-ios
+          cargo build --release --features "uniffi,vls,vss" --lib
+          cargo build --release --features "uniffi,vls,vss" --lib --target aarch64-apple-ios
+          cargo build --release --features "uniffi,vls,vss" --lib --target aarch64-apple-ios-sim
+          cargo build --release --features "uniffi,vls,vss" --lib --target x86_64-apple-ios
 
       - name: Generate Swift bindings
-        run: ./scripts/ci/uniffi_generate_swift.sh
+        run: ./scripts/ci/uniffi_generate_from_library.sh swift target/uniffi/swift target/release/librgb_lightning_node.dylib
 
       - name: Package XCFramework
         run: ./scripts/ci/package_swift_xcframework.sh

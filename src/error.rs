@@ -47,6 +47,22 @@ pub enum APIError {
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
+    #[error("External signer is required for this operation")]
+    ExternalSignerRequired,
+
+    #[allow(dead_code)]
+    #[error("External signer is unavailable: {0}")]
+    ExternalSignerUnavailable(String),
+
+    #[error("External signer identity does not match persisted node identity")]
+    ExternalSignerMismatch,
+
+    #[error("Unsupported in external signer mode: {0}")]
+    UnsupportedInExternalSignerMode(String),
+
+    #[error("External signer protocol error: {0}")]
+    ExternalSignerProtocolError(String),
+
     #[error("Another payment for this invoice is already in status {0}")]
     DuplicatePayment(String),
 
@@ -537,6 +553,7 @@ impl IntoResponse for APIError {
             | APIError::CannotEstimateFees
             | APIError::CannotFailBatchTransfer
             | APIError::ChangingState
+            | APIError::ExternalSignerRequired
             | APIError::DuplicatePayment(_)
             | APIError::FailedBdkSync(_)
             | APIError::FailedBitcoindConnection(_)
@@ -569,14 +586,21 @@ impl IntoResponse for APIError {
             | APIError::UnlockedNode
             | APIError::UnsupportedInflation(_)
             | APIError::UnsupportedLayer1(_)
-            | APIError::UnsupportedTransportType => {
+            | APIError::UnsupportedTransportType
+            | APIError::UnsupportedInExternalSignerMode(_) => {
                 (StatusCode::FORBIDDEN, self.to_string(), self.name())
             }
             APIError::InvoiceAlreadyClaimed => {
                 (StatusCode::CONFLICT, self.to_string(), self.name())
             }
+            APIError::ExternalSignerMismatch => {
+                (StatusCode::CONFLICT, self.to_string(), self.name())
+            }
             APIError::InvoiceNotClaimable => (StatusCode::NOT_FOUND, self.to_string(), self.name()),
-            APIError::Network(_) | APIError::NoValidTransportEndpoint => (
+            APIError::Network(_)
+            | APIError::NoValidTransportEndpoint
+            | APIError::ExternalSignerUnavailable(_)
+            | APIError::ExternalSignerProtocolError(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 self.to_string(),
                 self.name(),

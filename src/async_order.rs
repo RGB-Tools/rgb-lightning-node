@@ -545,6 +545,34 @@ impl AsyncOrderLspClient {
 }
 
 impl AsyncPaymentsPreimageRoot {
+    pub(crate) fn build_from_seed(
+        seed: &[u8; 32],
+        network: Network,
+        this_node_pubkey: &PublicKey,
+    ) -> Result<Self, JsonRpcErrorWire> {
+        let mut account_xprv = Xpriv::new_master(network, seed).map_err(|err| {
+            let message = format!("async_payment_root_derivation_failed: {err}");
+            JsonRpcErrorWire::internal_error(message)
+        })?;
+
+        let h31 = u32::from_be_bytes(
+            sha256::Hash::hash(&this_node_pubkey.serialize()).to_byte_array()[0..4]
+                .try_into()
+                .expect("sha256 hash is 32 bytes"),
+        ) & ASYNC_PAYMENTS_BIP32_MAX_CHILD_INDEX;
+
+        let path = [
+            ASYNC_PAYMENTS_PURPOSE_APAY_INDEX,
+            ASYNC_PAYMENTS_ACCOUNT_INDEX,
+            h31,
+        ];
+        for index in path {
+            account_xprv = derive_hardened_child(&account_xprv, index)?;
+        }
+
+        Ok(Self { account_xprv })
+    }
+
     pub(crate) fn build_from_mnemonic(
         mnemonic: &Mnemonic,
         network: Network,

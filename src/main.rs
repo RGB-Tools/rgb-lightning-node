@@ -15,6 +15,7 @@ mod ldk;
 mod rgb;
 mod routes;
 mod runtime;
+mod signer;
 mod swap;
 mod synced_kv_store;
 mod utils;

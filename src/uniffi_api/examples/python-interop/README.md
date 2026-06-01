@@ -18,9 +18,16 @@ From repo root:
 Build library and generate Python bindings:
 
 ```sh
+# Internal-signer-only flows (e.g. `manual_py_full_n2n.py`):
 cargo build --release --features uniffi --lib
+
+# Flows that use `NativeExternalSigner` / VLS (`manual_py_external_signer_e2e.py`):
+cargo build --release --features uniffi,vls --lib
+
 ./scripts/ci/uniffi_generate_python.sh
 ```
+
+`LnInvoiceRequest` is keyword-only in Python; pass `payment_hash=None` when you do not set a custom payment hash (see `manual_py_full_n2n.py`).
 
 Set env:
 
@@ -47,34 +54,154 @@ Virtual channels SDK test:
 python3 src/uniffi_api/examples/python-interop/manual_py_virtual_channels_sdk.py
 ```
 
-Optional env overrides:
+External signer E2E examples:
+
+1. Regular channel flow with real native external signer via UniFFI:
 
 ```sh
 RESET_DATA=1 \
-NODE_A_STORAGE="$PWD/sdkdata_py/node_a" \
-NODE_B_STORAGE="$PWD/sdkdata_py/node_b" \
-NODE_A_PEER_PORT=9735 \
-NODE_B_PEER_PORT=9736 \
-OPEN_CHANNEL_ASSET_AMOUNT=200 \
-PAYMENT_ASSET_AMOUNT=50 \
-PAYMENT_MSAT=3000000 \
-OPEN_CHANNEL_CONFIRM_BLOCKS=12 \
-CHANNEL_READY_TIMEOUT_SEC=300 \
-python3 src/uniffi_api/examples/python-interop/manual_py_full_n2n.py
+python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+  --scenario regular-flow-real
 ```
+
+Note:
+- No HTTP endpoint is used in this flow.
+- Python constructs `NativeExternalSigner(...)` from a fixed `seed_hex` (passed in-memory; no signer-side seed persistence in RLN).
+- The signer seed is created and persisted inside that signer directory.
+- The UniFFI flow now uses:
+  - `init_with_native_external_signer(...)`
+  - `unlock_with_native_external_signer(...)`
+
+Stable shell target for the same real flow:
+
+```sh
+START_REGTEST=1 \
+./scripts/ci/external_signer_real_e2e.sh
+```
+
+Optional env overrides:
+
+```sh
+export RLN_TEST_NATIVE_SIGNER_NETWORK="regtest"
+export RLN_TEST_NATIVE_SIGNER_PERMISSIVE_POLICY="1"
+./scripts/ci/external_signer_real_e2e.sh
+```
+
+2. Real signer mismatch rejection on restart:
+
+```sh
+RESET_DATA=1 \
+python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+  --scenario restart-mismatch-real
+```
+
+3. Real signer restart-without-reattach and recovery:
+
+```sh
+RESET_DATA=1 \
+python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+  --scenario connection-loss-real
+```
+
+4. **Mixed RGB + external signer scenario** (`mixed-asset-channel-real`): **skipped by default**
+   (prints `SKIP …` unless you opt in). Internal signer on node A, `NativeExternalSigner` (VLS) on
+   node B; requires `RUN_MIXED_ASSET_EXTERNAL_E2E=1` and a `uniffi,vls` build.
+
+   ```sh
+   RUN_MIXED_ASSET_EXTERNAL_E2E=1 RESET_DATA=1 \
+   python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+     --scenario mixed-asset-channel-real
+   ```
+
+   Optional env for this flow:
+
+   - `PY_EXT_SIGNER_DEBUG=1` — print ~10s progress while waiting on funding / visibility.
+   - `PY_EXT_SIGNER_FUNDING_MEMPOOL_FALLBACK=0` — disable the regtest-only heuristic that treats a
+     **sole** mempool transaction as the funding tx when `list_channels()` is slow to expose
+     `funding_txid` (single-channel flows only).
+   - `PAYMENT_SUCCEEDED_TIMEOUT_SEC` — seconds to wait for `HtlcStatus.SUCCEEDED` after `sendpayment`
+     (default `300`; payment wait also syncs the peer and mines a block every 5 polls, like `lib_sdk`).
+
+5. **Mixed RGB round-trip payment** (`mixed-asset-channel-roundtrip-real`): same mixed
+   internal/external RGB flow, then attempt to send the same RGB amount back from the
+   external-signer node to the internal node. Use this as the direct validation/regression scenario
+   for outbound RGB from RLN with external signer. This scenario opens the channel with a higher
+   push amount by default (`ROUNDTRIP_OPEN_CHANNEL_PUSH_MSAT=6000000`) so the external-signer node
+   has enough outbound msat to satisfy the RGB HTLC minimum on the reverse payment.
+
+   ```sh
+   RUN_MIXED_ASSET_EXTERNAL_E2E=1 RESET_DATA=1 \
+   python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+     --scenario mixed-asset-channel-roundtrip-real
+   ```
+
+6. **Mixed RGB cooperative close settlement** (`mixed-asset-channel-coop-close-real`): same mixed
+   internal/external RGB flow, then cooperative close and explicit on-chain balance assertions.
+
+   ```sh
+   RUN_MIXED_ASSET_EXTERNAL_E2E=1 RESET_DATA=1 \
+   python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+     --scenario mixed-asset-channel-coop-close-real
+   ```
+
+7. **Mixed RGB force-close settlement** (`mixed-asset-channel-force-close-real`): same mixed
+   internal/external RGB flow, then force close and wait for balances to settle after CSV.
+   Useful as a focused regression scenario for receiver-side sweep and settlement after CSV.
+
+   ```sh
+   RUN_MIXED_ASSET_EXTERNAL_E2E=1 RESET_DATA=1 \
+   python3 src/uniffi_api/examples/python-interop/manual_py_external_signer_e2e.py \
+     --scenario mixed-asset-channel-force-close-real
+   ```
+
+Note:
+- `mixed-asset-channel-real` honors `OPEN_CHANNEL_PUSH_MSAT` and has been validated with a non-zero
+  BTC push (`3_500_000 msat`) on the current branch.
+- The regular example scenarios still default to `push_msat=0` unless explicitly changed in the
+  script.
+
+Stable shell target for any supported native signer scenario:
+
+```sh
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=regular-flow-real \
+./scripts/ci/external_signer_real_e2e.sh
+```
+
+Other supported scenarios:
+
+```sh
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=restart-mismatch-real \
+./scripts/ci/external_signer_real_e2e.sh
+
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=connection-loss-real \
+./scripts/ci/external_signer_real_e2e.sh
+
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=mixed-asset-channel-roundtrip-real \
+./scripts/ci/external_signer_real_e2e.sh
+
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=mixed-asset-channel-coop-close-real \
+./scripts/ci/external_signer_real_e2e.sh
+
+START_REGTEST=1 \
+EXTERNAL_SIGNER_SCENARIO=mixed-asset-channel-force-close-real \
+./scripts/ci/external_signer_real_e2e.sh
+```
+
+In this scenario:
+- payment succeeds
+- node restarts without a reattached signer and unlock fails
+- same signer is reattached
+- unlock succeeds and payment resumes
 
 Or for the virtual channels SDK test:
 
 ```sh
 RESET_DATA=1 \
-python3 src/uniffi_api/examples/python-interop/manual_py_virtual_channels_sdk.py
-```
-
-Strict close check (host-authoritative):
-
-```sh
-RESET_DATA=1 \
-REQUIRE_CLOSE_SUCCESS=1 \
 python3 src/uniffi_api/examples/python-interop/manual_py_virtual_channels_sdk.py
 ```
 

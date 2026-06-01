@@ -16,13 +16,13 @@ Start local regtest services:
 Run the full SDK suite:
 
 ```sh
-cargo test --features uniffi --test lib_sdk -- --test-threads=1
+cargo test --features "uniffi,test-utils,vls" --test lib_sdk -- --test-threads=1
 ```
 
 Run a single scenario:
 
 ```sh
-cargo test --features uniffi --test lib_sdk <test_name> -- --test-threads=1
+cargo test --features "uniffi,test-utils,vls" --test lib_sdk <test_name> -- --test-threads=1
 ```
 
 Examples of `<test_name>`:

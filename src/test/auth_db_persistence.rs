@@ -35,6 +35,7 @@ fn build_state(storage_dir_path: PathBuf, database: DatabaseConnection) -> AppSt
         cancel_token: CancellationToken::new(),
         unlocked_app_state: Arc::new(TokioMutex::new(None)),
         ldk_background_services: Arc::new(Mutex::new(None)),
+        attached_external_signer: Arc::new(Mutex::new(None)),
         changing_state: Mutex::new(false),
         root_public_key: None,
         revoked_tokens: Arc::new(Mutex::new(HashSet::new())),

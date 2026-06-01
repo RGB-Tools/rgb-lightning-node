@@ -14,6 +14,17 @@ Current lifecycle/threading model:
   `CurrentThread` (or no runtime) uses a shared dedicated Tokio runtime to avoid
   `block_in_place` panic paths.
 
+Native external signer note:
+- `NativeExternalSigner` is a convenience in-process signer object exposed only in
+  `uniffi,vls` builds generated from the compiled library.
+- It is **not** a production-grade seed store.
+- The current constructor `NativeExternalSigner.new(seed_hex, network, permissive_policy)` expects
+  the host to supply a stable 32-byte seed in memory.
+- RLN init/unlock in external-signer mode still consumes bootstrap/attachment
+  data, not mnemonic/seed phrases.
+- Usage guide:
+  - `src/uniffi_api/native-external-signer.md`
+
 ## Dependency layering
 
 Current internal layering is:
@@ -134,6 +145,18 @@ UniFFI support adds a required manual sync checklist when upstream changes:
    - `.github/workflows/test.yaml`
    - `.github/workflows/sdk-e2e.yaml`
    - `.github/workflows/uniffi-artifacts.yaml`
+5. For SDK release bundles and publishing:
+   - run `.github/workflows/release-sdk.yaml`
+   - set workflow input `version` (for example `0.4.0-beta.1`)
+   - configure Central Publisher + GPG secrets before enabling publishing:
+     - `MAVENCENTRAL_USERNAME`
+     - `MAVENCENTRAL_PASSWORD`
+     - `GPG_SECRET_KEY` (ASCII-armored private key block)
+     - `GPG_KEY_NAME` (GPG key id)
+     - `GPG_PASSPHRASE`
+   - optional repository variables for coordinates:
+     - `MAVEN_GROUP_ID` (default `org.utexo`)
+     - `MAVEN_ARTIFACT_ID` (default `rgb-lightning-node-android`)
 
 ## Main code changes in `uniffi_api/mod.rs`
 

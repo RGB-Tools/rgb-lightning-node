@@ -910,6 +910,7 @@ private fun openchannelPushAssetAmountScenario() {
         refreshTransfers(nodeC)
         refreshTransfers(nodeC)
         refreshTransfers(nodeB)
+        refreshTransfers(nodeB)
 
         check(assetBalanceSpendable(nodeA, assetId) == 200uL)
         check(assetBalanceSpendable(nodeB, assetId) == 700uL)
