@@ -54,6 +54,7 @@ use rgb_lib::{
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
         Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
         Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
+        RefreshFilter as RgbLibRefreshFilter, RefreshTransferStatus as RgbLibRefreshTransferStatus,
         SyncKeychain as RgbLibSyncKeychain, SyncOptions as RgbLibSyncOptions,
         SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
         WitnessData as RgbLibWitnessData,
@@ -821,6 +822,7 @@ pub(crate) struct ListTransfersResponse {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListUnspentsRequest {
+    pub(crate) settled_only: bool,
     pub(crate) skip_sync: bool,
 }
 
@@ -1008,7 +1010,39 @@ impl From<RgbLibRecipientType> for RecipientType {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct RefreshFilter {
+    pub(crate) status: RefreshTransferStatus,
+    pub(crate) incoming: bool,
+}
+
+impl From<RefreshFilter> for RgbLibRefreshFilter {
+    fn from(value: RefreshFilter) -> Self {
+        Self {
+            status: value.status.into(),
+            incoming: value.incoming,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum RefreshTransferStatus {
+    WaitingCounterparty,
+    WaitingConfirmations,
+}
+
+impl From<RefreshTransferStatus> for RgbLibRefreshTransferStatus {
+    fn from(value: RefreshTransferStatus) -> Self {
+        match value {
+            RefreshTransferStatus::WaitingCounterparty => Self::WaitingCounterparty,
+            RefreshTransferStatus::WaitingConfirmations => Self::WaitingConfirmations,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RefreshRequest {
+    pub(crate) asset_id: Option<String>,
+    pub(crate) filter: Vec<RefreshFilter>,
     pub(crate) skip_sync: bool,
 }
 
@@ -2720,7 +2754,7 @@ pub(crate) async fn list_unspents(
     let unlocked_state = guard.as_ref().unwrap();
 
     let mut unspents = vec![];
-    for unspent in unlocked_state.rgb_list_unspents(payload.skip_sync)? {
+    for unspent in unlocked_state.rgb_list_unspents(payload.settled_only, payload.skip_sync)? {
         unspents.push(Unspent {
             utxo: Utxo {
                 outpoint: unspent.utxo.outpoint.to_string(),
@@ -3479,9 +3513,12 @@ pub(crate) async fn refresh_transfers(
         let unlocked_state = guard.as_ref().unwrap();
         let unlocked_state_copy = unlocked_state.clone();
 
-        tokio::task::spawn_blocking(move || unlocked_state_copy.rgb_refresh(payload.skip_sync))
-            .await
-            .unwrap()?;
+        let filter = payload.filter.into_iter().map(|f| f.into()).collect();
+        tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_refresh(payload.asset_id, filter, payload.skip_sync)
+        })
+        .await
+        .unwrap()?;
 
         tracing::info!("Refresh complete");
         Ok(Json(EmptyResponse {}))

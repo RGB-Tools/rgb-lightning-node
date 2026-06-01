@@ -2263,8 +2263,12 @@ components:
     ListUnspentsRequest:
       type: object
       required:
+        - settled_only
         - skip_sync
       properties:
+        settled_only:
+          type: boolean
+          example: false
         skip_sync:
           type: boolean
           example: false
@@ -2638,14 +2642,39 @@ components:
       enum:
         - Blind
         - Witness
+    RefreshFilter:
+      type: object
+      required:
+        - status
+        - incoming
+      properties:
+        status:
+          $ref: '#/components/schemas/RefreshTransferStatus'
+        incoming:
+          type: boolean
     RefreshRequest:
       type: object
       required:
+        - filter
         - skip_sync
       properties:
+        asset_id:
+          type: string
+          nullable: true
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        filter:
+          type: array
+          items:
+            $ref: '#/components/schemas/RefreshFilter'
+          example: []
         skip_sync:
           type: boolean
           example: false
+    RefreshTransferStatus:
+      type: string
+      enum:
+        - WaitingCounterparty
+        - WaitingConfirmations
     RestoreRequest:
       type: object
       required:

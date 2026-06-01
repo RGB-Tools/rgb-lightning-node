@@ -1036,7 +1036,10 @@ async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfe
 
 async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
     println!("listing unspents for node {node_address}");
-    let payload = ListUnspentsRequest { skip_sync: false };
+    let payload = ListUnspentsRequest {
+        settled_only: false,
+        skip_sync: false,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listunspents"))
         .json(&payload)
@@ -1482,7 +1485,11 @@ async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
 
 async fn refresh_transfers(node_address: SocketAddr) {
     println!("refreshing transfers for node {node_address}");
-    let payload = RefreshRequest { skip_sync: false };
+    let payload = RefreshRequest {
+        asset_id: None,
+        filter: vec![],
+        skip_sync: false,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/refreshtransfers"))
         .json(&payload)
