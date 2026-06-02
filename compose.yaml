@@ -22,6 +22,22 @@ services:
       - bitcoind
     ports:
       - 50001:50001
+  # mempool/electrs with --jsonrpc-import shares chain state with the shared
+  # bitcoind container by importing blocks over RPC (no shared blocks volume).
+  # Serves the esplora REST API at port 3002.
+  esplora:
+    image: mempool/electrs:v3.2.0
+    profiles: ['esplora']
+    command:
+      - --jsonrpc-import
+      - --cookie=user:password
+      - --network=regtest
+      - --daemon-rpc-addr=bitcoind:18443
+      - --http-addr=0.0.0.0:3002
+    depends_on:
+      - bitcoind
+    ports:
+      - 3002:3002
   proxy:
     image: ghcr.io/rgb-tools/rgb-proxy-server:0.3.0
     ports:

@@ -58,6 +58,8 @@ use crate::{
 pub(crate) const LDK_DIR: &str = ".ldk";
 pub(crate) const LOGS_DIR: &str = "logs";
 pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
+#[cfg(test)]
+pub(crate) const ESPLORA_URL_REGTEST: &str = "http://127.0.0.1:3002";
 pub(crate) const ELECTRUM_URL_SIGNET: &str = "ssl://electrum.iriswallet.com:50033";
 pub(crate) const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 pub(crate) const ELECTRUM_URL_TESTNET4: &str = "ssl://electrum.iriswallet.com:50053";

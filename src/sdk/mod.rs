@@ -361,10 +361,10 @@ pub(crate) struct InitData {
 
 pub(crate) struct UnlockRequest {
     pub(crate) password: String,
-    pub(crate) bitcoind_rpc_username: String,
-    pub(crate) bitcoind_rpc_password: String,
-    pub(crate) bitcoind_rpc_host: String,
-    pub(crate) bitcoind_rpc_port: u16,
+    pub(crate) bitcoind_rpc_username: Option<String>,
+    pub(crate) bitcoind_rpc_password: Option<String>,
+    pub(crate) bitcoind_rpc_host: Option<String>,
+    pub(crate) bitcoind_rpc_port: Option<u16>,
     pub(crate) indexer_url: Option<String>,
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
@@ -4318,10 +4318,10 @@ mod tests {
     fn sample_unlock_request() -> UnlockRequest {
         UnlockRequest {
             password: "unused-in-external-mode".to_string(),
-            bitcoind_rpc_username: "user".to_string(),
-            bitcoind_rpc_password: "pass".to_string(),
-            bitcoind_rpc_host: "127.0.0.1".to_string(),
-            bitcoind_rpc_port: 18443,
+            bitcoind_rpc_username: Some("user".to_string()),
+            bitcoind_rpc_password: Some("pass".to_string()),
+            bitcoind_rpc_host: Some("127.0.0.1".to_string()),
+            bitcoind_rpc_port: Some(18443),
             indexer_url: Some("127.0.0.1:50001".to_string()),
             proxy_endpoint: Some("rpc://127.0.0.1:3000/json-rpc".to_string()),
             announce_addresses: vec![],

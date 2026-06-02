@@ -2843,6 +2843,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightning-transaction-sync"
+version = "0.2.1"
+dependencies = [
+ "bitcoin",
+ "electrum-client 0.24.1",
+ "esplora-client",
+ "lightning 0.2.2",
+ "lightning-macros 0.2.1",
+]
+
+[[package]]
 name = "lightning-types"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4202,6 +4213,7 @@ dependencies = [
  "dircmp",
  "dirs",
  "electrum-client 0.20.0",
+ "esplora-client",
  "futures",
  "hex-conservative 0.3.2",
  "lazy_static",
@@ -4214,6 +4226,7 @@ dependencies = [
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
+ "lightning-transaction-sync",
  "magic-crypt",
  "once_cell",
  "prost 0.13.5",

@@ -1918,10 +1918,10 @@ async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
 fn unlock_req(password: &str) -> UnlockRequest {
     UnlockRequest {
         password: password.to_string(),
-        bitcoind_rpc_username: s!("user"),
-        bitcoind_rpc_password: s!("password"),
-        bitcoind_rpc_host: s!("localhost"),
-        bitcoind_rpc_port: 18443,
+        bitcoind_rpc_username: Some(s!("user")),
+        bitcoind_rpc_password: Some(s!("password")),
+        bitcoind_rpc_host: Some(s!("localhost")),
+        bitcoind_rpc_port: Some(18443),
         indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
         proxy_endpoint: Some(PROXY_ENDPOINT_LOCAL.to_string()),
         announce_addresses: vec![],
@@ -2322,6 +2322,7 @@ pub fn set_mock_fee(fee: u32) {
 mod auth_db_persistence;
 mod authentication;
 mod backup_and_restore;
+mod chain_backend_bitcoind_dispatch;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
 mod close_coop_standard;
@@ -2332,6 +2333,7 @@ mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
+mod esplora_indexer_defaults;
 mod fail_transfers;
 mod getchannelid;
 mod gossip_p2p;
@@ -2340,6 +2342,8 @@ mod hodl_invoice;
 mod htlc_amount_checks;
 mod inflate;
 mod init;
+mod init_electrum;
+mod init_esplora;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
@@ -2371,6 +2375,7 @@ mod swap_roundtrip_multihop_asset_asset;
 mod swap_roundtrip_multihop_buy;
 mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
+mod unlock_request_optional_bitcoind;
 mod upload_asset_media;
 mod vanilla_payment_on_rgb_channel;
 mod virtual_channels;

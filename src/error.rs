@@ -23,6 +23,9 @@ pub enum APIError {
     #[error("Node has already been initialized")]
     AlreadyInitialized,
 
+    #[error("Provide either bitcoind RPC credentials (all four fields) or an esplora indexer_url, not both")]
+    AmbiguousChainBackend,
+
     #[error("Anchor outputs are required for RGB channels")]
     AnchorsRequired,
 
@@ -285,6 +288,9 @@ pub enum APIError {
 
     #[error("Min fee not met for transfer with TXID: {0}")]
     MinFeeNotMet(String),
+
+    #[error("Provide either bitcoind RPC credentials (all four fields) or an esplora indexer_url; none were supplied")]
+    MissingChainBackend,
 
     #[error("Unable to find payment preimage, be sure you've provided the correct swap info")]
     MissingSwapPaymentPreimage,
@@ -553,6 +559,7 @@ impl IntoResponse for APIError {
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::AlreadyUnlocked
+            | APIError::AmbiguousChainBackend
             | APIError::AuthenticationDisabled
             | APIError::BatchTransferNotFound
             | APIError::CannotCloseChannel(_)
@@ -576,6 +583,7 @@ impl IntoResponse for APIError {
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)
             | APIError::MinFeeNotMet(_)
+            | APIError::MissingChainBackend
             | APIError::NetworkMismatch(_, _)
             | APIError::NoAvailableUtxos
             | APIError::NoRoute

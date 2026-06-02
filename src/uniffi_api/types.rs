@@ -459,10 +459,10 @@ pub struct InflateResponse {
 
 pub struct SdkUnlockRequest {
     pub password: String,
-    pub bitcoind_rpc_username: String,
-    pub bitcoind_rpc_password: String,
-    pub bitcoind_rpc_host: String,
-    pub bitcoind_rpc_port: u16,
+    pub bitcoind_rpc_username: Option<String>,
+    pub bitcoind_rpc_password: Option<String>,
+    pub bitcoind_rpc_host: Option<String>,
+    pub bitcoind_rpc_port: Option<u16>,
     pub indexer_url: Option<String>,
     pub proxy_endpoint: Option<String>,
     pub announce_addresses: Vec<String>,

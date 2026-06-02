@@ -101,10 +101,10 @@ impl_writeable_tlv_based_enum!(SwapStatus,
 
 #[derive(Clone, Debug)]
 pub(crate) struct UnlockRequest {
-    pub(crate) bitcoind_rpc_username: String,
-    pub(crate) bitcoind_rpc_password: String,
-    pub(crate) bitcoind_rpc_host: String,
-    pub(crate) bitcoind_rpc_port: u16,
+    pub(crate) bitcoind_rpc_username: Option<String>,
+    pub(crate) bitcoind_rpc_password: Option<String>,
+    pub(crate) bitcoind_rpc_host: Option<String>,
+    pub(crate) bitcoind_rpc_port: Option<u16>,
     pub(crate) indexer_url: Option<String>,
     pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,

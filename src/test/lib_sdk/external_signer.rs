@@ -74,10 +74,10 @@ fn attach_external_signer_host(
 
 fn unlock_with_attached_external_signer(node: &SdkNode, announce_alias: &str) {
     node.unlock_with_attached_external_signer(
-        "user".to_string(),
-        "password".to_string(),
-        "localhost".to_string(),
-        18443,
+        Some("user".to_string()),
+        Some("password".to_string()),
+        Some("localhost".to_string()),
+        Some(18443),
         Some("127.0.0.1:50001".to_string()),
         Some(PROXY_ENDPOINT_LOCAL.to_string()),
         vec![],
@@ -129,10 +129,10 @@ fn external_init_unlock_and_restart_same_signer() {
             .expect("external init");
         node.unlock_with_native_external_signer(
             signer.clone(),
-            "user".to_string(),
-            "password".to_string(),
-            "localhost".to_string(),
-            18443,
+            Some("user".to_string()),
+            Some("password".to_string()),
+            Some("localhost".to_string()),
+            Some(18443),
             Some("127.0.0.1:50001".to_string()),
             Some(PROXY_ENDPOINT_LOCAL.to_string()),
             vec![],
@@ -150,10 +150,10 @@ fn external_init_unlock_and_restart_same_signer() {
         restarted
             .unlock_with_native_external_signer(
                 signer.clone(),
-                "user".to_string(),
-                "password".to_string(),
-                "localhost".to_string(),
-                18443,
+                Some("user".to_string()),
+                Some("password".to_string()),
+                Some("localhost".to_string()),
+                Some(18443),
                 Some("127.0.0.1:50001".to_string()),
                 Some(PROXY_ENDPOINT_LOCAL.to_string()),
                 vec![],
@@ -192,10 +192,10 @@ fn external_restart_with_mismatched_signer_fails_unlock() {
             .expect("external init");
         node.unlock_with_native_external_signer(
             signer_a.clone(),
-            "user".to_string(),
-            "password".to_string(),
-            "localhost".to_string(),
-            18443,
+            Some("user".to_string()),
+            Some("password".to_string()),
+            Some("localhost".to_string()),
+            Some(18443),
             Some("127.0.0.1:50001".to_string()),
             Some(PROXY_ENDPOINT_LOCAL.to_string()),
             vec![],
@@ -211,10 +211,10 @@ fn external_restart_with_mismatched_signer_fails_unlock() {
         let err = restarted
             .unlock_with_native_external_signer(
                 signer_b,
-                "user".to_string(),
-                "password".to_string(),
-                "localhost".to_string(),
-                18443,
+                Some("user".to_string()),
+                Some("password".to_string()),
+                Some("localhost".to_string()),
+                Some(18443),
                 Some("127.0.0.1:50001".to_string()),
                 Some(PROXY_ENDPOINT_LOCAL.to_string()),
                 vec![],
@@ -427,10 +427,10 @@ fn rgb_native_external_signer_mixed_one_hop_payment_quick() {
         node_b
             .unlock_with_native_external_signer(
                 signer_b.clone(),
-                "user".to_string(),
-                "password".to_string(),
-                "localhost".to_string(),
-                18443,
+                Some("user".to_string()),
+                Some("password".to_string()),
+                Some("localhost".to_string()),
+                Some(18443),
                 Some("127.0.0.1:50001".to_string()),
                 Some(PROXY_ENDPOINT_LOCAL.to_string()),
                 vec![],
@@ -572,10 +572,10 @@ fn rgb_native_external_signer_mixed_one_hop_payment_roundtrip() {
         node_b
             .unlock_with_native_external_signer(
                 signer_b.clone(),
-                "user".to_string(),
-                "password".to_string(),
-                "localhost".to_string(),
-                18443,
+                Some("user".to_string()),
+                Some("password".to_string()),
+                Some("localhost".to_string()),
+                Some(18443),
                 Some("127.0.0.1:50001".to_string()),
                 Some(PROXY_ENDPOINT_LOCAL.to_string()),
                 vec![],
@@ -734,10 +734,10 @@ fn rgb_native_external_signer_mixed_one_hop_payment_coop_close_settles_to_chain(
         node_b
             .unlock_with_native_external_signer(
                 signer_b.clone(),
-                "user".to_string(),
-                "password".to_string(),
-                "localhost".to_string(),
-                18443,
+                Some("user".to_string()),
+                Some("password".to_string()),
+                Some("localhost".to_string()),
+                Some(18443),
                 Some("127.0.0.1:50001".to_string()),
                 Some(PROXY_ENDPOINT_LOCAL.to_string()),
                 vec![],

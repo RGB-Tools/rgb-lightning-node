@@ -51,18 +51,31 @@ model, binding generation, test commands, and artifact packaging details.
 ## Run
 
 In order to operate, the node will need:
-- a bitcoind node
-- an indexer instance (electrum or esplora)
+- a chain backend, either:
+  - a bitcoind node (drives LDK chain sync via RPC), or
+  - an esplora server (drives LDK chain sync over HTTP)
+- an indexer instance for RGB (electrum or esplora — forwarded to rgb-lib)
 - an [RGB proxy server] instance
 
 Once services are running, daemons can be started.
 Each daemon needs to be started in a separate shell with `rgb-lightning-node`,
 specifying:
-- bitcoind user, password, host and port
 - node data directory
 - node listening port
 - LN peer listening port
 - network
+
+Chain-backend credentials are supplied at `/unlock` time, not on the CLI. The
+body must include exactly one of:
+- all four `bitcoind_rpc_*` fields — LDK chain sync runs via bitcoind RPC.
+  An optional electrum `indexer_url` is forwarded to rgb-lib only.
+- esplora `indexer_url` (no `bitcoind_rpc_*` fields) — LDK chain sync runs
+  over esplora, same URL forwarded to rgb-lib.
+- electrum `indexer_url` (no `bitcoind_rpc_*` fields) — LDK chain sync runs
+  over electrum, same URL forwarded to rgb-lib.
+
+`bitcoind + esplora` returns `400 AmbiguousChainBackend`. No credentials at
+all returns `400 MissingChainBackend`.
 
 ### Regtest
 

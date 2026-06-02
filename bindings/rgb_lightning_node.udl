@@ -562,10 +562,10 @@ dictionary SdkInitRequest {
 
 dictionary SdkUnlockRequest {
     string password;
-    string bitcoind_rpc_username;
-    string bitcoind_rpc_password;
-    string bitcoind_rpc_host;
-    u16 bitcoind_rpc_port;
+    string? bitcoind_rpc_username;
+    string? bitcoind_rpc_password;
+    string? bitcoind_rpc_host;
+    u16? bitcoind_rpc_port;
     string? indexer_url;
     string? proxy_endpoint;
     sequence<string> announce_addresses;

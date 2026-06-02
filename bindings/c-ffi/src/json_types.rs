@@ -151,10 +151,14 @@ impl TryFrom<JsonSdkInitRequest> for SdkInitRequest {
 #[derive(Debug, Deserialize)]
 pub(crate) struct JsonSdkUnlockRequest {
     pub password: String,
-    pub bitcoind_rpc_username: String,
-    pub bitcoind_rpc_password: String,
-    pub bitcoind_rpc_host: String,
-    pub bitcoind_rpc_port: u16,
+    #[serde(default)]
+    pub bitcoind_rpc_username: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_password: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_host: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_port: Option<u16>,
     #[serde(default)]
     pub indexer_url: Option<String>,
     #[serde(default)]
@@ -184,10 +188,14 @@ impl From<JsonSdkUnlockRequest> for SdkUnlockRequest {
 // External-signer mode has no password: the seed never reaches RLN.
 #[derive(Debug, Deserialize)]
 pub(crate) struct JsonSdkExternalUnlockRequest {
-    pub bitcoind_rpc_username: String,
-    pub bitcoind_rpc_password: String,
-    pub bitcoind_rpc_host: String,
-    pub bitcoind_rpc_port: u16,
+    #[serde(default)]
+    pub bitcoind_rpc_username: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_password: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_host: Option<String>,
+    #[serde(default)]
+    pub bitcoind_rpc_port: Option<u16>,
     #[serde(default)]
     pub indexer_url: Option<String>,
     #[serde(default)]

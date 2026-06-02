@@ -3,6 +3,7 @@ mod async_order;
 mod auth;
 mod backup;
 mod bitcoind;
+mod chain_backend;
 mod core_types;
 mod database;
 mod disk;
@@ -11,6 +12,7 @@ mod error;
 #[path = "test/fee_mock.rs"]
 mod fee_mock;
 mod gossip;
+mod indexer;
 mod kv_store;
 mod ldk;
 mod rgb;
