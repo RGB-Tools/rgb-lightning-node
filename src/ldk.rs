@@ -118,6 +118,7 @@ const MAKER_SWAPS_KEY: &str = "maker_swaps";
 const TAKER_SWAPS_KEY: &str = "taker_swaps";
 const OUTPUT_SPENDER_TXES_KEY: &str = "output_spender_txes";
 const PSBT_NAMESPACE: &str = "psbt";
+const PENDING_FUNDING_NAMESPACE: &str = "pending_funding";
 const CONFIG_INDEXER_URL: &str = "indexer_url";
 const CONFIG_BITCOIN_NETWORK: &str = "bitcoin_network";
 const CONFIG_WALLET_FINGERPRINT: &str = "wallet_fingerprint";
@@ -1422,6 +1423,55 @@ fn handle_funding_prepare_err(
     }
 }
 
+/// Release the funds locked for a channel open that failed before the funding
+/// transaction was broadcast. For colored channels this fails the pending RGB
+/// batch transfer; for vanilla channels it aborts the pending vanilla tx that
+/// was created (and locked the UTXOs) during `FundingGenerationReady`.
+async fn handle_open_chan_fail(channel_id: &ChannelId, unlocked_state: Arc<UnlockedAppState>) {
+    let channel_id_hex = channel_id.0.as_hex().to_string();
+    if let Some(rgb_info) =
+        get_rgb_channel_info_optional(channel_id, true, unlocked_state.kv_store.as_ref())
+    {
+        if let Some(batch_transfer_idx) = rgb_info.batch_transfer_idx {
+            let unlocked_state_copy = unlocked_state.clone();
+            let failed = tokio::task::spawn_blocking(move || {
+                unlocked_state_copy.rgb_fail_transfers(Some(batch_transfer_idx), false, true)
+            })
+            .await
+            .unwrap();
+            if let Err(e) = failed {
+                tracing::error!(
+                    "Error failing RGB transfer batch_transfer_idx={batch_transfer_idx} for channel {channel_id}: {e:?}"
+                );
+            }
+        }
+    } else if let Ok(funding_txid_bytes) =
+        unlocked_state
+            .kv_store
+            .read(PENDING_FUNDING_NAMESPACE, "", &channel_id_hex)
+    {
+        let funding_txid = String::from_utf8(funding_txid_bytes).unwrap();
+        let unlocked_state_copy = unlocked_state.clone();
+        let txid_copy = funding_txid.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_abort_pending_vanilla_tx(txid_copy)
+        })
+        .await
+        .unwrap();
+        match result {
+            Ok(()) => {
+                tracing::info!("Aborted pending vanilla tx {funding_txid} for channel {channel_id}")
+            }
+            Err(e) => tracing::error!(
+                "Error aborting pending vanilla tx {funding_txid} for channel {channel_id}: {e:?}"
+            ),
+        }
+    }
+    let _ = unlocked_state
+        .kv_store
+        .remove(PENDING_FUNDING_NAMESPACE, "", &channel_id_hex, false);
+}
+
 async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
@@ -1728,40 +1778,57 @@ async fn handle_ldk_events(
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
-                let res = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                    let res = unlocked_state_copy
-                        .rgb_send_begin(
-                            recipient_map,
-                            true,
-                            FEE_RATE,
-                            MIN_CHANNEL_CONFIRMATIONS,
-                            None,
-                            false,
-                            // Final locktime: this colored tx funds an LN channel.
-                            Some(0),
-                        )
-                        .map_err(|e| e.to_string())?;
-                    let fascia_str =
-                        fs::read_to_string(&res.details.fascia_path).map_err(|e| e.to_string())?;
-                    let fascia: Fascia =
-                        serde_json::from_str(&fascia_str).map_err(|e| e.to_string())?;
-                    unlocked_state_copy
-                        .rgb_consume_fascia(fascia, None)
-                        .map_err(|e| e.to_string())?;
-                    unlocked_state_copy
-                        .rgb_create_consignments(res.psbt.clone())
-                        .map_err(|e| e.to_string())?;
-                    Ok(res.psbt)
-                })
+                let res = tokio::task::spawn_blocking(
+                    move || -> Result<(String, Option<i32>), String> {
+                        let res = unlocked_state_copy
+                            .rgb_send_begin(
+                                recipient_map,
+                                true,
+                                FEE_RATE,
+                                MIN_CHANNEL_CONFIRMATIONS,
+                                None,
+                                false,
+                                // Final locktime: this colored tx funds an LN channel.
+                                Some(0),
+                            )
+                            .map_err(|e| e.to_string())?;
+                        let fascia_str = fs::read_to_string(&res.details.fascia_path)
+                            .map_err(|e| e.to_string())?;
+                        let fascia: Fascia =
+                            serde_json::from_str(&fascia_str).map_err(|e| e.to_string())?;
+                        unlocked_state_copy
+                            .rgb_consume_fascia(fascia, None)
+                            .map_err(|e| e.to_string())?;
+                        unlocked_state_copy
+                            .rgb_create_consignments(res.psbt.clone())
+                            .map_err(|e| e.to_string())?;
+                        Ok((res.psbt, res.batch_transfer_idx))
+                    },
+                )
                 .await
                 .unwrap();
-                let unsigned_psbt = match res {
-                    Ok(psbt) => psbt,
+                let (unsigned_psbt, batch_transfer_idx) = match res {
+                    Ok(result) => result,
                     Err(e) => {
                         tracing::error!("cannot prepare channel funding transfer: {e}");
                         return Err(ReplayEvent());
                     }
                 };
+                // Record the batch transfer index on the channel's RGB info so a failed
+                // open can fail the pending transfer and release the locked assets
+                // (see handle_open_chan_fail).
+                if let Some(mut rgb_info) = get_rgb_channel_info_optional(
+                    &temporary_channel_id,
+                    true,
+                    unlocked_state.kv_store.as_ref(),
+                ) {
+                    rgb_info.batch_transfer_idx = batch_transfer_idx;
+                    unlocked_state.kv_store.write_rgb_channel_info(
+                        &temporary_channel_id.0.as_hex().to_string(),
+                        &rgb_info,
+                        true,
+                    );
+                }
                 (unsigned_psbt, Some(asset_id))
             } else {
                 let raw_psbt = unlocked_state
@@ -1802,10 +1869,17 @@ async fn handle_ldk_events(
                 bitcoin::hashes::Hash::as_byte_array(&funding_txid),
                 funding_output_index,
             );
-            let pending_funding_path = static_state
-                .ldk_data_dir
-                .join(format!("pending_funding_{}", final_channel_id.0.as_hex()));
-            fs::write(&pending_funding_path, &funding_txid_str).unwrap();
+            // Persist the channel -> funding txid mapping so a failed open can
+            // release the locked funds (see handle_open_chan_fail).
+            unlocked_state
+                .kv_store
+                .write(
+                    PENDING_FUNDING_NAMESPACE,
+                    "",
+                    &final_channel_id.0.as_hex().to_string(),
+                    funding_txid_str.clone().into_bytes(),
+                )
+                .unwrap();
 
             // Store PSBT in database for later use when channel is funded
             unlocked_state
@@ -2506,6 +2580,15 @@ async fn handle_ldk_events(
                         tracing::error!("Error completing channel opening: {e:?}");
                         ReplayEvent()
                     })?;
+
+                    // Channel funded successfully; drop the pending-funding marker so a
+                    // later close does not attempt to abort the already-broadcast tx.
+                    let _ = unlocked_state.kv_store.remove(
+                        PENDING_FUNDING_NAMESPACE,
+                        "",
+                        &channel_id.0.as_hex().to_string(),
+                        false,
+                    );
                 }
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {
                     // acceptor — read consignment from KVStore
@@ -2573,6 +2656,9 @@ async fn handle_ldk_events(
 
             *unlocked_state.rgb_send_lock.lock().unwrap() = false;
 
+            // Release any funds locked for a funding tx that was never broadcast.
+            handle_open_chan_fail(&channel_id, unlocked_state.clone()).await;
+
             let former_temporary_channel_id = unlocked_state.delete_channel_id(channel_id);
             let virtual_draft_temporary_channel_id = if unlocked_state
                 .virtual_channel_draft_get(&channel_id)
@@ -2615,6 +2701,9 @@ async fn handle_ldk_events(
                 "EVENT: Discarded funding for channel with ID {}",
                 channel_id
             );
+
+            // The funding tx was discarded before broadcast; release the locked funds.
+            handle_open_chan_fail(&channel_id, unlocked_state.clone()).await;
 
             unlocked_state.delete_channel_id(channel_id);
             let _ = unlocked_state.kv_store.remove(

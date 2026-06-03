@@ -3451,6 +3451,7 @@ pub(crate) async fn maker_execute(
         let first_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            unlocked_state.kv_store.as_ref(),
             unlocked_state.runtime_node_id(),
             taker_pk,
             if swap_info.is_to_btc() {
@@ -3468,6 +3469,7 @@ pub(crate) async fn maker_execute(
         let second_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            unlocked_state.kv_store.as_ref(),
             taker_pk,
             unlocked_state.runtime_node_id(),
             if swap_info.is_to_btc() || swap_info.is_asset_asset() {
@@ -4086,8 +4088,13 @@ pub(crate) async fn open_channel(
             (temporary_channel_id, None)
         };
 
-        *unlocked_state.rgb_send_lock.lock().unwrap() = true;
-        tracing::debug!("RGB send lock set to true");
+        // Only colored opens perform an RGB send during funding, so only they need
+        // the RGB send lock. Vanilla opens that stall (e.g. an unresponsive peer)
+        // must not hold it, or they would block all subsequent opens indefinitely.
+        if colored_info.is_some() {
+            *unlocked_state.rgb_send_lock.lock().unwrap() = true;
+            tracing::debug!("RGB send lock set to true");
+        }
 
         let temporary_channel_id = unlocked_state
             .channel_manager
