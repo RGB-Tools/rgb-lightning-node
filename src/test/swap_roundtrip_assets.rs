@@ -81,6 +81,36 @@ async fn swap_roundtrip_assets() {
         3600,
     )
     .await;
+    // check /decodeswapstring
+    let decoded_swapstring = decode_swapstring(maker_addr, &maker_init_response.swapstring).await;
+    assert_eq!(decoded_swapstring.qty_from, qty_from);
+    assert_eq!(decoded_swapstring.qty_to, qty_to);
+    assert_eq!(decoded_swapstring.from_asset, Some(asset_id_2.clone()));
+    assert_eq!(decoded_swapstring.to_asset, Some(asset_id_1.clone()));
+    assert!(decoded_swapstring.expiry > 0);
+    assert_eq!(
+        decoded_swapstring.payment_hash,
+        maker_init_response.payment_hash
+    );
+
+    // check /decodeswapstring invalid swapstring error
+    let payload = DecodeSwapstringRequest {
+        swapstring: s!("not_a_valid_swapstring"),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{maker_addr}/decodeswapstring"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid swap string 'not_a_valid_swapstring'",
+        "InvalidSwapString",
+    )
+    .await;
+
     taker(taker_addr, maker_init_response.swapstring.clone()).await;
 
     let swaps_maker = list_swaps(maker_addr).await;

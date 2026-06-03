@@ -72,9 +72,9 @@ jobs:
 
   test:
     runs-on: warp-ubuntu-latest-x64-16x
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1

@@ -81,8 +81,8 @@ use rgb_lib::{
         DatabaseType, OnlineOptions, Recipient, SinglesigKeys, TransportEndpoint,
         Wallet as RgbLibWallet, WalletData, WitnessData,
     },
-    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Fascia, FileContent,
-    RgbTransfer, RgbTxid, WitnessOrd,
+    AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Error as RgbLibError,
+    Fascia, FileContent, RgbTransfer, RgbTxid, WitnessOrd,
 };
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -227,6 +227,9 @@ fn sync_config_to_kvstore(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) static IGNORE_INBOUND_CHANNELS_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -1385,6 +1388,40 @@ fn normalize_funding_psbt_locktime(
     Ok(psbt.to_string())
 }
 
+// Handle an rgb-lib error that happened while preparing a channel funding transaction in
+// FundingGenerationReady. Returns the value to propagate from the event handler: `Err(ReplayEvent)`
+// to retry the event (for transient network errors), or `Ok(())` after force-closing the channel
+// (for terminal errors).
+#[allow(dead_code)]
+fn handle_funding_prepare_err(
+    e: RgbLibError,
+    channel_manager: &ChannelManager,
+    temporary_channel_id: &ChannelId,
+    counterparty_node_id: &PublicKey,
+) -> Result<(), ReplayEvent> {
+    match e {
+        RgbLibError::Indexer { details }
+        | RgbLibError::InvalidIndexer { details }
+        | RgbLibError::Network { details } => {
+            tracing::error!("Network error during channel opening: {details}");
+            Err(ReplayEvent())
+        }
+        e => {
+            tracing::error!("Cannot open channel: {e}");
+            if let Err(close_err) = channel_manager.force_close_broadcasting_latest_txn(
+                temporary_channel_id,
+                counterparty_node_id,
+                e.to_string(),
+            ) {
+                tracing::error!(
+                    "Failed to force-close channel {temporary_channel_id} after error: {close_err:?}"
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
 async fn handle_ldk_events(
     event: Event,
     unlocked_state: Arc<UnlockedAppState>,
@@ -1676,7 +1713,8 @@ async fn handle_ldk_events(
                     AssetSchema::Uda => Assignment::NonFungible,
                 };
 
-                let recipient_id = recipient_id_from_script_buf(script_buf, static_state.network);
+                let recipient_id =
+                    recipient_id_from_script_buf(script_buf.clone(), static_state.network);
 
                 let recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
@@ -1748,8 +1786,26 @@ async fn handle_ldk_events(
             let psbt = Psbt::from_str(&signed_psbt).unwrap();
 
             let funding_tx = psbt.clone().extract_tx().unwrap();
-            let funding_txid = funding_tx.compute_txid().to_string();
-            tracing::info!("Funding TXID: {funding_txid}");
+            let funding_txid = funding_tx.compute_txid();
+            let funding_txid_str = funding_txid.to_string();
+            tracing::info!("Funding TXID: {funding_txid_str}");
+
+            // persist the funding TXID keyed by the final channel ID so handle_open_chan_fail can
+            // find it
+            let funding_output_index = funding_tx
+                .output
+                .iter()
+                .position(|o| o.script_pubkey == script_buf)
+                .expect("funding TX must contain the expected output script")
+                as u16;
+            let final_channel_id = ChannelId::v1_from_funding_txid(
+                bitcoin::hashes::Hash::as_byte_array(&funding_txid),
+                funding_output_index,
+            );
+            let pending_funding_path = static_state
+                .ldk_data_dir
+                .join(format!("pending_funding_{}", final_channel_id.0.as_hex()));
+            fs::write(&pending_funding_path, &funding_txid_str).unwrap();
 
             // Store PSBT in database for later use when channel is funded
             unlocked_state
@@ -1757,14 +1813,14 @@ async fn handle_ldk_events(
                 .write(
                     PSBT_NAMESPACE,
                     "",
-                    &funding_txid,
+                    &funding_txid_str,
                     psbt.to_string().into_bytes(),
                 )
                 .unwrap();
 
             if let Some(asset_id) = asset_id {
                 let unlocked_state_copy = unlocked_state.clone();
-                let witness_id = funding_txid.clone();
+                let witness_id = funding_txid_str.clone();
                 tokio::task::spawn_blocking(move || {
                     unlocked_state_copy
                         .rgb_upsert_witness(
@@ -1777,7 +1833,7 @@ async fn handle_ldk_events(
                 .unwrap();
 
                 let consignment_path =
-                    unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid);
+                    unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid_str);
                 let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
                     .unwrap()
                     .endpoint;
@@ -1786,9 +1842,9 @@ async fn handle_ldk_events(
                 let res = tokio::task::spawn_blocking(move || {
                     unlocked_state_copy.rgb_post_consignment(
                         &proxy_url,
-                        funding_txid.clone(),
+                        funding_txid_str.clone(),
                         &consignment_path_copy,
-                        funding_txid,
+                        funding_txid_str,
                         None,
                     )
                 })
@@ -2103,6 +2159,20 @@ async fn handle_ldk_events(
             ref channel_type,
             ..
         } => {
+            #[cfg(test)]
+            if IGNORE_INBOUND_CHANNELS_ON_NODE
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|id| *id == unlocked_state.channel_manager.get_our_node_id())
+            {
+                tracing::info!(
+                    "TEST: ignoring inbound channel {} from {}",
+                    temporary_channel_id,
+                    hex_str(&counterparty_node_id.serialize()),
+                );
+                return Ok(());
+            }
             let mut random_bytes = [0u8; 16];
             random_bytes
                 .copy_from_slice(&unlocked_state.entropy_source.get_secure_random_bytes()[..16]);
@@ -2541,8 +2611,6 @@ async fn handle_ldk_events(
             }
         }
         Event::DiscardFunding { channel_id, .. } => {
-            // A "real" node should probably "lock" the UTXOs spent in funding transactions until
-            // the funding transaction either confirms, or this event is generated.
             tracing::info!(
                 "EVENT: Discarded funding for channel with ID {}",
                 channel_id
@@ -4645,6 +4713,7 @@ mod tests {
             schema: serde_json::from_str("\"Nia\"").expect("valid schema"),
             local_rgb_amount,
             remote_rgb_amount,
+            batch_transfer_idx: None,
         };
         kv_store.write_rgb_channel_info(channel_id, &info, false);
     }

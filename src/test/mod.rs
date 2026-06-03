@@ -3,8 +3,11 @@ use biscuit_auth::{builder::date, macros::*, KeyPair};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::{Amount, Denomination};
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
+use http::response::Builder;
+use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
 use lightning::rgb_utils::{
     RgbPaymentInfo, RGB_PAYMENT_INFO_INBOUND_NS, RGB_PAYMENT_INFO_OUTBOUND_NS, RGB_PRIMARY_NS,
 };
@@ -18,6 +21,8 @@ use reqwest::{Response, StatusCode};
 use rgb_lib::{BitcoinNetwork, ContractId};
 use sea_orm::{ConnectOptions, Database};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -29,35 +34,39 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing_test::traced_test;
 
 use crate::core_types::{HTLCStatus, SwapStatus, FEE_RATE, HTLC_MIN_MSAT};
+use crate::disk::LDK_LOGS_FILE;
 use crate::error::{APIError, APIErrorResponse};
 use crate::kv_store::SeaOrmKvStore;
-use crate::ldk::{InboundPaymentInfoStorage, InvoiceType, INBOUND_PAYMENTS_KEY};
+use crate::ldk::{
+    InboundPaymentInfoStorage, InvoiceType, IGNORE_INBOUND_CHANNELS_ON_NODE, INBOUND_PAYMENTS_KEY,
+};
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
     CancelHodlInvoiceRequest, ChangePasswordRequest, Channel, ChannelStatus,
     ClaimHodlInvoiceRequest, ClaimHodlInvoiceResponse, CloseChannelRequest, ConnectPeerRequest,
     CreateUtxosRequest, DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DisconnectPeerRequest, EmptyResponse, FailTransfersRequest,
-    FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest,
-    GetChannelIdResponse, GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
-    InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
-    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
-    IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
-    IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
-    LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse, ListChannelsResponse,
-    ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
-    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
-    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
-    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment,
-    PaymentType, Peer, PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest,
-    RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse,
-    SendPaymentRequest, SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest,
-    Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
+    DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
+    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
+    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, InflateRequest,
+    InflateResponse, InitRequest, InitResponse, InvoiceStatus, InvoiceStatusRequest,
+    InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse, IssueAssetIFARequest,
+    IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse, IssueAssetUDARequest,
+    IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest, LNInvoiceResponse,
+    ListAssetsRequest, ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse,
+    ListPeersResponse, ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse,
+    ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse,
+    MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, PaymentType, Peer,
+    PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
+    RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
+    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest, Transaction,
+    Transfer, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{
     get_db_path, hex_str, hex_str_to_vec, validate_and_parse_payment_hash, AppState,
-    ELECTRUM_URL_REGTEST, LOGS_DIR, PROXY_ENDPOINT_LOCAL,
+    ELECTRUM_URL_REGTEST, LDK_DIR, LOGS_DIR, PROXY_ENDPOINT_LOCAL,
 };
 
 use super::*;
@@ -69,6 +78,8 @@ const NODE3_PEER_PORT: u16 = 9803;
 const NODE4_PEER_PORT: u16 = 9804;
 const NODE5_PEER_PORT: u16 = 9805;
 const NODE6_PEER_PORT: u16 = 9806;
+
+const ISSUE_AMT: u64 = 1000;
 
 const DURATION_SECONDS: u64 = 999;
 
@@ -104,7 +115,39 @@ impl Default for UserArgs {
     }
 }
 
-fn _bitcoin_cli() -> [String; 7] {
+struct ElectrsRestartGuard;
+
+impl ElectrsRestartGuard {
+    fn stop_electrs(&self) {
+        let status = Command::new("docker")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .arg("compose")
+            .arg("stop")
+            .arg("electrs")
+            .status()
+            .expect("failed to stop electrs");
+        assert!(status.success(), "failed to stop electrs");
+    }
+}
+
+impl Drop for ElectrsRestartGuard {
+    fn drop(&mut self) {
+        let status = Command::new("docker")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .arg("compose")
+            .arg("start")
+            .arg("electrs")
+            .status()
+            .expect("failed to stop electrs");
+        assert!(status.success(), "failed to stop electrs");
+    }
+}
+
+fn bitcoin_cli() -> [String; 7] {
     [
         s!("exec"),
         s!("-T"),
@@ -123,7 +166,7 @@ fn check_preimage_matches_hash(payment: &Payment, expected_payment_hash: &str) {
     assert_eq!(payment_preimage_hash, expected_payment_hash);
 }
 
-async fn _check_response_is_ok(res: Response) -> Response {
+async fn check_response_is_ok(res: Response) -> Response {
     if res.status() != reqwest::StatusCode::OK {
         panic!("reqwest response is not OK: {:?}", res.text().await);
     }
@@ -143,28 +186,30 @@ async fn check_response_is_nok(
     assert_eq!(api_error_response.name, expected_name);
 }
 
-fn _fund_wallet(address: String) {
+fn fund_wallet(address: String, sats: u64) {
+    let amt = Amount::from_sat(sats);
+    let btc_str = amt.to_string_in(Denomination::Bitcoin);
     let status = Command::new("docker")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .arg("compose")
-        .args(_bitcoin_cli())
+        .args(bitcoin_cli())
         .arg("-rpcwallet=miner")
         .arg("sendtoaddress")
         .arg(address)
-        .arg("1")
+        .arg(btc_str)
         .status()
         .expect("failed to fund wallet");
     assert!(status.success());
 }
 
-fn _get_txout(txid: &str) -> String {
+fn get_txout(txid: &str) -> String {
     String::from_utf8(
         Command::new("docker")
             .stdin(Stdio::null())
             .arg("compose")
-            .args(_bitcoin_cli())
+            .args(bitcoin_cli())
             .arg("-rpcwallet=miner")
             .arg("gettxout")
             .arg(txid)
@@ -228,7 +273,7 @@ async fn start_daemon_with_virtual_options(
 
 async fn init(node_address: SocketAddr, password: &str, mnemonic: Option<String>) -> InitResponse {
     let res = init_res(node_address, password, mnemonic).await;
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<InitResponse>()
         .await
@@ -265,7 +310,7 @@ async fn init_with_bearer(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<InitResponse>()
         .await
@@ -319,7 +364,7 @@ async fn address(node_address: SocketAddr) -> String {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<AddressResponse>()
         .await
@@ -338,7 +383,7 @@ async fn asset_balance(node_address: SocketAddr, asset_id: &str) -> AssetBalance
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<AssetBalanceResponse>()
         .await
@@ -367,7 +412,7 @@ async fn backup(node_address: SocketAddr, backup_path: &str, password: &str) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -383,7 +428,7 @@ async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<BtcBalanceResponse>()
         .await
@@ -399,7 +444,7 @@ async fn cancel_hodl_invoice(node_address: SocketAddr, payment_hash: String) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res).await;
+    check_response_is_ok(res).await;
 }
 
 async fn change_password(node_address: SocketAddr, old_password: &str, new_password: &str) {
@@ -414,7 +459,7 @@ async fn change_password(node_address: SocketAddr, old_password: &str, new_passw
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -476,7 +521,7 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -511,7 +556,7 @@ async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &s
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -548,7 +593,7 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -566,7 +611,7 @@ async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNI
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<DecodeLNInvoiceResponse>()
         .await
@@ -584,9 +629,27 @@ async fn decode_rgb_invoice(node_address: SocketAddr, invoice: &str) -> DecodeRG
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<DecodeRGBInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn decode_swapstring(node_address: SocketAddr, swapstring: &str) -> DecodeSwapstringResponse {
+    println!("decoding swapstring {swapstring} for node {node_address}");
+    let payload = DecodeSwapstringRequest {
+        swapstring: swapstring.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/decodeswapstring"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<DecodeSwapstringResponse>()
         .await
         .unwrap()
 }
@@ -602,7 +665,7 @@ async fn disconnect_peer(node_address: SocketAddr, peer_pubkey: &str) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -624,7 +687,7 @@ async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<FailTransfersResponse>()
         .await
@@ -632,15 +695,19 @@ async fn fail_transfers(node_address: SocketAddr, batch_transfer_idx: Option<i32
         .transfers_changed
 }
 
-async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
+async fn fund_with_and_create_utxos(node_address: SocketAddr, num: Option<u8>, sats: u64) {
     println!("funding wallet for node {node_address}");
     let addr = address(node_address).await;
 
-    _fund_wallet(addr);
+    fund_wallet(addr, sats);
     mine(false);
 
     create_utxos(node_address, false, Some(num.unwrap_or(10)), None).await;
     mine(false);
+}
+
+async fn fund_and_create_utxos(node_address: SocketAddr, num: Option<u8>) {
+    fund_with_and_create_utxos(node_address, num, 100_000_000).await;
 }
 
 async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
@@ -654,7 +721,7 @@ async fn get_asset_media(node_address: SocketAddr, digest: &str) -> String {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<GetAssetMediaResponse>()
         .await
@@ -673,7 +740,7 @@ async fn get_channel_id(node_address: SocketAddr, temp_chan_id: &str) -> String 
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<GetChannelIdResponse>()
         .await
@@ -695,7 +762,7 @@ async fn inflate(node_address: SocketAddr, asset_id: &str, inflation_amount: u64
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<InflateResponse>()
         .await
@@ -713,7 +780,7 @@ async fn invoice_status(node_address: SocketAddr, invoice: &str) -> InvoiceStatu
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<InvoiceStatusResponse>()
         .await
@@ -740,7 +807,7 @@ async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> A
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetCFAResponse>()
         .await
@@ -751,7 +818,7 @@ async fn issue_asset_cfa(node_address: SocketAddr, file_path: Option<&str>) -> A
 async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
     println!("issuing IFA asset on node {node_address}");
     let payload = IssueAssetIFARequest {
-        amounts: vec![1000],
+        amounts: vec![ISSUE_AMT],
         inflation_amounts: vec![2000],
         ticker: s!("USDT"),
         name: s!("Tether"),
@@ -764,7 +831,7 @@ async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetIFAResponse>()
         .await
@@ -775,7 +842,7 @@ async fn issue_asset_ifa(node_address: SocketAddr) -> AssetIFA {
 async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
     println!("issuing NIA asset on node {node_address}");
     let payload = IssueAssetNIARequest {
-        amounts: vec![1000],
+        amounts: vec![ISSUE_AMT],
         ticker: s!("USDT"),
         name: s!("Tether"),
         precision: 0,
@@ -786,7 +853,7 @@ async fn issue_asset_nia(node_address: SocketAddr) -> AssetNIA {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetNIAResponse>()
         .await
@@ -808,7 +875,7 @@ async fn issue_asset_nia_with_amounts(node_address: SocketAddr, amounts: Vec<u64
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetNIAResponse>()
         .await
@@ -836,7 +903,7 @@ async fn issue_asset_uda(node_address: SocketAddr, file_path: Option<&str>) -> A
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetUDAResponse>()
         .await
@@ -844,7 +911,7 @@ async fn issue_asset_uda(node_address: SocketAddr, file_path: Option<&str>) -> A
         .asset
 }
 
-async fn _with_ln_balance_checks(
+async fn with_ln_balance_checks(
     node_address: SocketAddr,
     counterparty_node_address: SocketAddr,
     asset_id: Option<String>,
@@ -880,7 +947,7 @@ async fn _with_ln_balance_checks(
     .await;
 }
 
-async fn _keysend_raw(
+async fn keysend_raw(
     node_address: SocketAddr,
     dest_pubkey: &str,
     amt_msat: Option<u64>,
@@ -904,7 +971,7 @@ async fn _keysend_raw(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<KeysendResponse>()
         .await
@@ -918,7 +985,7 @@ async fn keysend(
     asset_id: Option<&str>,
     asset_amount: Option<u64>,
 ) -> Payment {
-    let keysend = _keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
+    let keysend = keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
     wait_for_ln_payment(node_address, &keysend.payment_hash, HTLCStatus::Succeeded).await
 }
 
@@ -933,9 +1000,9 @@ async fn keysend_with_ln_balance(
     initial_ln_balance_rgb: Option<u64>,
     counterparty_initial_ln_balance_rgb: Option<u64>,
 ) {
-    let res = _keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
+    let res = keysend_raw(node_address, dest_pubkey, amt_msat, asset_id, asset_amount).await;
 
-    _with_ln_balance_checks(
+    with_ln_balance_checks(
         node_address,
         counterparty_node_address,
         asset_id.map(|a| a.to_string()),
@@ -958,7 +1025,7 @@ async fn list_assets(node_address: SocketAddr) -> ListAssetsResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListAssetsResponse>()
         .await
@@ -972,7 +1039,7 @@ async fn list_channels(node_address: SocketAddr) -> Vec<Channel> {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListChannelsResponse>()
         .await
@@ -987,7 +1054,7 @@ async fn list_payments(node_address: SocketAddr) -> Vec<Payment> {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListPaymentsResponse>()
         .await
@@ -1011,7 +1078,7 @@ async fn get_payment(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<GetPaymentResponse>()
         .await
@@ -1026,7 +1093,7 @@ async fn list_peers(node_address: SocketAddr) -> Vec<Peer> {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListPeersResponse>()
         .await
@@ -1041,7 +1108,7 @@ async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res).await.json().await.unwrap()
+    check_response_is_ok(res).await.json().await.unwrap()
 }
 
 async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> Swap {
@@ -1056,7 +1123,7 @@ async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> 
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<GetSwapResponse>()
         .await
@@ -1073,7 +1140,7 @@ async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListTransactionsResponse>()
         .await
@@ -1092,7 +1159,7 @@ async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfe
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListTransfersResponse>()
         .await
@@ -1109,7 +1176,7 @@ async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ListUnspentsResponse>()
         .await
@@ -1185,7 +1252,7 @@ async fn ln_invoice_with_type(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<LNInvoiceResponse>()
         .await
@@ -1199,7 +1266,7 @@ async fn lock(node_address: SocketAddr) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -1213,7 +1280,7 @@ async fn maker_execute(
     taker_pubkey: String,
 ) {
     let res = maker_execute_raw(node_address, swapstring, payment_secret, taker_pubkey).await;
-    let _ = _check_response_is_ok(res)
+    let _ = check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await;
@@ -1264,7 +1331,7 @@ async fn maker_init(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<MakerInitResponse>()
         .await
@@ -1278,7 +1345,7 @@ async fn network_info(node_address: SocketAddr) -> NetworkInfoResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NetworkInfoResponse>()
         .await
@@ -1292,7 +1359,7 @@ async fn node_info(node_address: SocketAddr) -> NodeInfoResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<NodeInfoResponse>()
         .await
@@ -1500,7 +1567,7 @@ async fn open_channel_raw(
                 && asset_amounts_match
         }) {
             if let Some(txid) = &channel.funding_txid {
-                let txout = _get_txout(txid);
+                let txout = get_txout(txid);
                 if !txout.is_empty() {
                     mine_n_blocks(false, 6);
                     channel_id = Some(channel.channel_id.clone());
@@ -1511,6 +1578,169 @@ async fn open_channel_raw(
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 50.0 {
             panic!("cannot find funding TX")
+        }
+    }
+    let channel_id = channel_id.unwrap();
+
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node_address).await;
+        let channel = channels
+            .iter()
+            .find(|c| c.channel_id == channel_id)
+            .unwrap();
+        if channel.ready {
+            return Ok(channel.clone());
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("channel is taking too long to be ready")
+        }
+    }
+}
+
+/// Low-level open-channel helper: POSTs the request and returns the raw response
+/// without waiting for the channel to become ready. Used by tests that assert on
+/// the immediate open result or that deliberately exercise stuck/failed opens.
+#[allow(clippy::too_many_arguments)]
+async fn open_channel_request_raw(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
+    fee_base_msat: Option<u32>,
+    fee_proportional_millionths: Option<u32>,
+    temporary_channel_id: Option<&str>,
+    with_anchors: bool,
+    public: bool,
+) -> Result<OpenChannelResponse, Response> {
+    println!(
+        "opening channel with {asset_amount:?} of asset {asset_id:?} from node {node_address} \
+              to {dest_peer_pubkey}"
+    );
+
+    let blockcount = get_block_count();
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let net_info = network_info(node_address).await;
+        if net_info.height == blockcount {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("height is not syncing");
+        }
+    }
+
+    let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
+        format!("{dest_peer_pubkey}@127.0.0.1:{p}")
+    } else {
+        dest_peer_pubkey.to_string()
+    };
+    let payload = OpenChannelRequest {
+        peer_pubkey_and_opt_addr,
+        capacity_sat: capacity_sat.unwrap_or(100_000),
+        push_msat: push_msat.unwrap_or(0),
+        asset_amount,
+        asset_id: asset_id.map(|a| a.to_string()),
+        push_asset_amount,
+        public,
+        with_anchors,
+        fee_base_msat,
+        fee_proportional_millionths,
+        temporary_channel_id: temporary_channel_id.map(|t| t.to_string()),
+        virtual_open_mode: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/openchannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+
+    let status = res.status();
+    if !status.is_success() {
+        return Err(res);
+    }
+
+    Ok(res.json::<OpenChannelResponse>().await.unwrap())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn open_channel_funded_raw(
+    node_address: SocketAddr,
+    dest_peer_pubkey: &str,
+    dest_peer_port: Option<u16>,
+    capacity_sat: Option<u64>,
+    push_msat: Option<u64>,
+    asset_amount: Option<u64>,
+    asset_id: Option<&str>,
+    push_asset_amount: Option<u64>,
+    fee_base_msat: Option<u32>,
+    fee_proportional_millionths: Option<u32>,
+    temporary_channel_id: Option<&str>,
+    with_anchors: bool,
+    public: bool,
+) -> Result<Channel, Response> {
+    open_channel_request_raw(
+        node_address,
+        dest_peer_pubkey,
+        dest_peer_port,
+        capacity_sat,
+        push_msat,
+        asset_amount,
+        asset_id,
+        push_asset_amount,
+        fee_base_msat,
+        fee_proportional_millionths,
+        temporary_channel_id,
+        with_anchors,
+        public,
+    )
+    .await?;
+
+    let t_0 = OffsetDateTime::now_utc();
+    let mut channel_id = None;
+    let mut channel_funded = false;
+    while !channel_funded {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node_address).await;
+        if let Some(channel) = channels.iter().find(|c| {
+            let asset_amounts_match = if asset_id.is_some() {
+                let local_amount = asset_amount.unwrap_or(0) - push_asset_amount.unwrap_or(0);
+                let remote_amount = push_asset_amount.unwrap_or(0);
+                c.asset_local_amount == Some(local_amount)
+                    && c.asset_remote_amount == Some(remote_amount)
+            } else {
+                c.asset_local_amount.is_none() && c.asset_remote_amount.is_none()
+            };
+            !c.ready
+                && c.peer_pubkey == dest_peer_pubkey
+                && c.asset_id == asset_id.map(|id| id.to_string())
+                && asset_amounts_match
+        }) {
+            if let Some(txid) = &channel.funding_txid {
+                let txout = get_txout(txid);
+                if !txout.is_empty() {
+                    mine_n_blocks(false, 6);
+                    channel_id = Some(channel.channel_id.clone());
+                    channel_funded = true;
+                    continue;
+                }
+            }
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 50.0 {
+            println!("cannot find funding TX for channel to {dest_peer_pubkey}");
+            return Err(Response::from(
+                Builder::new()
+                    .status(reqwest::StatusCode::FORBIDDEN)
+                    .body("")
+                    .unwrap(),
+            ));
         }
     }
     let channel_id = channel_id.unwrap();
@@ -1547,7 +1777,7 @@ async fn open_channel_with_custom_data(
     temporary_channel_id: Option<&str>,
     with_anchors: bool,
 ) -> Channel {
-    open_channel_raw(
+    open_channel_funded_raw(
         node_address,
         dest_peer_pubkey,
         dest_peer_port,
@@ -1561,7 +1791,6 @@ async fn open_channel_with_custom_data(
         temporary_channel_id,
         with_anchors,
         true,
-        None,
     )
     .await
     .expect("channel opening should succeed")
@@ -1609,7 +1838,7 @@ async fn post_asset_media(node_address: SocketAddr, file_path: &str) -> String {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<PostAssetMediaResponse>()
         .await
@@ -1634,7 +1863,7 @@ async fn refresh_transfers(node_address: SocketAddr) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -1653,7 +1882,7 @@ async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -1697,7 +1926,7 @@ async fn rgb_invoice_with_assignment(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<RgbInvoiceResponse>()
         .await
@@ -1750,7 +1979,7 @@ async fn send_assets(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<SendRgbResponse>()
         .await
@@ -1771,7 +2000,7 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<SendBtcResponse>()
         .await
@@ -1793,7 +2022,7 @@ async fn send_payment_raw(node_address: SocketAddr, invoice: String) -> SendPaym
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<SendPaymentResponse>()
         .await
@@ -1815,7 +2044,7 @@ async fn send_payment_with_ln_balance(
 
     let res = send_payment_raw(node_address, invoice).await;
 
-    _with_ln_balance_checks(
+    with_ln_balance_checks(
         node_address,
         counterparty_node_address,
         bolt11_invoice.rgb_contract_id().map(|c| c.to_string()),
@@ -1860,7 +2089,7 @@ async fn claim_hodl_invoice(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<ClaimHodlInvoiceResponse>()
         .await
@@ -1876,7 +2105,7 @@ async fn shutdown(node_sockets: &[SocketAddr]) {
             .send()
             .await
             .unwrap();
-        _check_response_is_ok(res).await;
+        check_response_is_ok(res).await;
     }
     // check node sockets have been released
     let t_0 = OffsetDateTime::now_utc();
@@ -1908,7 +2137,7 @@ async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -1955,7 +2184,7 @@ async fn unlock_with_gossip_source(
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -1965,7 +2194,7 @@ async fn unlock_with_gossip_source(
 async fn unlock(node_address: SocketAddr, password: &str) {
     println!("unlocking node {node_address}");
     let res = unlock_res(node_address, password).await;
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<EmptyResponse>()
         .await
@@ -2178,7 +2407,7 @@ impl Miner {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .arg("compose")
-            .args(_bitcoin_cli())
+            .args(bitcoin_cli())
             .arg("-rpcwallet=miner")
             .arg("-generate")
             .arg(num_blocks.to_string())
@@ -2246,7 +2475,7 @@ fn get_block_count() -> u32 {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .arg("compose")
-        .args(_bitcoin_cli())
+        .args(bitcoin_cli())
         .arg("getblockcount")
         .output()
         .expect("failed to call getblockcount");
@@ -2333,6 +2562,7 @@ mod close_force_other_side;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
+mod drop_funding_signed;
 mod esplora_indexer_defaults;
 mod fail_transfers;
 mod getchannelid;
@@ -2347,10 +2577,12 @@ mod init_esplora;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
+mod missing_acceptor;
 mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
 mod openchannel_fail;
+mod openchannel_no_indexer;
 mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
 mod payment;

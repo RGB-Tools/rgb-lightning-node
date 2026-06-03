@@ -2942,6 +2942,7 @@ pub(crate) async fn open_channel(
                 schema: schema.unwrap(),
                 local_rgb_amount: *asset_amount - push_amount,
                 remote_rgb_amount: push_amount,
+                batch_transfer_idx: None,
             };
             unlocked_state
                 .kv_store
@@ -3575,7 +3576,10 @@ pub(crate) async fn send_onion_message(
 pub(crate) async fn sync(state: Arc<AppState>) -> Result<(), APIError> {
     let guard = check_unlocked(&state).await?;
     let unlocked_state = guard.as_ref().unwrap();
-    unlocked_state.rgb_sync()?;
+    unlocked_state.rgb_sync(rgb_lib::wallet::SyncOptions {
+        keychain: rgb_lib::wallet::SyncKeychain::Colored,
+        strategy: rgb_lib::wallet::SyncStrategy::FastSync,
+    })?;
     Ok(())
 }
 

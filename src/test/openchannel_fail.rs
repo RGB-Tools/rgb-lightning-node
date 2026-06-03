@@ -1,11 +1,11 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/open_fail/";
+const TEST_DIR_BASE: &str = "tmp/openchannel_fail/";
 
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-async fn open_fail() {
+async fn openchannel_fail() {
     initialize();
 
     let test_dir_node1 = format!("{TEST_DIR_BASE}node1");
@@ -13,13 +13,12 @@ async fn open_fail() {
     let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
     let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
 
-    fund_and_create_utxos(node1_addr, Some(1)).await;
+    fund_with_and_create_utxos(node1_addr, Some(1), 300_000).await;
     fund_and_create_utxos(node2_addr, None).await;
 
     let asset_id = issue_asset_nia(node1_addr).await.asset_id;
 
     let node2_info = node_info(node2_addr).await;
-
     let node2_pubkey = node2_info.pubkey;
 
     // open with insufficient allocation slots
@@ -46,8 +45,8 @@ async fn open_fail() {
     check_response_is_nok(
         res,
         reqwest::StatusCode::FORBIDDEN,
-        "No uncolored UTXOs are available (hint: call createutxos)",
-        "NoAvailableUtxos",
+        "Not enough funds",
+        "InsufficientFunds",
     )
     .await;
 
@@ -56,7 +55,67 @@ async fn open_fail() {
     assert_eq!(channels_1.len(), 0);
     assert_eq!(channels_2.len(), 0);
 
+    // insufficient colored bitcoin funds
+    fund_wallet(address(node2_addr).await, 1000000);
+    let res = open_channel_request_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        None,
+        Some(200),
+        Some(&asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+        true,
+    )
+    .await;
+    check_response_is_nok(
+        res.unwrap_err(),
+        reqwest::StatusCode::FORBIDDEN,
+        "Not enough funds",
+        "InsufficientFunds",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
+    // insufficient RGB assets
     fund_and_create_utxos(node1_addr, Some(9)).await;
+    let res = open_channel_request_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        None,
+        None,
+        Some(ISSUE_AMT + 1),
+        Some(&asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+        true,
+    )
+    .await;
+    check_response_is_nok(
+        res.unwrap_err(),
+        reqwest::StatusCode::FORBIDDEN,
+        "Not enough assets",
+        "InsufficientAssets",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
 
     // open with unknown asset
     let payload = OpenChannelRequest {
@@ -86,6 +145,11 @@ async fn open_fail() {
         "UnknownContractId",
     )
     .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
 
     // open with bad asset amount
     let payload = OpenChannelRequest {

@@ -1,5 +1,5 @@
 [submodule "rust-lightning"]
 	path = rust-lightning
-	url = https://github.com/UTEXO-Protocol/rust-lightning.git
-	branch = dev
+	url = https://github.com/dcorral/rust-lightning.git
+	branch = chore/merge-upstream-rgb
 	shallow = true

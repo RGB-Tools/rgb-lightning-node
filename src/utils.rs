@@ -596,6 +596,7 @@ pub(crate) fn get_max_local_rgb_amount<'r>(
     max_balance
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn get_route(
     channel_manager: &crate::ldk::ChannelManager,
     router: &crate::ldk::Router,

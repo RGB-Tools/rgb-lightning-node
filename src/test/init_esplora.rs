@@ -93,7 +93,7 @@ async fn init_esplora_path_unlocks_without_bitcoind() {
     // Fund + mine: if esplora chain-sync is broken the balance never moves.
     let addr = address(node1_addr).await;
     let pre_balance = btc_balance(node1_addr).await;
-    _fund_wallet(addr);
+    fund_wallet(addr, 100_000_000);
     mine(false);
     let t_0 = OffsetDateTime::now_utc();
     let mut post_balance = btc_balance(node1_addr).await;
