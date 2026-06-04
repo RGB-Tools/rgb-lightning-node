@@ -298,3 +298,16 @@ jobs:
           repository: UTEXO-Protocol/rgb-sdk-rn
           event-type: rln-release
           client-payload: '{"version": "${{ needs.resolve-version.outputs.version }}"}'
+
+  trigger-wdk:
+    name: Trigger wdk-rgb-lightning release
+    runs-on: ubuntu-latest
+    needs: [resolve-version, github-release]
+    steps:
+      - name: Dispatch rln-release to wdk-rgb-lightning
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+          repository: UTEXO-Protocol/wdk-rgb-lightning
+          event-type: rln-release
+          client-payload: '{"version": "${{ needs.resolve-version.outputs.version }}"}'
