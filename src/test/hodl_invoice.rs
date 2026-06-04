@@ -639,7 +639,7 @@ async fn claim_hodl_invoice_btc_rgb() {
         )
         .await;
     } else if claim_while_claiming_res.status() == StatusCode::OK {
-        let _ = _check_response_is_ok(claim_while_claiming_res).await;
+        let _ = check_response_is_ok(claim_while_claiming_res).await;
     } else {
         let status = claim_while_claiming_res.status();
         let body = claim_while_claiming_res.text().await.unwrap_or_default();

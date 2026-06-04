@@ -4216,6 +4216,7 @@ dependencies = [
  "esplora-client",
  "futures",
  "hex-conservative 0.3.2",
+ "http",
  "lazy_static",
  "lightning 0.2.2",
  "lightning-background-processor",

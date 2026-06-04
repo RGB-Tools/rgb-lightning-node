@@ -20,8 +20,9 @@ use rgb_lib::{
         rust_only::{check_proxy_url, ColoringInfo},
         AssetCFA, AssetIFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online,
         OperationResult, ReceiveData, Recipient, RefreshResult, RgbWalletOpsOffline,
-        RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, Transaction as RgbLibTransaction,
-        Transfer, TransportEndpoint, Unspent, Wallet as RgbLibWallet,
+        RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, SyncOptions,
+        Transaction as RgbLibTransaction, Transfer, TransportEndpoint, Unspent,
+        Wallet as RgbLibWallet,
     },
     AssetSchema, Assignment, BitcoinNetwork, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
     RgbTransport, RgbTxid, UpdateRes, WitnessOrd,
@@ -116,6 +117,12 @@ impl UnlockedAppState {
         unsigned_psbt: &str,
     ) -> Result<Vec<String>, RgbLibError> {
         rgb_signer_descriptors_for_psbt_with_context(self.external_signer.as_deref(), unsigned_psbt)
+    }
+
+    // Upstream API retained through the merge; not yet wired into utexo's flow.
+    #[allow(dead_code)]
+    pub(crate) fn rgb_abort_pending_vanilla_tx(&self, txid: String) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.abort_pending_vanilla_tx(txid)
     }
 
     pub(crate) fn rgb_blind_receive(
@@ -418,7 +425,7 @@ impl UnlockedAppState {
         fee_rate: u64,
     ) -> Result<String, RgbLibError> {
         self.rgb_wallet_wrapper
-            .send_btc_begin(address, amount, fee_rate)
+            .send_btc_begin(address, amount, fee_rate, false)
     }
 
     pub(crate) fn rgb_send_btc_end(&self, signed_psbt: String) -> Result<String, RgbLibError> {
@@ -450,8 +457,8 @@ impl UnlockedAppState {
         }
     }
 
-    pub(crate) fn rgb_sync(&self) -> Result<(), RgbLibError> {
-        self.rgb_wallet_wrapper.sync()
+    pub(crate) fn rgb_sync(&self, options: SyncOptions) -> Result<(), RgbLibError> {
+        self.rgb_wallet_wrapper.sync(options)
     }
 
     pub(crate) fn rgb_upsert_witness(
@@ -520,6 +527,12 @@ impl RgbLibWalletWrapper {
     #[cfg(feature = "vss")]
     pub(crate) fn vss_client(&self) -> Option<Arc<rgb_lib::wallet::vss::VssBackupClient>> {
         self.get_rgb_wallet().vss_client()
+    }
+
+    // Upstream API retained through the merge; not yet wired into utexo's flow.
+    #[allow(dead_code)]
+    pub(crate) fn abort_pending_vanilla_tx(&self, txid: String) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().abort_pending_vanilla_tx(txid)
     }
 
     pub(crate) fn bitcoin_network(&self) -> BitcoinNetwork {
@@ -863,6 +876,7 @@ impl RgbLibWalletWrapper {
         address: String,
         amount: u64,
         fee_rate: u64,
+        _dry_run: bool,
     ) -> Result<String, RgbLibError> {
         // Funding-only path: pin a final (zero) locktime so LDK accepts the
         // vanilla channel funding tx regardless of the node's chain-tip lag.
@@ -889,14 +903,8 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().sign_psbt(unsigned_psbt, None)
     }
 
-    pub(crate) fn sync(&self) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().sync(
-            self.online,
-            rgb_lib::wallet::SyncOptions {
-                keychain: rgb_lib::wallet::SyncKeychain::Colored,
-                strategy: rgb_lib::wallet::SyncStrategy::FastSync,
-            },
-        )
+    pub(crate) fn sync(&self, options: SyncOptions) -> Result<(), RgbLibError> {
+        self.get_rgb_wallet().sync(self.online, options)
     }
 
     pub(crate) fn update_witnesses(

@@ -51,7 +51,7 @@ async fn issue_asset_nia_with_amounts(node_address: SocketAddr, amounts: Vec<u64
         .send()
         .await
         .unwrap();
-    _check_response_is_ok(res)
+    check_response_is_ok(res)
         .await
         .json::<IssueAssetNIAResponse>()
         .await
@@ -1131,7 +1131,7 @@ async fn virtual_close_succeeds_without_remote_value_and_is_idempotent() {
         false,
     )
     .await;
-    _check_response_is_ok(response)
+    check_response_is_ok(response)
         .await
         .json::<EmptyResponse>()
         .await

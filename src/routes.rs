@@ -51,7 +51,9 @@ use rgb_lib::{
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
         Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
         Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
-        Token as RgbLibToken, TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
+        SyncKeychain as RgbLibSyncKeychain, SyncOptions as RgbLibSyncOptions,
+        SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
+        WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
     BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
@@ -368,6 +370,7 @@ pub(crate) enum BitcoinNetwork {
     Testnet,
     Testnet4,
     Signet,
+    SignetCustom,
     Regtest,
 }
 
@@ -391,7 +394,7 @@ impl From<RgbLibNetwork> for BitcoinNetwork {
             RgbLibNetwork::Testnet4 => Self::Testnet4,
             RgbLibNetwork::Regtest => Self::Regtest,
             RgbLibNetwork::Signet => Self::Signet,
-            RgbLibNetwork::SignetCustom => todo!("fix when adding support to custom signet"),
+            RgbLibNetwork::SignetCustom => Self::SignetCustom,
         }
     }
 }
@@ -544,6 +547,21 @@ pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) network: BitcoinNetwork,
     pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) transport_endpoints: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeSwapstringRequest {
+    pub(crate) swapstring: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct DecodeSwapstringResponse {
+    pub(crate) qty_from: u64,
+    pub(crate) qty_to: u64,
+    pub(crate) from_asset: Option<String>,
+    pub(crate) to_asset: Option<String>,
+    pub(crate) expiry: u64,
+    pub(crate) payment_hash: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -934,7 +952,7 @@ pub(crate) struct OpenChannelRequest {
     pub(crate) virtual_open_mode: Option<String>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct OpenChannelResponse {
     pub(crate) temporary_channel_id: String,
 }
@@ -1138,6 +1156,58 @@ pub(crate) struct Swap {
     pub(crate) initiated_at: Option<u64>,
     pub(crate) expires_at: u64,
     pub(crate) completed_at: Option<u64>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum SyncKeychain {
+    Colored,
+    Vanilla { lookback: u32 },
+}
+
+impl From<SyncKeychain> for RgbLibSyncKeychain {
+    fn from(value: SyncKeychain) -> Self {
+        match value {
+            SyncKeychain::Colored => RgbLibSyncKeychain::Colored,
+            SyncKeychain::Vanilla { lookback } => RgbLibSyncKeychain::Vanilla { lookback },
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SyncOptions {
+    keychain: SyncKeychain,
+    strategy: SyncStrategy,
+}
+
+impl From<SyncOptions> for RgbLibSyncOptions {
+    fn from(value: SyncOptions) -> Self {
+        Self {
+            keychain: value.keychain.into(),
+            strategy: value.strategy.into(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct SyncRequest {
+    pub(crate) options: SyncOptions,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) enum SyncStrategy {
+    FullScan,
+    FullSync,
+    FastSync,
+}
+
+impl From<SyncStrategy> for RgbLibSyncStrategy {
+    fn from(value: SyncStrategy) -> Self {
+        match value {
+            SyncStrategy::FullScan => RgbLibSyncStrategy::FullScan,
+            SyncStrategy::FullSync => RgbLibSyncStrategy::FullSync,
+            SyncStrategy::FastSync => RgbLibSyncStrategy::FastSync,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2172,6 +2242,23 @@ pub(crate) async fn decode_rgb_invoice(
     }))
 }
 
+pub(crate) async fn decode_swapstring(
+    WithRejection(Json(payload), _): WithRejection<Json<DecodeSwapstringRequest>, APIError>,
+) -> Result<Json<DecodeSwapstringResponse>, APIError> {
+    let swapstring = SwapString::from_str(&payload.swapstring)
+        .map_err(|e| APIError::InvalidSwapString(payload.swapstring, e.to_string()))?;
+    let swap_info = swapstring.swap_info;
+
+    Ok(Json(DecodeSwapstringResponse {
+        qty_from: swap_info.qty_from,
+        qty_to: swap_info.qty_to,
+        from_asset: swap_info.from_asset.map(|a| a.to_string()),
+        to_asset: swap_info.to_asset.map(|a| a.to_string()),
+        expiry: swap_info.expiry,
+        payment_hash: hex_str(&swapstring.payment_hash.0),
+    }))
+}
+
 pub(crate) async fn disconnect_peer(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<DisconnectPeerRequest>, APIError>,
@@ -2438,10 +2525,6 @@ pub(crate) async fn inflate(
             ));
         }
 
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
         let unlocked_state_copy = unlocked_state.clone();
         let inflate_result = tokio::task::spawn_blocking(move || {
             unlocked_state_copy.rgb_inflate(
@@ -2531,10 +2614,6 @@ pub(crate) async fn issue_asset_cfa(
             ));
         }
 
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
         let file_path = payload.file_digest.map(|d: String| {
             unlocked_state
                 .rgb_get_media_dir()
@@ -2571,10 +2650,6 @@ pub(crate) async fn issue_asset_ifa(
             ));
         }
 
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
         let asset = unlocked_state.rgb_issue_asset_ifa(
             payload.ticker,
             payload.name,
@@ -2604,10 +2679,6 @@ pub(crate) async fn issue_asset_nia(
             ));
         }
 
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
         let asset = unlocked_state.rgb_issue_asset_nia(
             payload.ticker,
             payload.name,
@@ -2633,10 +2704,6 @@ pub(crate) async fn issue_asset_uda(
             return Err(APIError::UnsupportedInExternalSignerMode(
                 "asset issuance is not supported in external signer mode".to_string(),
             ));
-        }
-
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
         }
 
         let rgb_media_dir = unlocked_state.rgb_get_media_dir();
@@ -3384,6 +3451,7 @@ pub(crate) async fn maker_execute(
         let first_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            unlocked_state.kv_store.as_ref(),
             unlocked_state.runtime_node_id(),
             taker_pk,
             if swap_info.is_to_btc() {
@@ -3401,6 +3469,7 @@ pub(crate) async fn maker_execute(
         let second_leg = get_route(
             &unlocked_state.channel_manager,
             &unlocked_state.router,
+            unlocked_state.kv_store.as_ref(),
             taker_pk,
             unlocked_state.runtime_node_id(),
             if swap_info.is_to_btc() || swap_info.is_asset_asset() {
@@ -3908,11 +3977,14 @@ pub(crate) async fn open_channel(
             ..Default::default()
         };
 
+        // checks on balances here are not precise since they do not take fees into account
         let consignment_endpoint = if let Some((contract_id, asset_amount)) = &colored_info {
+            let balance = unlocked_state.rgb_get_btc_balance(true)?;
+            if payload.capacity_sat > balance.colored.spendable {
+                return Err(APIError::InsufficientFunds(payload.capacity_sat - balance.colored.spendable));
+            }
             let balance = unlocked_state.rgb_get_asset_balance(*contract_id)?;
-            let spendable_rgb_amount = balance.spendable;
-
-            if *asset_amount > spendable_rgb_amount {
+            if *asset_amount > balance.spendable {
                 return Err(APIError::InsufficientAssets);
             }
 
@@ -3968,6 +4040,10 @@ pub(crate) async fn open_channel(
             }
             Some(schema)
         } else {
+            let balance = unlocked_state.rgb_get_btc_balance(true)?;
+            if payload.capacity_sat > balance.vanilla.spendable {
+                return Err(APIError::InsufficientFunds(payload.capacity_sat - balance.vanilla.spendable));
+            }
             None
         };
 
@@ -3999,6 +4075,7 @@ pub(crate) async fn open_channel(
                 schema: schema.unwrap(),
                 local_rgb_amount: *asset_amount - push_amount,
                 remote_rgb_amount: push_amount,
+                batch_transfer_idx: None,
             };
             unlocked_state
                 .kv_store
@@ -4011,8 +4088,13 @@ pub(crate) async fn open_channel(
             (temporary_channel_id, None)
         };
 
-        *unlocked_state.rgb_send_lock.lock().unwrap() = true;
-        tracing::debug!("RGB send lock set to true");
+        // Only colored opens perform an RGB send during funding, so only they need
+        // the RGB send lock. Vanilla opens that stall (e.g. an unresponsive peer)
+        // must not hold it, or they would block all subsequent opens indefinitely.
+        if colored_info.is_some() {
+            *unlocked_state.rgb_send_lock.lock().unwrap() = true;
+            tracing::debug!("RGB send lock set to true");
+        }
 
         let temporary_channel_id = unlocked_state
             .channel_manager
@@ -4195,10 +4277,6 @@ pub(crate) async fn rgb_invoice(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
-
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
 
         let assignment = payload.assignment.unwrap_or(Assignment::Any).into();
 
@@ -4539,10 +4617,6 @@ pub(crate) async fn send_rgb(
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        if *unlocked_state.rgb_send_lock.lock().unwrap() {
-            return Err(APIError::OpenChannelInProgress);
-        }
-
         let recipient_map: HashMap<String, Vec<RgbLibRecipient>> = payload
             .recipient_map
             .into_iter()
@@ -4630,12 +4704,13 @@ pub(crate) async fn sign_message(
 
 pub(crate) async fn sync(
     State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<SyncRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        unlocked_state.rgb_sync()?;
+        unlocked_state.rgb_sync(payload.options.into())?;
 
         Ok(Json(EmptyResponse {}))
     })
