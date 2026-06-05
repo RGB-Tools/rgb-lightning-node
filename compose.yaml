@@ -1,6 +1,6 @@
 services:
   bitcoind:
-    image: registry.gitlab.com/hashbeam/docker/bitcoind:30.0
+    image: registry.gitlab.com/hashbeam/docker/bitcoind:30.2
     command: ["-fallbackfee=0.0002", "-rest"]
     environment:
       MYUID: 1000
@@ -11,7 +11,7 @@ services:
     volumes:
       - ./datacore:/srv/app/.bitcoin
   electrs:
-    image: registry.gitlab.com/hashbeam/docker/electrs:0.10.10
+    image: registry.gitlab.com/hashbeam/docker/electrs:0.11.0
     environment:
       MYUID: 1000
       MYGID: 1000

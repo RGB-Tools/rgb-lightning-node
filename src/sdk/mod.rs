@@ -3239,9 +3239,11 @@ pub(crate) async fn refresh_transfers(
     let unlocked_state = guard.as_ref().unwrap();
     let unlocked_state_copy = unlocked_state.clone();
 
-    tokio::task::spawn_blocking(move || unlocked_state_copy.rgb_refresh(request.skip_sync))
-        .await
-        .unwrap()?;
+    tokio::task::spawn_blocking(move || {
+        unlocked_state_copy.rgb_refresh(None, vec![], request.skip_sync)
+    })
+    .await
+    .unwrap()?;
     Ok(())
 }
 
@@ -4227,7 +4229,7 @@ pub(crate) async fn list_unspents(
     let unlocked_state = guard.as_ref().unwrap();
 
     let mut unspents = vec![];
-    for unspent in unlocked_state.rgb_list_unspents(skip_sync)? {
+    for unspent in unlocked_state.rgb_list_unspents(false, skip_sync)? {
         unspents.push(UnspentData {
             utxo: UtxoData {
                 outpoint: unspent.utxo.outpoint.to_string(),

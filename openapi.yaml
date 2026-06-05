@@ -2628,8 +2628,12 @@ components:
     ListUnspentsRequest:
       type: object
       required:
+        - settled_only
         - skip_sync
       properties:
+        settled_only:
+          type: boolean
+          example: false
         skip_sync:
           type: boolean
           example: false
@@ -3032,14 +3036,39 @@ components:
       enum:
         - Blind
         - Witness
+    RefreshFilter:
+      type: object
+      required:
+        - status
+        - incoming
+      properties:
+        status:
+          $ref: '#/components/schemas/RefreshTransferStatus'
+        incoming:
+          type: boolean
     RefreshRequest:
       type: object
       required:
+        - filter
         - skip_sync
       properties:
+        asset_id:
+          type: string
+          nullable: true
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd
+        filter:
+          type: array
+          items:
+            $ref: '#/components/schemas/RefreshFilter'
+          example: []
         skip_sync:
           type: boolean
           example: false
+    RefreshTransferStatus:
+      type: string
+      enum:
+        - WaitingCounterparty
+        - WaitingConfirmations
     RestoreRequest:
       type: object
       required:
@@ -3094,11 +3123,12 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Assignment'
             - type: 'null'
+          example: null
         expiration_timestamp:
           type:
             - integer
             - 'null'
-          example: 1695811760
+          example: null
         witness:
           type: boolean
           example: false
@@ -3234,7 +3264,7 @@ components:
           type:
             - integer
             - 'null'
-          example: 1695811760
+          example: null
         recipient_map:
           type: object
           additionalProperties:
@@ -3245,18 +3275,21 @@ components:
             rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8:
               - recipient_id: "utxob:2FjRqgQ-eEWCVHY5-zmpFtYzT-gGm3MdR-sTnxNcS-7RtUbY9-4NYuuh"
                 assignment:
-                  Fungible: 400
+                  type: Fungible
+                  value: 400
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
               - recipient_id: "utxob:3GkRrhR-fFXDLIZ6-0anqGuzU-hHn4NeS-tUoyOdT-8SuVcZ0-5OZvvi"
                 assignment:
-                  Fungible: 200
+                  type: Fungible
+                  value: 200
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
             rgb:d8qDVS5X-ICVG2uM-CPr3yO4-lfBhgjt-7FN1EPE-ApY1LcM:
               - recipient_id: "utxob:4HlSsiS-gGYEMKA7-1borHvaV-iIo5OfT-uVpzPeU-9TvWdA1-6PAwwj"
                 assignment:
-                  Fungible: 100
+                  type: Fungible
+                  value: 100
                 transport_endpoints:
                   - rpc://127.0.0.1:3000/json-rpc
     SendRgbResponse:
