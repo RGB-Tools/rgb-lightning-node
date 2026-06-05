@@ -19,7 +19,7 @@ use rgb_lib::{
     wallet::{
         rust_only::{check_proxy_url, ColoringInfo},
         AssetCFA, AssetIFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online,
-        OperationResult, ReceiveData, Recipient, RefreshResult, RgbWalletOpsOffline,
+        OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult, RgbWalletOpsOffline,
         RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, SyncOptions,
         Transaction as RgbLibTransaction, Transfer, TransportEndpoint, Unspent,
         Wallet as RgbLibWallet,
@@ -334,8 +334,13 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.list_transfers(asset_id)
     }
 
-    pub(crate) fn rgb_list_unspents(&self, skip_sync: bool) -> Result<Vec<Unspent>, RgbLibError> {
-        self.rgb_wallet_wrapper.list_unspents(skip_sync)
+    pub(crate) fn rgb_list_unspents(
+        &self,
+        settled_only: bool,
+        skip_sync: bool,
+    ) -> Result<Vec<Unspent>, RgbLibError> {
+        self.rgb_wallet_wrapper
+            .list_unspents(settled_only, skip_sync)
     }
 
     pub(crate) fn rgb_post_consignment<P: AsRef<Path>>(
@@ -355,8 +360,13 @@ impl UnlockedAppState {
         )
     }
 
-    pub(crate) fn rgb_refresh(&self, skip_sync: bool) -> Result<RefreshResult, RgbLibError> {
-        self.rgb_wallet_wrapper.refresh(skip_sync)
+    pub(crate) fn rgb_refresh(
+        &self,
+        asset_id: Option<String>,
+        filter: Vec<RefreshFilter>,
+        skip_sync: bool,
+    ) -> Result<RefreshResult, RgbLibError> {
+        self.rgb_wallet_wrapper.refresh(asset_id, filter, skip_sync)
     }
 
     pub(crate) fn rgb_save_new_asset(
@@ -781,10 +791,14 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().list_transfers(Some(asset_id))
     }
 
-    pub(crate) fn list_unspents(&self, skip_sync: bool) -> Result<Vec<Unspent>, RgbLibError> {
+    pub(crate) fn list_unspents(
+        &self,
+        settled_only: bool,
+        skip_sync: bool,
+    ) -> Result<Vec<Unspent>, RgbLibError> {
         let online = if skip_sync { None } else { Some(self.online) };
         self.get_rgb_wallet()
-            .list_unspents(online, false, skip_sync)
+            .list_unspents(online, settled_only, skip_sync)
     }
 
     pub(crate) fn post_consignment<P: AsRef<Path>>(
@@ -804,9 +818,14 @@ impl RgbLibWalletWrapper {
         )
     }
 
-    pub(crate) fn refresh(&self, skip_sync: bool) -> Result<RefreshResult, RgbLibError> {
+    pub(crate) fn refresh(
+        &self,
+        asset_id: Option<String>,
+        filter: Vec<RefreshFilter>,
+        skip_sync: bool,
+    ) -> Result<RefreshResult, RgbLibError> {
         self.get_rgb_wallet()
-            .refresh(self.online, None, vec![], skip_sync)
+            .refresh(self.online, asset_id, filter, skip_sync)
     }
 
     pub(crate) fn save_new_asset(

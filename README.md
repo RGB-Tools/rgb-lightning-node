@@ -150,7 +150,7 @@ When unlocking regtest nodes use the following local services:
 - bitcoind_rpc_username: user
 - bitcoind_rpc_password: password
 - bitcoind_rpc_host: localhost
-- bitcoind_rpc_port: 18433
+- bitcoind_rpc_port: 18443
 - indexer_url: 127.0.0.1:50001
 - proxy_endpoint: rpc://127.0.0.1:3000/json-rpc
 
@@ -158,7 +158,7 @@ To unlock a regtest nodes running in docker use the following local services:
 - bitcoind_rpc_username: user
 - bitcoind_rpc_password: password
 - bitcoind_rpc_host: bitcoind
-- bitcoind_rpc_port: 18433
+- bitcoind_rpc_port: 18443
 - indexer_url: electrs:50001
 - proxy_endpoint: rpc://proxy:3000/json-rpc
 
@@ -289,7 +289,7 @@ available at https://rgb-tools.github.io/rgb-lightning-node.
 Otherwise a local copy can be exposed. To do so, from the project root, run:
 
 ```sh
-docker run -it \
+docker run --rm -it \
   -p 8246:8080 \
   -e SWAGGER_JSON=/var/specs/openapi.yaml \
   -v $PWD/openapi.yaml:/var/specs/openapi.yaml \
