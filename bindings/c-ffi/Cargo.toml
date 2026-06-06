@@ -13,7 +13,7 @@ crate-type = ["staticlib", "rlib"]
 name = "rlncffi"
 
 [dependencies]
-rgb-lightning-node = { path = "../..", features = ["uniffi", "vls"] }
+rgb-lightning-node = { path = "../..", features = ["uniffi", "vls", "vss"] }
 # Direct deps so we can construct typed wrappers by their real crate paths —
 # `rgb_lightning_node::PaymentHash` etc. are aliases and Rust 2021 doesn't
 # allow tuple-struct construction through an alias. Unified with the parent

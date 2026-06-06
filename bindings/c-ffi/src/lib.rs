@@ -113,6 +113,46 @@ pub extern "C" fn rln_sdk_node_shutdown(node: &COpaqueStruct) -> CResultString {
     ffi_call!("rln_sdk_node_shutdown", api::sdk_node_shutdown(node))
 }
 
+/// Take over a stale VSS ownership fence after a previous node died holding
+/// it. Request JSON: `{"password": "..."}`. Returns empty success or
+/// `FailedVssInit` if VSS isn't configured / the takeover fails. Pointing
+/// two live nodes at the same VSS store corrupts state — only call this
+/// when you're certain the previous owner is gone.
+#[unsafe(no_mangle)]
+pub extern "C" fn rln_sdk_node_vss_clear_fence(
+    node: &COpaqueStruct,
+    request_json: *const c_char,
+) -> CResultString {
+    ffi_call!("rln_sdk_node_vss_clear_fence", api::sdk_node_vss_clear_fence(node, request_json))
+}
+
+/// Force an immediate VSS backup flush. Returns `{"version": i64}` JSON
+/// where version is the snapshot index just persisted. Throws
+/// `FailedVssInit` if VSS isn't configured (vssUrl unset at init) or
+/// the flush fails (server unreachable, auth rejected, etc).
+///
+/// Useful for app-controlled checkpoints (e.g. "save state before app
+/// suspend") rather than relying on the implicit on-write flush. The
+/// HTTP equivalent is `POST /vssbackup`; the UniFFI equivalent is
+/// `SdkNode::vss_backup()` (uniffi_api/mod.rs:346).
+#[unsafe(no_mangle)]
+pub extern "C" fn rln_sdk_node_vss_backup(node: &COpaqueStruct) -> CResultString {
+    ffi_call!("rln_sdk_node_vss_backup", api::sdk_node_vss_backup(node))
+}
+
+/// APay receiver-side registration with an LSP. Argument is the LSP's
+/// node_id as a hex string (compressed secp256k1). Returns JSON of
+/// `AsyncOrderNewResponse` (request_id, host_node_id, protocol_version,
+/// order_id, status, accepted_through_index, next_index_expected,
+/// unused_hashes, refill_batch_size, first_hash_index). Upstream PR #51.
+#[unsafe(no_mangle)]
+pub extern "C" fn rln_sdk_node_apay_new(
+    node: &COpaqueStruct,
+    host_node_id: *const c_char,
+) -> CResultString {
+    ffi_call!("rln_sdk_node_apay_new", api::sdk_node_apay_new(node, host_node_id))
+}
+
 // ---------------------------------------------------------------------------
 // Channels / peers
 // ---------------------------------------------------------------------------

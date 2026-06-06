@@ -152,6 +152,16 @@ struct CResultString rln_rgb_invoice(const struct COpaqueStruct *node, const cha
 
 struct CResultString rln_sdk_initialize(const char *request_json);
 
+/**
+ * APay receiver-side registration with an LSP. Argument is the LSP's
+ * node_id as a hex string (compressed secp256k1). Returns JSON of
+ * `AsyncOrderNewResponse` (request_id, host_node_id, protocol_version,
+ * order_id, status, accepted_through_index, next_index_expected,
+ * unused_hashes, refill_batch_size, first_hash_index). Upstream PR #51.
+ */
+struct CResultString rln_sdk_node_apay_new(const struct COpaqueStruct *node,
+                                           const char *host_node_id);
+
 struct CResultString rln_sdk_node_attach_native_external_signer(const struct COpaqueStruct *node,
                                                                 const struct COpaqueStruct *signer);
 
@@ -180,6 +190,29 @@ struct CResultString rln_sdk_node_unlock_with_attached_external_signer(const str
 struct CResultString rln_sdk_node_unlock_with_native_external_signer(const struct COpaqueStruct *node,
                                                                      const struct COpaqueStruct *signer,
                                                                      const char *request_json);
+
+/**
+ * Force an immediate VSS backup flush. Returns `{"version": i64}` JSON
+ * where version is the snapshot index just persisted. Throws
+ * `FailedVssInit` if VSS isn't configured (vssUrl unset at init) or
+ * the flush fails (server unreachable, auth rejected, etc).
+ *
+ * Useful for app-controlled checkpoints (e.g. "save state before app
+ * suspend") rather than relying on the implicit on-write flush. The
+ * HTTP equivalent is `POST /vssbackup`; the UniFFI equivalent is
+ * `SdkNode::vss_backup()` (uniffi_api/mod.rs:346).
+ */
+struct CResultString rln_sdk_node_vss_backup(const struct COpaqueStruct *node);
+
+/**
+ * Take over a stale VSS ownership fence after a previous node died holding
+ * it. Request JSON: `{"password": "..."}`. Returns empty success or
+ * `FailedVssInit` if VSS isn't configured / the takeover fails. Pointing
+ * two live nodes at the same VSS store corrupts state — only call this
+ * when you're certain the previous owner is gone.
+ */
+struct CResultString rln_sdk_node_vss_clear_fence(const struct COpaqueStruct *node,
+                                                  const char *request_json);
 
 struct CResultString rln_sdk_shutdown(void);
 
