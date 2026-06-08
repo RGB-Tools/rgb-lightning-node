@@ -29,7 +29,7 @@ use rgb_lightning_node::{
     SdkPostAssetMediaRequest, SdkPostAssetMediaResponse, SdkRefreshTransfersRequest,
     SdkRgbInvoiceRequest, SdkRgbInvoiceResponse, SdkSendBtcRequest, SdkSendBtcResponse,
     SdkExternalSignerBootstrap, SdkSendOnionMessageRequest, SdkSendPaymentRequest,
-    SdkSendPaymentResponse, SdkTakerRequest, SdkUnlockRequest, SendRgbRequest, SendRgbResponse,
+    SdkSendPaymentResponse, SdkTakerRequest, SdkUnlockRequest, SdkVssClearFenceRequest, SendRgbRequest, SendRgbResponse,
     AssetRecipients, RgbRecipient,
     SignMessageResponse, Swap, SwapList, SwapStatus, Token, TokenLight, Transaction,
     TransactionType, Transfer, TransferTransportEndpoint, TransportEndpoint, Txid, Unspent, Utxo,
@@ -125,6 +125,14 @@ pub(crate) struct JsonSdkInitRequest {
     pub lsp_base_url: Option<String>,
     #[serde(default)]
     pub lsp_bearer_token: Option<String>,
+    // VSS cloud-backup config (added in the dev→feat/external-signer merge).
+    // All optional; omit / pass null to disable VSS.
+    #[serde(default)]
+    pub vss_url: Option<String>,
+    #[serde(default)]
+    pub vss_allow_http: bool,
+    #[serde(default)]
+    pub vss_allow_empty_restore: bool,
 }
 
 impl TryFrom<JsonSdkInitRequest> for SdkInitRequest {
@@ -144,6 +152,9 @@ impl TryFrom<JsonSdkInitRequest> for SdkInitRequest {
             virtual_peer_pubkeys,
             lsp_base_url: j.lsp_base_url,
             lsp_bearer_token: j.lsp_bearer_token,
+            vss_url: j.vss_url,
+            vss_allow_http: j.vss_allow_http,
+            vss_allow_empty_restore: j.vss_allow_empty_restore,
         })
     }
 }
@@ -181,6 +192,24 @@ impl From<JsonSdkUnlockRequest> for SdkUnlockRequest {
             proxy_endpoint: j.proxy_endpoint,
             announce_addresses: j.announce_addresses,
             announce_alias: j.announce_alias,
+        }
+    }
+}
+
+// VSS ownership-marker takeover (upstream PR #47). If a previous node holding
+// the VSS write fence died without releasing it, no fresh node can claim the
+// store. This call authenticates with the wallet password and forcibly
+// rewrites the fence so the current node takes ownership. Use sparingly —
+// pointing two live nodes at the same VSS store corrupts state.
+#[derive(Debug, Deserialize)]
+pub(crate) struct JsonVssClearFenceRequest {
+    pub password: String,
+}
+
+impl From<JsonVssClearFenceRequest> for SdkVssClearFenceRequest {
+    fn from(j: JsonVssClearFenceRequest) -> Self {
+        SdkVssClearFenceRequest {
+            password: j.password,
         }
     }
 }
@@ -597,6 +626,14 @@ pub(crate) struct JsonLnInvoiceRequest {
     pub payment_hash: Option<String>,
     #[serde(default)]
     pub description_hash: Option<String>,
+    // APay outbound flow (added by upstream PR #29). Wallets register a batch of
+    // payment hashes with the LSP; the LSP later calls /apay/outboundinvoice on
+    // the wallet RLN to materialise the outbound invoice for one of those hashes.
+    // That outbound invoice needs a tunable min_final_cltv_expiry_delta so the
+    // LSP can satisfy its claim-deadline policy. Optional; omit for the regular
+    // (non-APay) invoice path.
+    #[serde(default)]
+    pub min_final_cltv_expiry_delta: Option<u16>,
 }
 
 impl TryFrom<JsonLnInvoiceRequest> for LnInvoiceRequest {
@@ -609,6 +646,7 @@ impl TryFrom<JsonLnInvoiceRequest> for LnInvoiceRequest {
             asset_amount: j.asset_amount,
             payment_hash: j.payment_hash.map(|s| parse_payment_hash(&s)).transpose()?,
             description_hash: j.description_hash,
+            min_final_cltv_expiry_delta: j.min_final_cltv_expiry_delta,
         })
     }
 }
@@ -882,6 +920,11 @@ pub(crate) struct JsonSendRgbRequest {
     pub donation: bool,
     pub fee_rate: u64,
     pub min_confirmations: u8,
+    // `skip_sync` dropped upstream in the dev→feat/external-signer merge
+    // (see Diego's VSS PR commit msg "drop unused skip_sync from RGB send").
+    // Kept in the JSON shape as a `#[serde(default)]` so existing JS callers
+    // that still send it don't 400 — the value is ignored.
+    #[serde(default)]
     pub skip_sync: bool,
     pub recipient_groups: Vec<JsonAssetRecipients>,
 }
@@ -889,11 +932,12 @@ pub(crate) struct JsonSendRgbRequest {
 impl TryFrom<JsonSendRgbRequest> for SendRgbRequest {
     type Error = Error;
     fn try_from(j: JsonSendRgbRequest) -> Result<Self, Self::Error> {
+        // skip_sync ignored intentionally; field no longer exists on SendRgbRequest.
+        let _ = j.skip_sync;
         Ok(SendRgbRequest {
             donation: j.donation,
             fee_rate: j.fee_rate,
             min_confirmations: j.min_confirmations,
-            skip_sync: j.skip_sync,
             recipient_groups: j
                 .recipient_groups
                 .into_iter()
@@ -1629,7 +1673,12 @@ pub(crate) enum TransactionTypeStr {
     RgbSend,
     Drain,
     CreateUtxos,
-    User,
+    // rgb-lib 0.3.0-beta.6 split the old catch-all `User` variant into
+    // `SendBtc` (plain BTC send) and `Incoming` (anything else credited to
+    // the wallet). JS callers that previously matched on "User" should
+    // accept either tag.
+    SendBtc,
+    Incoming,
 }
 
 impl From<TransactionType> for TransactionTypeStr {
@@ -1638,7 +1687,8 @@ impl From<TransactionType> for TransactionTypeStr {
             TransactionType::RgbSend => TransactionTypeStr::RgbSend,
             TransactionType::Drain => TransactionTypeStr::Drain,
             TransactionType::CreateUtxos => TransactionTypeStr::CreateUtxos,
-            TransactionType::User => TransactionTypeStr::User,
+            TransactionType::SendBtc => TransactionTypeStr::SendBtc,
+            TransactionType::Incoming => TransactionTypeStr::Incoming,
         }
     }
 }

@@ -96,6 +96,49 @@ pub(crate) fn sdk_node_shutdown(node: &COpaqueStruct) -> Result<String, Error> {
     ok_void()
 }
 
+// Takes over a stale VSS ownership fence after a previous node died holding it.
+// Authenticates with the wallet password. Empty success response on takeover;
+// returns FailedVssInit if VSS isn't configured or the takeover fails.
+pub(crate) fn sdk_node_vss_clear_fence(
+    node: &COpaqueStruct,
+    request_json: *const c_char,
+) -> Result<String, Error> {
+    let node = require_handle(node)?;
+    let req: JsonVssClearFenceRequest = parse_req(request_json)?;
+    node.vss_clear_fence(req.into())?;
+    ok_void()
+}
+
+// Force an immediate VSS backup flush. Returns the version number of
+// the snapshot just persisted. Mirrors the HTTP /vssbackup route +
+// the `vss_backup()` UniFFI method (uniffi_api/mod.rs:346). Useful for
+// app-controlled checkpoints (e.g. "save state before app suspend")
+// rather than relying on the implicit on-write flush.
+//
+// Returns FailedVssInit if VSS isn't configured (vssUrl unset at
+// init time) or the flush fails (server unreachable, etc).
+pub(crate) fn sdk_node_vss_backup(node: &COpaqueStruct) -> Result<String, Error> {
+    let node = require_handle(node)?;
+    let version = node.vss_backup()?;
+    json(serde_json::json!({ "version": version }))
+}
+
+// APay receiver-side: register this node with an LSP as an async-order
+// recipient. PR #51 upstream — returns AsyncOrderNewResponse (request_id,
+// host_node_id, protocol_version, order_id, status, accepted_through_index,
+// next_index_expected, unused_hashes, refill_batch_size, first_hash_index).
+// We don't name the response type here — `core_types::async_order` is a
+// private module — but rely on the impl's `Serialize` derive via the
+// generic `json()` helper. Input: the LSP's node_id as a hex string.
+pub(crate) fn sdk_node_apay_new(
+    node: &COpaqueStruct,
+    host_node_id: *const c_char,
+) -> Result<String, Error> {
+    let node = require_handle(node)?;
+    let response = node.apay_new(ptr_to_string(host_node_id))?;
+    json(response)
+}
+
 // ---------------------------------------------------------------------------
 // Channels / peers
 // ---------------------------------------------------------------------------
