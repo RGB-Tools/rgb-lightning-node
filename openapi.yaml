@@ -660,7 +660,30 @@ paths:
       tags:
         - Payments
       summary: List payments
-      description: List the node's LN payments
+      description: >-
+        List the node's LN payments (inbound and outbound) ordered most-recent
+        first. Supports index-based cursor pagination: pass the
+        last_index_offset of a page as the next index_offset to fetch the next,
+        older page.
+      parameters:
+        - in: query
+          name: index_offset
+          required: false
+          schema:
+            type: integer
+            format: uint64
+          description: >-
+            Exclusive upper-bound cursor: only payments with a lower index are
+            returned. 0 or absent means start from the most recent payment.
+        - in: query
+          name: max_payments
+          required: false
+          schema:
+            type: integer
+            format: uint64
+          description: >-
+            Maximum number of payments to return. Defaults to 100 when absent or
+            zero.
       responses:
         '200':
           description: Successful operation
@@ -2563,11 +2586,28 @@ components:
       type: object
       required:
         - payments
+        - first_index_offset
+        - last_index_offset
       properties:
         payments:
           type: array
           items:
             $ref: '#/components/schemas/Payment'
+        first_index_offset:
+          type: integer
+          format: uint64
+          description: >-
+            Index of the first (most recent) payment in the returned page, or 0
+            when the page is empty.
+          example: 100
+        last_index_offset:
+          type: integer
+          format: uint64
+          description: >-
+            Index of the last (oldest) payment in the returned page, or 0 when
+            the page is empty. Pass this as index_offset to fetch the next,
+            older page.
+          example: 51
     ListPeersResponse:
       type: object
       required:
@@ -2972,6 +3012,12 @@ components:
         preimage:
           type: string
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
+        description_hash:
+          type:
+            - string
+            - 'null'
+          description: BOLT11 description hash (the h tag), hex-encoded, if present
+          example: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
     Peer:
       type: object
       required:

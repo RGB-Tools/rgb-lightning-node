@@ -2526,6 +2526,8 @@ pub(crate) async fn keysend(
             payee_pubkey: dest_pubkey,
             expires_at: None,
             invoice_type: None,
+            description_hash: None,
+            payment_idx: None,
         },
     )?;
     if let Some((contract_id, rgb_amount)) = rgb_payment {
@@ -3061,6 +3063,8 @@ pub(crate) async fn send_payment(
                     .ok_or(APIError::InvalidInvoice(s!("missing signing pubkey")))?,
                 expires_at: None,
                 invoice_type: None,
+                description_hash: None,
+                payment_idx: None,
             },
         )?;
 
@@ -3157,6 +3161,8 @@ pub(crate) async fn send_payment(
                 payee_pubkey: invoice.get_payee_pub_key(),
                 expires_at: None,
                 invoice_type: None,
+                description_hash: crate::routes::description_hash_from_invoice(&invoice),
+                payment_idx: None,
             },
         )?;
         let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());
@@ -3763,6 +3769,8 @@ pub(crate) async fn create_ln_invoice(
             payee_pubkey: unlocked_state.runtime_node_id(),
             expires_at: Some(created_at + expiry_sec as u64),
             invoice_type: Some(invoice_type),
+            description_hash: crate::routes::description_hash_from_invoice(&invoice),
+            payment_idx: None,
         },
     );
 

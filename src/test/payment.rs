@@ -405,3 +405,155 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
         "found expired inbound payments still Pending: {still_pending:?}"
     );
 }
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn description_hash() {
+    initialize();
+
+    let test_dir_base = format!("{TEST_DIR_BASE}description_hash/");
+    let test_dir_node1 = format!("{test_dir_base}node1");
+    let test_dir_node2 = format!("{test_dir_base}node2");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
+
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+    open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(600_000),
+        Some(300_000_000),
+        None,
+        None,
+    )
+    .await;
+
+    // 32-byte sha256 description hash, hex-encoded.
+    let dh = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+    // Invoice WITH a description_hash.
+    let invoice = ln_invoice_with_description_hash(node2_addr, Some(3_000_000), 900, Some(dh))
+        .await
+        .invoice;
+    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
+    assert_eq!(decoded.description_hash.as_deref(), Some(dh));
+    send_payment(node1_addr, invoice.clone()).await;
+
+    let out = get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
+    assert_eq!(out.description_hash.as_deref(), Some(dh));
+    let inb = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
+    assert_eq!(inb.description_hash.as_deref(), Some(dh));
+
+    let listed = list_payments(node2_addr)
+        .await
+        .into_iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(listed.description_hash.as_deref(), Some(dh));
+
+    // Invoice WITHOUT a description_hash.
+    let invoice2 = ln_invoice(node2_addr, Some(3_000_000), None, None, 900)
+        .await
+        .invoice;
+    let decoded2 = decode_ln_invoice(node1_addr, &invoice2).await;
+    assert_eq!(decoded2.description_hash, None);
+    send_payment(node1_addr, invoice2.clone()).await;
+    let out2 = get_payment(node1_addr, &decoded2.payment_hash, PaymentType::Outbound).await;
+    assert_eq!(out2.description_hash, None);
+}
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn pagination() {
+    initialize();
+
+    let test_dir_base = format!("{TEST_DIR_BASE}pagination/");
+    let test_dir_node1 = format!("{test_dir_base}node1");
+    let test_dir_node2 = format!("{test_dir_base}node2");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
+
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+    open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(600_000),
+        Some(300_000_000),
+        None,
+        None,
+    )
+    .await;
+
+    // Make several vanilla payments node1 -> node2 so the sender accumulates
+    // a handful of indexed outbound payments.
+    let total = 5u64;
+    for i in 0..total {
+        let invoice = ln_invoice(node2_addr, Some(3_000_000 + i * 1000), None, None, 900)
+            .await
+            .invoice;
+        send_payment(node1_addr, invoice).await;
+    }
+
+    // Default page: most recent first, no upper bound.
+    let all = list_payments_full(node1_addr, None, None).await;
+    assert_eq!(all.payments.len() as u64, total);
+    // Newest item carries the highest index, oldest the lowest.
+    assert!(all.first_index_offset >= all.last_index_offset);
+
+    // max_payments bounds the page to the newest N.
+    let page = list_payments_full(node1_addr, None, Some(2)).await;
+    assert_eq!(page.payments.len(), 2);
+    assert_eq!(page.first_index_offset, all.first_index_offset);
+    assert_eq!(
+        page.payments[0].payment_hash, all.payments[0].payment_hash,
+        "first page should start at the most recent payment"
+    );
+
+    // Walk to the next, older page using the cursor.
+    let next = list_payments_full(node1_addr, Some(page.last_index_offset), Some(2)).await;
+    assert_eq!(next.payments.len(), 2);
+    assert!(next.first_index_offset < page.last_index_offset);
+
+    // No overlap between consecutive pages.
+    let page_hashes: Vec<&String> = page.payments.iter().map(|p| &p.payment_hash).collect();
+    for p in &next.payments {
+        assert!(
+            !page_hashes.contains(&&p.payment_hash),
+            "pages must not overlap"
+        );
+    }
+
+    // Walking the cursor to exhaustion yields exactly `total` unique payments.
+    let mut seen: Vec<String> = vec![];
+    let mut cursor: Option<u64> = None;
+    loop {
+        let resp = list_payments_full(node1_addr, cursor, Some(2)).await;
+        if resp.payments.is_empty() {
+            break;
+        }
+        for p in &resp.payments {
+            assert!(
+                !seen.contains(&p.payment_hash),
+                "no duplicates across pages"
+            );
+            seen.push(p.payment_hash.clone());
+        }
+        cursor = Some(resp.last_index_offset);
+    }
+    assert_eq!(seen.len() as u64, total);
+}
