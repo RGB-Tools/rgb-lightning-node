@@ -14,22 +14,21 @@ dedicated extra output containing the anchor to the RGB state transition.
 More context on how RGB works on the Lightning Network can be found
 [here](https://docs.rgb.info/lightning-network-compatibility).
 
-The RGB functionality for now can be tested only in regtest or testnet
-environments, but an advanced user may be able to apply changes in order to use
-it also on other networks.
+The node supports the regtest, signet, testnet3, testnet4 and mainnet networks,
+selected at startup via the `--network` flag (accepted values: `regtest`,
+`signet`, `signetcustom`, `testnet`/`testnet3`, `testnet4`, `mainnet`/`bitcoin`).
 Please be careful, this software is early alpha, we do not take any
 responsibility for loss of funds or any other issue you may encounter.
 
 Also note that [rust-lightning] has been changed in order to support RGB
-channels,
-[here](https://github.com/RGB-Tools/rust-lightning/compare/v0.2.2...rgb)
-a comparison with `v0.2.2`, the version we applied the changes to.
+channels; the node builds against the UTEXO-Protocol fork, tracked as a git
+submodule on branch `dev`.
 
 ## Install
 
 Clone the project, including (shallow) submodules:
 ```sh
-git clone https://github.com/RGB-Tools/rgb-lightning-node --recurse-submodules --shallow-submodules
+git clone https://github.com/UTEXO-Protocol/rgb-lightning-node --recurse-submodules --shallow-submodules
 ```
 
 Then, from the project root, install the `rgb-lightning-node` binary by
@@ -285,7 +284,7 @@ The node currently exposes the following APIs:
 
 To get more details about the available APIs see the [OpenAPI specification].
 A Swagger UI for the `master` branch is generated from the specification and
-available at https://rgb-tools.github.io/rgb-lightning-node.
+available at https://utexo-protocol.github.io/rgb-lightning-node.
 Otherwise a local copy can be exposed. To do so, from the project root, run:
 
 ```sh
@@ -505,7 +504,7 @@ staleness.
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
 [rgb-lightning-sample]: https://github.com/RGB-Tools/rgb-lightning-sample
-[rust-lightning]: https://github.com/lightningdevkit/rust-lightning
+[rust-lightning]: https://github.com/UTEXO-Protocol/rust-lightning
 [Iris Wallet desktop]: https://github.com/RGB-Tools/iris-wallet-desktop
 [KaleidoSwap]: https://kaleidoswap.com/
 [Lnfi]: https://www.lnfi.network/
