@@ -252,6 +252,8 @@ pub(crate) struct PaymentInfo {
     pub(crate) expires_at: Option<u64>,
     pub(crate) claim_deadline_height: Option<u32>,
     pub(crate) invoice_type: Option<InvoiceType>,
+    pub(crate) description_hash: Option<[u8; 32]>,
+    pub(crate) payment_idx: Option<u64>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -265,6 +267,8 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (14, expires_at, option),
     (16, claim_deadline_height, option),
     (18, invoice_type, option),
+    (20, description_hash, option),
+    (22, payment_idx, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -372,10 +376,15 @@ impl VirtualChannelSessionStore {
 
 fn persist_staged_inbound_payment(
     kv_store: &dyn KVStoreSync,
+    next_payment_idx: &std::sync::atomic::AtomicU64,
     inbound: &mut InboundPaymentInfoStorage,
     payment_hash: PaymentHash,
-    payment_info: PaymentInfo,
+    mut payment_info: PaymentInfo,
 ) -> Result<(), JsonRpcErrorWire> {
+    if payment_info.payment_idx.is_none() {
+        payment_info.payment_idx =
+            Some(next_payment_idx.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
+    }
     let mut staged_inbound = InboundPaymentInfoStorage {
         payments: inbound.payments.clone(),
     };
@@ -460,8 +469,25 @@ impl UnlockedAppState {
         self.get_taker_swaps().swaps.clone()
     }
 
-    pub(crate) fn add_inbound_payment(&self, payment_hash: PaymentHash, payment_info: PaymentInfo) {
+    /// Assign a stable, monotonically increasing index to a payment if it does
+    /// not already have one. Indices are shared across inbound and outbound
+    /// payments so the two sets can be merged and paged in a stable order.
+    pub(crate) fn stamp_payment_idx(&self, payment_info: &mut PaymentInfo) {
+        if payment_info.payment_idx.is_none() {
+            payment_info.payment_idx = Some(
+                self.next_payment_idx
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            );
+        }
+    }
+
+    pub(crate) fn add_inbound_payment(
+        &self,
+        payment_hash: PaymentHash,
+        mut payment_info: PaymentInfo,
+    ) {
         let mut inbound = self.get_inbound_payments();
+        self.stamp_payment_idx(&mut payment_info);
         inbound.payments.insert(payment_hash, payment_info);
         self.save_inbound_payments(inbound);
     }
@@ -469,7 +495,7 @@ impl UnlockedAppState {
     pub(crate) fn add_outbound_payment(
         &self,
         payment_id: PaymentId,
-        payment_info: PaymentInfo,
+        mut payment_info: PaymentInfo,
     ) -> Result<(), APIError> {
         let mut outbound = self.get_outbound_payments();
         if let Some(existing_payment) = outbound.payments.get(&payment_id) {
@@ -479,6 +505,7 @@ impl UnlockedAppState {
                 ));
             }
         }
+        self.stamp_payment_idx(&mut payment_info);
         outbound.payments.insert(payment_id, payment_info);
         self.save_outbound_payments(outbound);
         Ok(())
@@ -637,7 +664,7 @@ impl UnlockedAppState {
             }
             Entry::Vacant(e) => {
                 let created_at = get_current_timestamp();
-                e.insert(PaymentInfo {
+                let mut payment_info = PaymentInfo {
                     preimage,
                     secret,
                     status,
@@ -648,7 +675,11 @@ impl UnlockedAppState {
                     expires_at: None,
                     claim_deadline_height,
                     invoice_type,
-                });
+                    description_hash: None,
+                    payment_idx: None,
+                };
+                self.stamp_payment_idx(&mut payment_info);
+                e.insert(payment_info);
             }
         }
         self.save_inbound_payments(inbound);
@@ -1100,6 +1131,7 @@ struct AsyncOrderRecipientInvoiceProvider {
     inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     async_payments_preimage_root: Arc<AsyncPaymentsPreimageRoot>,
     kv_store: Arc<SyncedKvStore>,
+    next_payment_idx: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AsyncOrderRecipientInvoiceProvider {
@@ -1207,6 +1239,7 @@ impl AsyncOrderInvoiceProvider for AsyncOrderRecipientInvoiceProvider {
         };
         persist_staged_inbound_payment(
             self.kv_store.as_ref(),
+            self.next_payment_idx.as_ref(),
             &mut inbound,
             requested_payment_hash,
             PaymentInfo {
@@ -1222,6 +1255,8 @@ impl AsyncOrderInvoiceProvider for AsyncOrderRecipientInvoiceProvider {
                 invoice_type: Some(InvoiceType::Hodl {
                     async_payment_recipient: true,
                 }),
+                description_hash: crate::routes::description_hash_from_invoice(&invoice),
+                payment_idx: None,
             },
         )?;
 
@@ -3855,12 +3890,7 @@ pub(crate) async fn start_ldk(
                 bitcoin_network,
                 database_type: DatabaseType::Sqlite,
                 max_allocations_per_utxo: 1,
-                supported_schemas: vec![
-                    AssetSchema::Nia,
-                    AssetSchema::Cfa,
-                    AssetSchema::Uda,
-                    AssetSchema::Ifa,
-                ],
+                supported_schemas: vec![AssetSchema::Nia, AssetSchema::Cfa, AssetSchema::Uda],
                 reuse_addresses: false,
             },
             keys,
@@ -4318,6 +4348,67 @@ pub(crate) async fn start_ldk(
         }
     }));
 
+    // Seed the shared payment-index counter and backfill any records persisted
+    // before payment indexing existed. Missing indices are assigned
+    // deterministically by (created_at, payment hash/id) so the ordering is
+    // stable across restarts.
+    let next_payment_idx = {
+        let mut inbound_g = inbound_payments.lock().unwrap();
+        let mut outbound_g = outbound_payments.lock().unwrap();
+
+        let mut max_idx = 0u64;
+        for info in inbound_g
+            .payments
+            .values()
+            .chain(outbound_g.payments.values())
+        {
+            if let Some(i) = info.payment_idx {
+                max_idx = max_idx.max(i);
+            }
+        }
+
+        let mut missing: Vec<(u64, [u8; 32], bool)> = Vec::new();
+        for (h, info) in inbound_g.payments.iter() {
+            if info.payment_idx.is_none() {
+                missing.push((info.created_at, h.0, true));
+            }
+        }
+        for (id, info) in outbound_g.payments.iter() {
+            if info.payment_idx.is_none() {
+                missing.push((info.created_at, id.0, false));
+            }
+        }
+        missing.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        let mut changed = false;
+        for (_, key, is_inbound) in missing {
+            max_idx += 1;
+            if is_inbound {
+                inbound_g
+                    .payments
+                    .get_mut(&PaymentHash(key))
+                    .unwrap()
+                    .payment_idx = Some(max_idx);
+            } else {
+                outbound_g
+                    .payments
+                    .get_mut(&PaymentId(key))
+                    .unwrap()
+                    .payment_idx = Some(max_idx);
+            }
+            changed = true;
+        }
+        if changed {
+            kv_store
+                .write("", "", INBOUND_PAYMENTS_KEY, inbound_g.encode())
+                .unwrap();
+            kv_store
+                .write("", "", OUTBOUND_PAYMENTS_KEY, outbound_g.encode())
+                .unwrap();
+        }
+        Arc::new(std::sync::atomic::AtomicU64::new(max_idx + 1))
+    };
+
     let bump_wallet_source = Arc::new(RgbBumpWalletSource {
         inner: rgb_wallet_wrapper.clone(),
         signer: keys_manager.clone(),
@@ -4416,6 +4507,7 @@ pub(crate) async fn start_ldk(
         inbound_payments: Arc::clone(&inbound_payments),
         async_payments_preimage_root: Arc::clone(&async_payments_preimage_root),
         kv_store: Arc::clone(&kv_store),
+        next_payment_idx: Arc::clone(&next_payment_idx),
     }));
 
     let unlocked_state = Arc::new(UnlockedAppState {
@@ -4446,6 +4538,7 @@ pub(crate) async fn start_ldk(
         external_node_id,
         virtual_channel_draft_store,
         virtual_channel_session_store,
+        next_payment_idx,
     });
 
     // Refresh the RGS snapshot on a fixed interval (RGS mode only). The first

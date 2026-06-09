@@ -181,6 +181,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) external_node_id: Option<String>,
     pub(crate) virtual_channel_draft_store: Arc<Mutex<VirtualChannelDraftStore>>,
     pub(crate) virtual_channel_session_store: Arc<Mutex<VirtualChannelSessionStore>>,
+    pub(crate) next_payment_idx: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl UnlockedAppState {

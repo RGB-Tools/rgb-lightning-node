@@ -594,6 +594,7 @@ pub(crate) struct JsonPayment {
     pub updated_at: u64,
     pub payee_pubkey: String,
     pub preimage: Option<String>,
+    pub description_hash: Option<String>,
 }
 
 impl From<Payment> for JsonPayment {
@@ -609,6 +610,7 @@ impl From<Payment> for JsonPayment {
             updated_at: p.updated_at,
             payee_pubkey: fmt_pubkey(&p.payee_pubkey),
             preimage: p.preimage,
+            description_hash: p.description_hash,
         }
     }
 }

@@ -209,6 +209,7 @@ dictionary Payment {
     u64 updated_at;
     PublicKey payee_pubkey;
     string? preimage;
+    string? description_hash;
 };
 
 enum PaymentType {
