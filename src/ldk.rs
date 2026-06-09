@@ -2104,36 +2104,43 @@ async fn handle_ldk_events(
 
             match invoice.invoice_type.unwrap_or(InvoiceType::AutoClaim) {
                 InvoiceType::AutoClaim => {
-                    unlocked_state
-                        .channel_manager
-                        .claim_funds(payment_preimage.unwrap());
+                    let Some(claim_preimage) = payment_preimage else {
+                        tracing::error!(
+                            "Missing LDK preimage for auto-claim invoice {:?}",
+                            payment_hash
+                        );
+                        return Err(ReplayEvent());
+                    };
+                    unlocked_state.channel_manager.claim_funds(claim_preimage);
                 }
                 InvoiceType::Hodl {
-                    async_payment_recipient,
+                    async_payment_recipient: true,
                 } => {
-                    if async_payment_recipient {
-                        unlocked_state
-                            .channel_manager
-                            .claim_funds(payment_preimage.unwrap());
-                    } else {
-                        unlocked_state.upsert_inbound_payment(
-                            payment_hash,
-                            HTLCStatus::Claimable,
-                            payment_preimage,
-                            payment_secret,
-                            Some(amount_msat),
-                            unlocked_state.channel_manager.get_our_node_id(),
-                            claim_deadline,
-                            None,
+                    let Some(stored_preimage) = invoice.preimage else {
+                        tracing::error!(
+                            "Missing stored preimage for async recipient invoice {:?}",
+                            payment_hash
                         );
-                        unlocked_state
-                            .async_order_handler
-                            .notify_claimable_hodl_invoice(
-                                payment_hash,
-                                amount_msat,
-                                claim_deadline,
-                            );
-                    }
+                        return Err(ReplayEvent());
+                    };
+                    unlocked_state.channel_manager.claim_funds(stored_preimage);
+                }
+                InvoiceType::Hodl {
+                    async_payment_recipient: false,
+                } => {
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Claimable,
+                        payment_preimage,
+                        payment_secret,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                        claim_deadline,
+                        None,
+                    );
+                    unlocked_state
+                        .async_order_handler
+                        .notify_claimable_hodl_invoice(payment_hash, amount_msat, claim_deadline);
                 }
             }
         }
