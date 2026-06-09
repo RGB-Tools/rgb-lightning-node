@@ -125,6 +125,7 @@ pub struct Payment {
     pub updated_at: u64,
     pub payee_pubkey: PublicKey,
     pub preimage: Option<String>,
+    pub description_hash: Option<String>,
 }
 
 pub enum PaymentType {

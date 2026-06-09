@@ -375,6 +375,7 @@ mod uniffi_smoke_tests {
             payee_pubkey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
                 .to_string(),
             preimage: expected_preimage.clone(),
+            description_hash: None,
         };
 
         let mapped = map_payment_data(data).expect("payment mapping should succeed");

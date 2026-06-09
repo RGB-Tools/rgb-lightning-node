@@ -582,6 +582,7 @@ pub(crate) struct PaymentData {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: String,
     pub(crate) preimage: Option<String>,
+    pub(crate) description_hash: Option<String>,
 }
 
 pub(crate) struct CancelHodlInvoiceRequestData {
@@ -3814,6 +3815,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+            description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }
 
@@ -3838,6 +3840,7 @@ pub(crate) async fn list_payments(state: Arc<AppState>) -> Result<Vec<PaymentDat
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+            description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }
 
@@ -3883,6 +3886,7 @@ pub(crate) async fn get_payment(
                         updated_at: payment_info.updated_at,
                         payee_pubkey: payment_info.payee_pubkey.to_string(),
                         preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+                        description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                     });
                 }
             }
@@ -3910,6 +3914,7 @@ pub(crate) async fn get_payment(
                         updated_at: payment_info.updated_at,
                         payee_pubkey: payment_info.payee_pubkey.to_string(),
                         preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+                        description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                     });
                 }
             }
