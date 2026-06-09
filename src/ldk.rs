@@ -3890,12 +3890,7 @@ pub(crate) async fn start_ldk(
                 bitcoin_network,
                 database_type: DatabaseType::Sqlite,
                 max_allocations_per_utxo: 1,
-                supported_schemas: vec![
-                    AssetSchema::Nia,
-                    AssetSchema::Cfa,
-                    AssetSchema::Uda,
-                    AssetSchema::Ifa,
-                ],
+                supported_schemas: vec![AssetSchema::Nia, AssetSchema::Cfa, AssetSchema::Uda],
                 reuse_addresses: false,
             },
             keys,
