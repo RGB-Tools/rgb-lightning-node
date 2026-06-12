@@ -806,6 +806,10 @@ pub(crate) struct ListChannelsResponse {
 pub(crate) struct ListPaymentsRequest {
     pub(crate) index_offset: Option<u64>,
     pub(crate) max_payments: Option<u64>,
+    pub(crate) status: Option<HTLCStatus>,
+    pub(crate) direction: Option<PaymentDirection>,
+    pub(crate) created_after: Option<u64>,
+    pub(crate) created_before: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -816,6 +820,41 @@ pub(crate) struct ListPaymentsResponse {
 }
 
 const DEFAULT_MAX_PAYMENTS: u64 = 100;
+const DEFAULT_MAX_TRANSFERS: u64 = 100;
+const DEFAULT_MAX_UNSPENTS: u64 = 100;
+const DEFAULT_MAX_TRANSACTIONS: u64 = 100;
+
+/// Resolve a caller-supplied page size, treating absent or zero as the default.
+fn resolve_page_size(max: Option<u64>, default: u64) -> u64 {
+    match max {
+        Some(0) | None => default,
+        Some(m) => m,
+    }
+}
+
+/// Inclusive `[after, before]` timestamp filter; an absent bound is open-ended.
+fn in_time_range(ts: u64, after: Option<u64>, before: Option<u64>) -> bool {
+    after.map_or(true, |a| ts >= a) && before.map_or(true, |b| ts <= b)
+}
+
+/// Newest-first cursor pagination over `(index, value)` pairs. `index_offset`
+/// is an exclusive upper bound (0 = start from the newest); returns the page
+/// plus its first (newest) and last (oldest) index, both 0 when empty.
+fn paginate_newest_first<T>(
+    mut items: Vec<(u64, T)>,
+    index_offset: u64,
+    max: u64,
+) -> (Vec<T>, u64, u64) {
+    items.sort_by_key(|(idx, _)| std::cmp::Reverse(*idx));
+    let page: Vec<(u64, T)> = items
+        .into_iter()
+        .filter(|(idx, _)| index_offset == 0 || *idx < index_offset)
+        .take(max as usize)
+        .collect();
+    let first = page.first().map(|(idx, _)| *idx).unwrap_or(0);
+    let last = page.last().map(|(idx, _)| *idx).unwrap_or(0);
+    (page.into_iter().map(|(_, v)| v).collect(), first, last)
+}
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListPeersResponse {
@@ -831,32 +870,47 @@ pub(crate) struct ListSwapsResponse {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransactionsRequest {
     pub(crate) skip_sync: bool,
+    pub(crate) index_offset: Option<u64>,
+    pub(crate) max_transactions: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransactionsResponse {
     pub(crate) transactions: Vec<Transaction>,
+    pub(crate) first_index_offset: u64,
+    pub(crate) last_index_offset: u64,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersRequest {
     pub(crate) asset_id: String,
+    pub(crate) index_offset: Option<u64>,
+    pub(crate) max_transfers: Option<u64>,
+    pub(crate) status: Option<TransferStatus>,
+    pub(crate) created_after: Option<u64>,
+    pub(crate) created_before: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersResponse {
     pub(crate) transfers: Vec<Transfer>,
+    pub(crate) first_index_offset: u64,
+    pub(crate) last_index_offset: u64,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListUnspentsRequest {
     pub(crate) settled_only: bool,
     pub(crate) skip_sync: bool,
+    pub(crate) index_offset: Option<u64>,
+    pub(crate) max_unspents: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListUnspentsResponse {
     pub(crate) unspents: Vec<Unspent>,
+    pub(crate) first_index_offset: u64,
+    pub(crate) last_index_offset: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -974,6 +1028,21 @@ pub(crate) enum PaymentType {
     Outbound,
     InboundAutoClaim,
     InboundHodl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub(crate) enum PaymentDirection {
+    Inbound,
+    Outbound,
+}
+
+impl PaymentType {
+    fn direction(self) -> PaymentDirection {
+        match self {
+            PaymentType::Outbound => PaymentDirection::Outbound,
+            PaymentType::InboundAutoClaim | PaymentType::InboundHodl => PaymentDirection::Inbound,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -3138,26 +3207,19 @@ pub(crate) async fn list_payments(
         ));
     }
 
-    // Newest-first ordering by stable payment index.
-    all.sort_by_key(|(idx, _)| std::cmp::Reverse(*idx));
+    all.retain(|(_, p)| {
+        params.status.map_or(true, |s| p.status == s)
+            && params
+                .direction
+                .map_or(true, |d| p.payment_type.direction() == d)
+            && in_time_range(p.created_at, params.created_after, params.created_before)
+    });
 
-    let index_offset = params.index_offset.unwrap_or(0);
-    let max_payments = match params.max_payments {
-        Some(0) | None => DEFAULT_MAX_PAYMENTS,
-        Some(m) => m,
-    };
-
-    // `index_offset` is an exclusive upper-bound cursor; 0 means no bound
-    // (start from the most recent payment).
-    let page: Vec<(u64, Payment)> = all
-        .into_iter()
-        .filter(|(idx, _)| index_offset == 0 || *idx < index_offset)
-        .take(max_payments as usize)
-        .collect();
-
-    let first_index_offset = page.first().map(|(idx, _)| *idx).unwrap_or(0);
-    let last_index_offset = page.last().map(|(idx, _)| *idx).unwrap_or(0);
-    let payments = page.into_iter().map(|(_, p)| p).collect();
+    let (payments, first_index_offset, last_index_offset) = paginate_newest_first(
+        all,
+        params.index_offset.unwrap_or(0),
+        resolve_page_size(params.max_payments, DEFAULT_MAX_PAYMENTS),
+    );
 
     Ok(Json(ListPaymentsResponse {
         payments,
@@ -3261,7 +3323,30 @@ pub(crate) async fn list_transactions(
         })
     }
 
-    Ok(Json(ListTransactionsResponse { transactions }))
+    // No stable index; order newest-first (unconfirmed first, then by height)
+    // and derive a descending index so the cursor walks a consistent snapshot.
+    transactions.sort_by(|a, b| {
+        let ha = a.confirmation_time.as_ref().map_or(u32::MAX, |c| c.height);
+        let hb = b.confirmation_time.as_ref().map_or(u32::MAX, |c| c.height);
+        hb.cmp(&ha).then_with(|| a.txid.cmp(&b.txid))
+    });
+    let count = transactions.len() as u64;
+    let indexed = transactions
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| (count - i as u64, t))
+        .collect();
+    let (transactions, first_index_offset, last_index_offset) = paginate_newest_first(
+        indexed,
+        payload.index_offset.unwrap_or(0),
+        resolve_page_size(payload.max_transactions, DEFAULT_MAX_TRANSACTIONS),
+    );
+
+    Ok(Json(ListTransactionsResponse {
+        transactions,
+        first_index_offset,
+        last_index_offset,
+    }))
 }
 
 pub(crate) async fn list_transfers(
@@ -3315,7 +3400,28 @@ pub(crate) async fn list_transfers(
                 .collect(),
         })
     }
-    Ok(Json(ListTransfersResponse { transfers }))
+
+    transfers.retain(|t| {
+        payload.status.as_ref().map_or(true, |s| &t.status == s)
+            && in_time_range(
+                t.created_at as u64,
+                payload.created_after,
+                payload.created_before,
+            )
+    });
+
+    let indexed = transfers.into_iter().map(|t| (t.idx as u64, t)).collect();
+    let (transfers, first_index_offset, last_index_offset) = paginate_newest_first(
+        indexed,
+        payload.index_offset.unwrap_or(0),
+        resolve_page_size(payload.max_transfers, DEFAULT_MAX_TRANSFERS),
+    );
+
+    Ok(Json(ListTransfersResponse {
+        transfers,
+        first_index_offset,
+        last_index_offset,
+    }))
 }
 
 pub(crate) async fn list_unspents(
@@ -3344,7 +3450,27 @@ pub(crate) async fn list_unspents(
                 .collect(),
         })
     }
-    Ok(Json(ListUnspentsResponse { unspents }))
+
+    // UTXOs have no stable index; derive a deterministic descending one from a
+    // fixed (outpoint) ordering so the cursor walks a consistent snapshot.
+    unspents.sort_by(|a, b| a.utxo.outpoint.cmp(&b.utxo.outpoint));
+    let count = unspents.len() as u64;
+    let indexed = unspents
+        .into_iter()
+        .enumerate()
+        .map(|(i, u)| (count - i as u64, u))
+        .collect();
+    let (unspents, first_index_offset, last_index_offset) = paginate_newest_first(
+        indexed,
+        payload.index_offset.unwrap_or(0),
+        resolve_page_size(payload.max_unspents, DEFAULT_MAX_UNSPENTS),
+    );
+
+    Ok(Json(ListUnspentsResponse {
+        unspents,
+        first_index_offset,
+        last_index_offset,
+    }))
 }
 
 pub(crate) async fn ln_invoice(
@@ -5078,5 +5204,60 @@ mod request_tests {
     fn node_info_response_rgs_timestamp_null_when_absent() {
         let json = serde_json::to_value(sample_node_info(None)).unwrap();
         assert!(json["latest_rgs_snapshot_timestamp"].is_null());
+    }
+
+    fn pairs(indexes: &[u64]) -> Vec<(u64, String)> {
+        indexes.iter().map(|i| (*i, format!("v{i}"))).collect()
+    }
+
+    #[test]
+    fn paginate_orders_newest_first_unbounded() {
+        let (page, first, last) = paginate_newest_first(pairs(&[3, 1, 5, 2, 4]), 0, 100);
+        assert_eq!(page, vec!["v5", "v4", "v3", "v2", "v1"]);
+        assert_eq!(first, 5);
+        assert_eq!(last, 1);
+    }
+
+    #[test]
+    fn paginate_max_bounds_to_newest_n() {
+        let (page, first, last) = paginate_newest_first(pairs(&[3, 1, 5, 2, 4]), 0, 2);
+        assert_eq!(page, vec!["v5", "v4"]);
+        assert_eq!(first, 5);
+        assert_eq!(last, 4);
+    }
+
+    #[test]
+    fn paginate_index_offset_is_exclusive_upper_bound() {
+        let (page, first, last) = paginate_newest_first(pairs(&[3, 1, 5, 2, 4]), 4, 2);
+        assert_eq!(page, vec!["v3", "v2"]);
+        assert_eq!(first, 3);
+        assert_eq!(last, 2);
+    }
+
+    #[test]
+    fn paginate_empty_page_reports_zero_offsets() {
+        let (page, first, last) = paginate_newest_first(pairs(&[3, 1, 2]), 1, 100);
+        assert!(page.is_empty());
+        assert_eq!(first, 0);
+        assert_eq!(last, 0);
+    }
+
+    #[test]
+    fn paginate_walks_cursor_to_exhaustion_without_overlap() {
+        let all = [5u64, 4, 3, 2, 1];
+        let mut seen = vec![];
+        let mut cursor = 0u64;
+        loop {
+            let (page, _first, last) = paginate_newest_first(pairs(&all), cursor, 2);
+            if page.is_empty() {
+                break;
+            }
+            for v in &page {
+                assert!(!seen.contains(v));
+                seen.push(v.clone());
+            }
+            cursor = last;
+        }
+        assert_eq!(seen, vec!["v5", "v4", "v3", "v2", "v1"]);
     }
 }

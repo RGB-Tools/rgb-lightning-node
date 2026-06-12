@@ -58,11 +58,11 @@ use crate::routes::{
     ListPeersResponse, ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse,
     ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse,
     MakerExecuteRequest, MakerInitRequest, MakerInitResponse, NetworkInfoResponse,
-    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, PaymentType, Peer,
-    PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest, Transaction,
-    Transfer, UnlockRequest, Unspent, WitnessData,
+    NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, PaymentDirection,
+    PaymentType, Peer, PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest,
+    RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse,
+    SendPaymentRequest, SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, TakerRequest,
+    Transaction, Transfer, TransferStatus, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{
     get_db_path, hex_str, hex_str_to_vec, validate_and_parse_payment_hash, AppState,
@@ -1077,6 +1077,44 @@ async fn list_payments_full(
         .unwrap()
 }
 
+#[derive(Default)]
+struct ListPaymentsFilter {
+    status: Option<HTLCStatus>,
+    direction: Option<PaymentDirection>,
+    created_after: Option<u64>,
+    created_before: Option<u64>,
+}
+
+async fn list_payments_filtered(
+    node_address: SocketAddr,
+    filter: ListPaymentsFilter,
+) -> ListPaymentsResponse {
+    let mut query = vec![];
+    if let Some(s) = filter.status {
+        query.push(format!("status={s:?}"));
+    }
+    if let Some(d) = filter.direction {
+        query.push(format!("direction={d:?}"));
+    }
+    if let Some(a) = filter.created_after {
+        query.push(format!("created_after={a}"));
+    }
+    if let Some(b) = filter.created_before {
+        query.push(format!("created_before={b}"));
+    }
+    let mut url = format!("http://{node_address}/listpayments");
+    if !query.is_empty() {
+        url.push('?');
+        url.push_str(&query.join("&"));
+    }
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<ListPaymentsResponse>()
+        .await
+        .unwrap()
+}
+
 async fn get_payment(
     node_address: SocketAddr,
     payment_hash: &str,
@@ -1147,8 +1185,22 @@ async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> 
 }
 
 async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
+    list_transactions_full(node_address, None, None)
+        .await
+        .transactions
+}
+
+async fn list_transactions_full(
+    node_address: SocketAddr,
+    index_offset: Option<u64>,
+    max_transactions: Option<u64>,
+) -> ListTransactionsResponse {
     println!("listing transactions for node {node_address}");
-    let payload = ListTransactionsRequest { skip_sync: false };
+    let payload = ListTransactionsRequest {
+        skip_sync: false,
+        index_offset,
+        max_transactions,
+    };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listtransactions"))
         .json(&payload)
@@ -1160,13 +1212,36 @@ async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
         .json::<ListTransactionsResponse>()
         .await
         .unwrap()
-        .transactions
 }
 
 async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfer> {
+    list_transfers_full(node_address, asset_id, ListTransfersFilter::default())
+        .await
+        .transfers
+}
+
+#[derive(Default)]
+struct ListTransfersFilter {
+    index_offset: Option<u64>,
+    max_transfers: Option<u64>,
+    status: Option<TransferStatus>,
+    created_after: Option<u64>,
+    created_before: Option<u64>,
+}
+
+async fn list_transfers_full(
+    node_address: SocketAddr,
+    asset_id: &str,
+    filter: ListTransfersFilter,
+) -> ListTransfersResponse {
     println!("listing transfers for asset {asset_id} on node {node_address}");
     let payload = ListTransfersRequest {
         asset_id: asset_id.to_string(),
+        index_offset: filter.index_offset,
+        max_transfers: filter.max_transfers,
+        status: filter.status,
+        created_after: filter.created_after,
+        created_before: filter.created_before,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listtransfers"))
@@ -1179,14 +1254,23 @@ async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfe
         .json::<ListTransfersResponse>()
         .await
         .unwrap()
-        .transfers
 }
 
 async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
+    list_unspents_full(node_address, None, None).await.unspents
+}
+
+async fn list_unspents_full(
+    node_address: SocketAddr,
+    index_offset: Option<u64>,
+    max_unspents: Option<u64>,
+) -> ListUnspentsResponse {
     println!("listing unspents for node {node_address}");
     let payload = ListUnspentsRequest {
         settled_only: false,
         skip_sync: false,
+        index_offset,
+        max_unspents,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listunspents"))
@@ -1199,7 +1283,6 @@ async fn list_unspents(node_address: SocketAddr) -> Vec<Unspent> {
         .json::<ListUnspentsResponse>()
         .await
         .unwrap()
-        .unspents
 }
 
 async fn ln_invoice(
@@ -2638,6 +2721,7 @@ mod openchannel_fail;
 mod openchannel_no_indexer;
 mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
+mod pagination_filters;
 mod payment;
 mod refuse_high_fees;
 mod restart;

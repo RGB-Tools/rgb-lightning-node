@@ -557,3 +557,117 @@ async fn pagination() {
     }
     assert_eq!(seen.len() as u64, total);
 }
+
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn list_payments_filter() {
+    initialize();
+
+    let test_dir_base = format!("{TEST_DIR_BASE}list_payments_filter/");
+    let test_dir_node1 = format!("{test_dir_base}node1");
+    let test_dir_node2 = format!("{test_dir_base}node2");
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+
+    fund_and_create_utxos(node1_addr, None).await;
+    fund_and_create_utxos(node2_addr, None).await;
+
+    let node2_pubkey = node_info(node2_addr).await.pubkey;
+    open_channel(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(600_000),
+        Some(300_000_000),
+        None,
+        None,
+    )
+    .await;
+
+    let invoice = ln_invoice(node2_addr, Some(3_000_000), None, None, 900)
+        .await
+        .invoice;
+    send_payment(node1_addr, invoice).await;
+
+    let out = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            direction: Some(PaymentDirection::Outbound),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(!out.payments.is_empty());
+    assert!(out
+        .payments
+        .iter()
+        .all(|p| p.payment_type == PaymentType::Outbound));
+
+    let inbound_on_sender = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            direction: Some(PaymentDirection::Inbound),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(inbound_on_sender.payments.is_empty());
+
+    let inbound_on_receiver = list_payments_filtered(
+        node2_addr,
+        ListPaymentsFilter {
+            direction: Some(PaymentDirection::Inbound),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(!inbound_on_receiver.payments.is_empty());
+    assert!(inbound_on_receiver.payments.iter().all(|p| matches!(
+        p.payment_type,
+        PaymentType::InboundAutoClaim | PaymentType::InboundHodl
+    )));
+
+    let succeeded = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            status: Some(HTLCStatus::Succeeded),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(succeeded
+        .payments
+        .iter()
+        .all(|p| p.status == HTLCStatus::Succeeded));
+
+    let failed = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            status: Some(HTLCStatus::Failed),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(failed.payments.is_empty());
+
+    let future = out.payments.first().unwrap().created_at + 1_000_000;
+    let before = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            created_before: Some(future),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(!before.payments.is_empty());
+    let after = list_payments_filtered(
+        node1_addr,
+        ListPaymentsFilter {
+            created_after: Some(future),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(after.payments.is_empty());
+}

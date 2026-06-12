@@ -664,7 +664,8 @@ paths:
         List the node's LN payments (inbound and outbound) ordered most-recent
         first. Supports index-based cursor pagination: pass the
         last_index_offset of a page as the next index_offset to fetch the next,
-        older page.
+        older page. Optionally filter by status, direction (inbound/outbound)
+        and creation time interval.
       parameters:
         - in: query
           name: index_offset
@@ -684,6 +685,46 @@ paths:
           description: >-
             Maximum number of payments to return. Defaults to 100 when absent or
             zero.
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum:
+              - Pending
+              - Succeeded
+              - Failed
+              - Claimable
+              - Claiming
+              - Cancelled
+          description: Return only payments with this HTLC status.
+        - in: query
+          name: direction
+          required: false
+          schema:
+            type: string
+            enum:
+              - Inbound
+              - Outbound
+          description: Return only inbound or only outbound payments.
+        - in: query
+          name: created_after
+          required: false
+          schema:
+            type: integer
+            format: uint64
+          description: >-
+            Return only payments created at or after this Unix timestamp
+            (seconds).
+        - in: query
+          name: created_before
+          required: false
+          schema:
+            type: integer
+            format: uint64
+          description: >-
+            Return only payments created at or before this Unix timestamp
+            (seconds).
       responses:
         '200':
           description: Successful operation
@@ -722,7 +763,10 @@ paths:
       tags:
         - On-chain
       summary: List transactions
-      description: List the node's on-chain transactions
+      description: >-
+        List the node's on-chain transactions, ordered most-recent first.
+        Supports index-based cursor pagination: pass the last_index_offset of a
+        page as the next index_offset to fetch the next, older page.
       requestBody:
         content:
           application/json:
@@ -740,7 +784,10 @@ paths:
       tags:
         - RGB
       summary: List transfers
-      description: List the node's on-chain RGB transfers
+      description: >-
+        List the node's RGB transfers for an asset, ordered most-recent first.
+        Supports index-based cursor pagination (idx) and optional filtering by
+        status and creation time interval.
       requestBody:
         content:
           application/json:
@@ -758,7 +805,10 @@ paths:
       tags:
         - On-chain
       summary: List unspents
-      description: List the unspent outputs of the internal BDK wallet
+      description: >-
+        List the unspent outputs of the internal BDK wallet. Supports
+        index-based cursor pagination: pass the last_index_offset of a page as
+        the next index_offset to fetch the next page.
       requestBody:
         content:
           application/json:
@@ -2639,15 +2689,41 @@ components:
         skip_sync:
           type: boolean
           example: false
+        index_offset:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: >-
+            Exclusive upper-bound cursor: only transactions with a lower index
+            are returned. 0 or absent means start from the most recent.
+        max_transactions:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: Maximum number to return. Defaults to 100 when absent or zero.
     ListTransactionsResponse:
       type: object
       required:
         - transactions
+        - first_index_offset
+        - last_index_offset
       properties:
         transactions:
           type: array
           items:
             $ref: '#/components/schemas/Transaction'
+        first_index_offset:
+          type: integer
+          format: uint64
+          description: Index of the first transaction in the page, or 0 when empty.
+        last_index_offset:
+          type: integer
+          format: uint64
+          description: >-
+            Index of the last transaction in the page, or 0 when empty. Pass as
+            index_offset to fetch the next, older page.
     ListTransfersRequest:
       type: object
       required:
@@ -2656,15 +2732,70 @@ components:
         asset_id:
           type: string
           example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        index_offset:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: >-
+            Exclusive upper-bound cursor: only transfers with a lower idx are
+            returned. 0 or absent means start from the most recent.
+        max_transfers:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: Maximum number to return. Defaults to 100 when absent or zero.
+        status:
+          type:
+            - string
+            - 'null'
+          enum:
+            - Initiated
+            - WaitingCounterparty
+            - WaitingSafeHeight
+            - WaitingConfirmations
+            - Settled
+            - Failed
+            - null
+          description: Return only transfers with this status.
+        created_after:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: >-
+            Return only transfers created at or after this Unix timestamp
+            (seconds).
+        created_before:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: >-
+            Return only transfers created at or before this Unix timestamp
+            (seconds).
     ListTransfersResponse:
       type: object
       required:
         - transfers
+        - first_index_offset
+        - last_index_offset
       properties:
         transfers:
           type: array
           items:
             $ref: '#/components/schemas/Transfer'
+        first_index_offset:
+          type: integer
+          format: uint64
+          description: Index (idx) of the first transfer in the page, or 0 when empty.
+        last_index_offset:
+          type: integer
+          format: uint64
+          description: >-
+            Index (idx) of the last transfer in the page, or 0 when empty. Pass
+            as index_offset to fetch the next, older page.
     ListUnspentsRequest:
       type: object
       required:
@@ -2677,15 +2808,41 @@ components:
         skip_sync:
           type: boolean
           example: false
+        index_offset:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: >-
+            Exclusive upper-bound cursor: only unspents with a lower index are
+            returned. 0 or absent means start from the first.
+        max_unspents:
+          type:
+            - integer
+            - 'null'
+          format: uint64
+          description: Maximum number to return. Defaults to 100 when absent or zero.
     ListUnspentsResponse:
       type: object
       required:
         - unspents
+        - first_index_offset
+        - last_index_offset
       properties:
         unspents:
           type: array
           items:
             $ref: '#/components/schemas/Unspent'
+        first_index_offset:
+          type: integer
+          format: uint64
+          description: Index of the first unspent in the page, or 0 when empty.
+        last_index_offset:
+          type: integer
+          format: uint64
+          description: >-
+            Index of the last unspent in the page, or 0 when empty. Pass as
+            index_offset to fetch the next page.
     LNInvoiceRequest:
       type: object
       required:
