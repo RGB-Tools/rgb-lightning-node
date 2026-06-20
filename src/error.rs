@@ -68,6 +68,9 @@ pub enum APIError {
     #[error("Failed to create invoice: {0}")]
     FailedInvoiceCreation(String),
 
+    #[error("Failed to create offer: {0}")]
+    FailedOfferCreation(String),
+
     #[error("Failed to issue asset: {0}")]
     FailedIssuingAsset(String),
 
@@ -427,6 +430,7 @@ impl IntoResponse for APIError {
         let (status, error, name) = match self {
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
+            | APIError::FailedOfferCreation(_)
             | APIError::FailedIssuingAsset(_)
             | APIError::FailedKeysCreation(_, _)
             | APIError::FailedOpenChannel(_)

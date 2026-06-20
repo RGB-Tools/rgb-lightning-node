@@ -241,6 +241,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DecodeLNInvoiceResponse'
+  /decodeoffer:
+    post:
+      tags:
+        - Invoices
+      summary: Decode a BOLT12 offer
+      description: Decode the provided BOLT12 offer string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecodeOfferRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecodeOfferResponse'
   /decodergbinvoice:
     post:
       tags:
@@ -705,6 +723,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LNInvoiceResponse'
+  /lnoffer:
+    post:
+      tags:
+        - Invoices
+      summary: Get a BOLT12 offer
+      description: Get a BOLT12 offer to receive a payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LNOfferRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LNOfferResponse'
   /makerexecute:
     post:
       tags:
@@ -1620,6 +1656,14 @@ components:
         invoice:
           type: string
           example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
+    DecodeOfferRequest:
+      type: object
+      required:
+        - offer
+      properties:
+        offer:
+          type: string
+          example: lno1qcp4256ypq...
     DecodeLNInvoiceResponse:
       type: object
       required:
@@ -1663,6 +1707,58 @@ components:
           example: 0343851df9e0e8aff0c10b3498ce723ff4c9b4a855e6c8819adcafbbb3e24ea2af
         network:
           $ref: '#/components/schemas/BitcoinNetwork'
+    DecodeOfferResponse:
+      type: object
+      required:
+        - is_expired
+        - chains
+        - path_count
+        - offer_id
+      properties:
+        amt_msat:
+          type:
+            - integer
+            - 'null'
+          example: 50000
+        description:
+          type:
+            - string
+            - 'null'
+          example: bolt12 test
+        issuer:
+          type:
+            - string
+            - 'null'
+          example: Example node
+        expiry_sec:
+          type:
+            - integer
+            - 'null'
+          example: 1744298100
+        is_expired:
+          type: boolean
+          example: false
+        chains:
+          type: array
+          items:
+            $ref: '#/components/schemas/BitcoinNetwork'
+        supported_quantity_max:
+          type:
+            - integer
+            - 'null'
+          description: Null means a single-item offer, 0 means unbounded quantity.
+          example: 10
+        issuer_signing_pubkey:
+          type:
+            - string
+            - 'null'
+          example: 0343851df9e0e8aff0c10b3498ce723ff4c9b4a855e6c8819adcafbbb3e24ea2af
+        path_count:
+          type: integer
+          example: 1
+        offer_id:
+          type: string
+          example: 6a1ccf1d8a1f3f0f9f2d4ec6a1e8ff7db3b7092bd2e8f25aee72586b1f7cdabc
     DecodeRGBInvoiceRequest:
       type: object
       required:
@@ -2312,6 +2408,53 @@ components:
         invoice:
           type: string
           example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
+    LNOfferRequest:
+      type: object
+      properties:
+        amt_msat:
+          type:
+            - integer
+            - 'null'
+          example: 50000
+        description:
+          type:
+            - string
+            - 'null'
+          example: bolt12 test
+        issuer:
+          type:
+            - string
+            - 'null'
+          example: Example node
+        expiry_sec:
+          type:
+            - integer
+            - 'null'
+          example: 900
+        supported_quantity_max:
+          type:
+            - integer
+            - 'null'
+          description: Null means a single-item offer, 0 means unbounded quantity.
+          example: 10
+        asset_id:
+          type:
+            - string
+            - 'null'
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        asset_amount:
+          type:
+            - integer
+            - 'null'
+          example: 42
+    LNOfferResponse:
+      type: object
+      required:
+        - offer
+      properties:
+        offer:
+          type: string
+          example: lno1qcp4256ypq...
     MakerExecuteRequest:
       type: object
       required:
@@ -2812,6 +2955,7 @@ components:
       properties:
         invoice:
           type: string
+          description: A BOLT11 invoice or a BOLT12 offer.
           example: lnbcrt30u1pjv6yzndqud3jxktt5w46x7unfv9kz6mn0v3jsnp4qdpc280eur52luxppv6f3nnj8l6vnd9g2hnv3qv6mjhmhvlzf6327pp5tjjasx6g9dqptea3fhm6yllq5wxzycnnvp8l6wcq3d6j2uvpryuqsp5l8az8x3g8fe05dg7cmgddld3da09nfjvky8xftwsk4cj8p2l7kfq9qyysgqcqpcxqzdylzlwfnkyw3jv344x4rzwgkk53ng0fhxy5rdduk4g5tpvea8xa6rfckkza35va28xjn2tqkhgarcxep5umm4x5k56wfcdvu95eq7qzp20vrl4xz76syapsa3c09j7lg5gerkaj63llj0ark7ph8hfketn6fkqzm8laf66dhsncm23wkwm5l5377we9e8lnlknnkwje5eefkccusqm6rqt8
         amt_msat:
           type:

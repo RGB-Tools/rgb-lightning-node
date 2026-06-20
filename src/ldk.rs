@@ -134,6 +134,7 @@ pub(crate) struct PaymentInfo {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: PublicKey,
     pub(crate) expires_at: Option<u64>,
+    pub(crate) payment_hash: Option<PaymentHash>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -145,6 +146,7 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (10, updated_at, required),
     (12, payee_pubkey, required),
     (14, expires_at, option),
+    (16, payment_hash, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -363,6 +365,7 @@ impl UnlockedAppState {
                     secret,
                     status,
                     amt_msat,
+                    payment_hash: Some(payment_hash),
                     created_at,
                     updated_at: created_at,
                     payee_pubkey,
@@ -376,6 +379,7 @@ impl UnlockedAppState {
     pub(crate) fn update_outbound_payment(
         &self,
         payment_id: PaymentId,
+        payment_hash: Option<PaymentHash>,
         status: HTLCStatus,
         preimage: Option<PaymentPreimage>,
     ) -> PaymentInfo {
@@ -383,16 +387,27 @@ impl UnlockedAppState {
         let payment_info = outbound.payments.get_mut(&payment_id).unwrap();
         payment_info.status = status;
         payment_info.preimage = preimage;
+        if payment_hash.is_some() {
+            payment_info.payment_hash = payment_hash;
+        }
         payment_info.updated_at = get_current_timestamp();
         let payment = (*payment_info).clone();
         self.save_outbound_payments(outbound);
         payment
     }
 
-    pub(crate) fn update_outbound_payment_status(&self, payment_id: PaymentId, status: HTLCStatus) {
+    pub(crate) fn update_outbound_payment_status(
+        &self,
+        payment_id: PaymentId,
+        status: HTLCStatus,
+        payment_hash: Option<PaymentHash>,
+    ) {
         let mut outbound = self.get_outbound_payments();
         let payment_info = outbound.payments.get_mut(&payment_id).unwrap();
         payment_info.status = status;
+        if payment_hash.is_some() {
+            payment_info.payment_hash = payment_hash;
+        }
         payment_info.updated_at = get_current_timestamp();
         self.save_outbound_payments(outbound);
     }
@@ -1001,6 +1016,7 @@ async fn handle_ldk_events(
             } else {
                 let payment = unlocked_state.update_outbound_payment(
                     payment_id.unwrap(),
+                    Some(payment_hash),
                     HTLCStatus::Succeeded,
                     Some(payment_preimage),
                 );
@@ -1087,7 +1103,11 @@ async fn handle_ldk_events(
                 if unlocked_state.is_maker_swap(&hash) {
                     unlocked_state.update_maker_swap_status(&hash, SwapStatus::Failed);
                 } else {
-                    unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
+                    unlocked_state.update_outbound_payment_status(
+                        payment_id,
+                        HTLCStatus::Failed,
+                        Some(hash),
+                    );
                 }
             } else {
                 tracing::error!(
@@ -1099,7 +1119,7 @@ async fn handle_ldk_events(
                         PaymentFailureReason::RetriesExhausted
                     }
                 );
-                unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed);
+                unlocked_state.update_outbound_payment_status(payment_id, HTLCStatus::Failed, None);
             }
         }
         Event::InvoiceReceived { .. } => {
