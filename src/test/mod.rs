@@ -81,6 +81,9 @@ impl Default for UserArgs {
             daemon_listening_port: 3001,
             ldk_peer_listening_port: 9735,
             max_media_upload_size_mb: 3,
+            max_aggregated_media_size_per_channel_mb: 24,
+            max_pending_consignments: 10,
+            max_media_files_per_channel: 42,
             root_public_key: None,
         }
     }
@@ -1548,10 +1551,9 @@ async fn rgb_invoice_with_assignment(
         min_confirmations: 1,
         asset_id,
         assignment,
-        expiration_timestamp: Some(
-            OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
-        ),
+        expiration_timestamp: OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
         witness,
+        transport_endpoints: vec![PROXY_ENDPOINT_LOCAL.to_string()],
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/rgbinvoice"))
@@ -1601,9 +1603,7 @@ async fn send_assets(
         donation,
         fee_rate: FEE_RATE,
         min_confirmations: 1,
-        expiration_timestamp: Some(
-            OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
-        ),
+        expiration_timestamp: OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
         recipient_map,
     };
     let res = reqwest::Client::new()
@@ -1761,7 +1761,6 @@ fn unlock_req(password: &str) -> UnlockRequest {
         bitcoind_rpc_host: s!("localhost"),
         bitcoind_rpc_port: 18443,
         indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
-        proxy_endpoint: Some(PROXY_ENDPOINT_LOCAL.to_string()),
         announce_addresses: vec![],
         announce_alias: Some(s!("RLN_alias")),
     }
@@ -2068,6 +2067,7 @@ mod multi_hop;
 mod multi_open_close;
 mod open_after_double_send;
 mod openchannel_fail;
+mod openchannel_media;
 mod openchannel_no_indexer;
 mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;

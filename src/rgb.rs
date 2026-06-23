@@ -17,16 +17,16 @@ use rgb_lib::{
     bitcoin::psbt::Psbt as BitcoinPsbt,
     wallet::{
         rust_only::{check_proxy_url, ColoringInfo},
-        AssetCFA, AssetIFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Metadata, Online,
-        OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult, RgbWalletOpsOffline,
-        RgbWalletOpsOnline, SendBeginResult, SinglesigKeys, SyncOptions,
-        Transaction as RgbLibTransaction, Transfer, TransportEndpoint, Unspent,
+        AssetCFA, AssetIFA, AssetNIA, AssetUDA, Assets, Balance, BtcBalance, Media, Metadata,
+        Online, OperationResult, ReceiveData, Recipient, RefreshFilter, RefreshResult,
+        RefreshedTransfer, RgbWalletOpsOffline, RgbWalletOpsOnline, SendBeginResult, SinglesigKeys,
+        SyncOptions, Transaction as RgbLibTransaction, Transfer, TransportEndpoint, Unspent,
         Wallet as RgbLibWallet,
     },
     AssetSchema, Assignment, BitcoinNetwork, ContractId, Error as RgbLibError, Fascia, RgbTransfer,
-    RgbTransport, RgbTxid, UpdateRes, WitnessOrd,
+    RgbTxid, UpdateRes, WitnessOrd,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -42,7 +42,7 @@ impl UnlockedAppState {
         &self,
         asset_id: Option<String>,
         assignment: Assignment,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
@@ -212,6 +212,13 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.list_assets(filter_asset_schemas)
     }
 
+    pub(crate) fn rgb_list_asset_media(
+        &self,
+        asset_id: String,
+    ) -> Result<HashSet<Media>, RgbLibError> {
+        self.rgb_wallet_wrapper.list_asset_media(asset_id)
+    }
+
     pub(crate) fn rgb_list_transactions(
         &self,
         skip_sync: bool,
@@ -233,23 +240,6 @@ impl UnlockedAppState {
     ) -> Result<Vec<Unspent>, RgbLibError> {
         self.rgb_wallet_wrapper
             .list_unspents(settled_only, skip_sync)
-    }
-
-    pub(crate) fn rgb_post_consignment<P: AsRef<Path>>(
-        &self,
-        proxy_url: &str,
-        recipient_id: String,
-        consignment_path: P,
-        txid: String,
-        vout: Option<u32>,
-    ) -> Result<(), RgbLibError> {
-        self.rgb_wallet_wrapper.post_consignment(
-            proxy_url,
-            recipient_id,
-            consignment_path,
-            txid,
-            vout,
-        )
     }
 
     pub(crate) fn rgb_refresh(
@@ -276,7 +266,7 @@ impl UnlockedAppState {
         donation: bool,
         fee_rate: u64,
         min_confirmations: u8,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
     ) -> Result<OperationResult, RgbLibError> {
         self.rgb_wallet_wrapper.send(
             recipient_map,
@@ -293,7 +283,7 @@ impl UnlockedAppState {
         donation: bool,
         fee_rate: u64,
         min_confirmations: u8,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         dry_run: bool,
     ) -> Result<SendBeginResult, RgbLibError> {
         self.rgb_wallet_wrapper.send_begin(
@@ -332,8 +322,11 @@ impl UnlockedAppState {
         self.rgb_wallet_wrapper.send_btc_end(signed_psbt)
     }
 
-    pub(crate) fn rgb_send_end(&self, signed_psbt: String) -> Result<OperationResult, RgbLibError> {
-        self.rgb_wallet_wrapper.send_end(signed_psbt)
+    pub(crate) fn rgb_send_end_db_update_only(
+        &self,
+        signed_psbt: String,
+    ) -> Result<OperationResult, RgbLibError> {
+        self.rgb_wallet_wrapper.send_end_db_update_only(signed_psbt)
     }
 
     pub(crate) fn rgb_sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
@@ -357,7 +350,7 @@ impl UnlockedAppState {
         &self,
         asset_id: Option<String>,
         assignment: Assignment,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
@@ -397,7 +390,7 @@ impl RgbLibWalletWrapper {
         &self,
         asset_id: Option<String>,
         assignment: Assignment,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
@@ -507,7 +500,7 @@ impl RgbLibWalletWrapper {
     }
 
     pub(crate) fn get_tx_height(&self, txid: String) -> Result<Option<u32>, RgbLibError> {
-        self.get_rgb_wallet().get_tx_height(txid)
+        self.get_rgb_wallet().get_tx_height(self.online, txid)
     }
 
     pub(crate) fn inflate(
@@ -595,6 +588,10 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().list_assets(filter_asset_schemas)
     }
 
+    pub(crate) fn list_asset_media(&self, asset_id: String) -> Result<HashSet<Media>, RgbLibError> {
+        self.get_rgb_wallet().list_asset_media(asset_id)
+    }
+
     pub(crate) fn list_transactions(
         &self,
         skip_sync: bool,
@@ -617,20 +614,15 @@ impl RgbLibWalletWrapper {
             .list_unspents(online, settled_only, skip_sync)
     }
 
-    pub(crate) fn post_consignment<P: AsRef<Path>>(
+    pub(crate) fn provide_out_of_band_consignment(
         &self,
-        proxy_url: &str,
-        recipient_id: String,
-        consignment_path: P,
-        txid: String,
-        vout: Option<u32>,
-    ) -> Result<(), RgbLibError> {
-        self.get_rgb_wallet().post_consignment(
-            proxy_url,
-            recipient_id,
+        consignment_path: String,
+        media_file_paths: Vec<String>,
+    ) -> Result<HashMap<i32, RefreshedTransfer>, RgbLibError> {
+        self.get_rgb_wallet().provide_out_of_band_consignment(
+            self.online,
             consignment_path,
-            txid,
-            vout,
+            media_file_paths,
         )
     }
 
@@ -650,7 +642,7 @@ impl RgbLibWalletWrapper {
         offchain_txid: String,
     ) -> Result<(), RgbLibError> {
         self.get_rgb_wallet()
-            .save_new_asset(consignment, offchain_txid)
+            .save_new_asset(self.online, consignment, offchain_txid)
     }
 
     pub(crate) fn send(
@@ -659,7 +651,7 @@ impl RgbLibWalletWrapper {
         donation: bool,
         fee_rate: u64,
         min_confirmations: u8,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
     ) -> Result<OperationResult, RgbLibError> {
         self.get_rgb_wallet().send(
             self.online,
@@ -677,7 +669,7 @@ impl RgbLibWalletWrapper {
         donation: bool,
         fee_rate: u64,
         min_confirmations: u8,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         dry_run: bool,
     ) -> Result<SendBeginResult, RgbLibError> {
         self.get_rgb_wallet().send_begin(
@@ -717,8 +709,12 @@ impl RgbLibWalletWrapper {
         self.get_rgb_wallet().send_btc_end(self.online, signed_psbt)
     }
 
-    pub(crate) fn send_end(&self, signed_psbt: String) -> Result<OperationResult, RgbLibError> {
-        self.get_rgb_wallet().send_end(self.online, signed_psbt)
+    pub(crate) fn send_end_db_update_only(
+        &self,
+        signed_psbt: String,
+    ) -> Result<OperationResult, RgbLibError> {
+        self.get_rgb_wallet()
+            .send_end_db_update_only(self.online, signed_psbt)
     }
 
     pub(crate) fn sign_psbt(&self, unsigned_psbt: String) -> Result<String, RgbLibError> {
@@ -735,7 +731,7 @@ impl RgbLibWalletWrapper {
         force_witnesses: Vec<RgbTxid>,
     ) -> Result<UpdateRes, RgbLibError> {
         self.get_rgb_wallet()
-            .update_witnesses(after_height, force_witnesses)
+            .update_witnesses(self.online, after_height, force_witnesses)
     }
 
     pub(crate) fn upsert_witness(
@@ -751,7 +747,7 @@ impl RgbLibWalletWrapper {
         &self,
         asset_id: Option<String>,
         assignment: Assignment,
-        expiration_timestamp: Option<u64>,
+        expiration_timestamp: u64,
         transport_endpoints: Vec<String>,
         min_confirmations: u8,
     ) -> Result<ReceiveData, RgbLibError> {
@@ -844,9 +840,7 @@ impl WalletSource for RgbLibWalletWrapper {
 }
 
 pub(crate) async fn check_rgb_proxy_endpoint(proxy_endpoint: &str) -> Result<(), APIError> {
-    let rgb_transport =
-        RgbTransport::from_str(proxy_endpoint).map_err(|_| APIError::InvalidProxyEndpoint)?;
-    let proxy_url = TransportEndpoint::try_from(rgb_transport)?.endpoint;
+    let proxy_url = TransportEndpoint::new(proxy_endpoint.to_string())?.endpoint;
     tokio::task::spawn_blocking(move || check_proxy_url(&proxy_url))
         .await
         .unwrap()?;

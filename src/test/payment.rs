@@ -216,8 +216,9 @@ async fn success() {
     assert!(xfer_2.recipient_id.is_some());
     assert!(xfer_2.receive_utxo.is_none());
     assert!(xfer_2.change_utxo.is_some());
-    assert!(xfer_2.expiration_timestamp.is_none());
-    assert!(!xfer_2.transport_endpoints.is_empty());
+    assert!(xfer_2.expiration_timestamp.is_some());
+    // the channel funding consignment travels over the p2p link, so no proxy is involved
+    assert!(xfer_2.transport_endpoints.is_empty());
     let xfer_3 = transfers.iter().find(|t| t.idx == 3).unwrap();
     assert_eq!(xfer_3.status, TransferStatus::Settled);
     assert_eq!(xfer_3.kind, TransferKind::ReceiveWitness);
@@ -226,8 +227,8 @@ async fn success() {
     assert!(xfer_3.recipient_id.is_some());
     assert!(xfer_3.receive_utxo.is_some());
     assert!(xfer_3.change_utxo.is_none());
-    assert!(xfer_3.expiration_timestamp.is_none());
-    assert!(!xfer_3.transport_endpoints.is_empty());
+    assert!(xfer_3.expiration_timestamp.is_some());
+    assert!(xfer_3.transport_endpoints.is_empty());
 }
 
 #[serial_test::serial]

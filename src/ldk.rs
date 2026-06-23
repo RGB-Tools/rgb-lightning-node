@@ -24,9 +24,8 @@ use lightning::onion_message::messenger::{
 };
 use lightning::rgb_utils::{
     get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, write_rgb_channel_info, BITCOIN_NETWORK_FNAME, INDEXER_URL_FNAME,
-    STATIC_BLINDING, WALLET_ACCOUNT_XPUB_COLORED_FNAME, WALLET_ACCOUNT_XPUB_VANILLA_FNAME,
-    WALLET_FINGERPRINT_FNAME, WALLET_MASTER_FINGERPRINT_FNAME,
+    update_rgb_channel_amount, write_rgb_channel_info, INDEXER_URL_FNAME, STATIC_BLINDING,
+    WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -70,8 +69,8 @@ use rgb_lib::{
     utils::{get_account_data, recipient_id_from_script_buf, script_buf_from_recipient_id},
     wallet::{
         rust_only::{check_indexer_url, AssetColoringInfo, ColoringInfo},
-        DatabaseType, OnlineOptions, Recipient, SinglesigKeys, TransportEndpoint,
-        Wallet as RgbLibWallet, WalletData, WitnessData,
+        DatabaseType, OnlineOptions, Recipient, SinglesigKeys, Wallet as RgbLibWallet, WalletData,
+        WitnessData,
     },
     AssetSchema, Assignment, BitcoinNetwork, ConsignmentExt, ContractId, Error as RgbLibError,
     Fascia, FileContent, RgbTransfer, RgbTxid, WitnessOrd,
@@ -99,19 +98,22 @@ use crate::disk::{
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
-use crate::rgb::{check_rgb_proxy_endpoint, get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::rgb_file_transfer::{
+    PeerChannelGate, RgbFileTransferHandler, REASSEMBLY_SWEEP_INTERVAL,
+};
 use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
     hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, PROXY_ENDPOINT_LOCAL,
-    PROXY_ENDPOINT_PUBLIC,
+    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4,
 };
 
 pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
 pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
+const RGB_TRANSFER_CHAN_EXPIRATION_SECS: u64 = 86400;
 const VANILLA_SYNC_LOOKBACK: u32 = 20;
 
 #[cfg(test)]
@@ -470,7 +472,7 @@ pub(crate) type PeerManager = LdkPeerManager<
     Arc<P2PGossipSync<Arc<NetworkGraph>, Arc<GossipVerifier>, Arc<FilesystemLogger>>>,
     Arc<OnionMessenger>,
     Arc<FilesystemLogger>,
-    IgnoringMessageHandler,
+    Arc<RgbFileTransferHandler>,
     Arc<KeysManager>,
     Arc<ChainMonitor>,
 >;
@@ -488,6 +490,20 @@ pub(crate) type Router = DefaultRouter<
 
 pub(crate) type ChannelManager =
     SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
+
+impl PeerChannelGate for ChannelManager {
+    fn channel_count_with(&self, peer: &PublicKey) -> usize {
+        // unlike list_channels, this doesn't filter out unfunded channels
+        self.list_channels_with_counterparty(peer).len()
+    }
+
+    fn has_channel_funded_by(&self, funding_txid: &str) -> bool {
+        self.list_channels().iter().any(|chan| {
+            chan.funding_txo
+                .is_some_and(|txo| txo.txid.to_string() == funding_txid)
+        })
+    }
+}
 
 pub(crate) type NetworkGraph = gossip::NetworkGraph<Arc<FilesystemLogger>>;
 
@@ -518,7 +534,6 @@ pub(crate) struct RgbOutputSpender {
     keys_manager: Arc<KeysManager>,
     fs_store: Arc<FilesystemStore>,
     txes: Arc<Mutex<OutputSpenderTxes>>,
-    proxy_endpoint: String,
 }
 
 pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
@@ -576,20 +591,34 @@ fn handle_funding_prepare_err(
             tracing::error!("Network error during channel opening: {details}");
             Err(ReplayEvent())
         }
-        e => {
-            tracing::error!("Cannot open channel: {e}");
-            if let Err(close_err) = channel_manager.force_close_broadcasting_latest_txn(
-                temporary_channel_id,
-                counterparty_node_id,
-                e.to_string(),
-            ) {
-                tracing::error!(
-                    "Failed to force-close channel {temporary_channel_id} after error: {close_err:?}"
-                );
-            }
-            Ok(())
-        }
+        e => abort_funding(
+            e.to_string(),
+            channel_manager,
+            temporary_channel_id,
+            counterparty_node_id,
+        ),
     }
+}
+
+// Give up on a channel funding for a reason retrying cannot fix, closing the channel rather than
+// leaving the peer waiting on a funding that will never come.
+fn abort_funding(
+    reason: String,
+    channel_manager: &ChannelManager,
+    temporary_channel_id: &ChannelId,
+    counterparty_node_id: &PublicKey,
+) -> Result<(), ReplayEvent> {
+    tracing::error!("Cannot open channel: {reason}");
+    if let Err(close_err) = channel_manager.force_close_broadcasting_latest_txn(
+        temporary_channel_id,
+        counterparty_node_id,
+        reason,
+    ) {
+        tracing::error!(
+            "Failed to abort funding by force-closing the channel {temporary_channel_id} after error: {close_err:?}"
+        );
+    }
+    Ok(())
 }
 
 async fn handle_open_chan_fail(
@@ -726,7 +755,7 @@ async fn handle_ldk_events(
                             blinding: Some(STATIC_BLINDING),
                         }),
                         assignment,
-                        transport_endpoints: vec![unlocked_state.proxy_endpoint.clone()]
+                        transport_endpoints: vec![]
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
@@ -736,7 +765,7 @@ async fn handle_ldk_events(
                         true,
                         FEE_RATE,
                         MIN_CHANNEL_CONFIRMATIONS,
-                        None,
+                        get_current_timestamp() + RGB_TRANSFER_CHAN_EXPIRATION_SECS,
                         false,
                     )?;
                     let fascia_str = fs::read_to_string(&res.details.fascia_path).unwrap();
@@ -838,28 +867,79 @@ async fn handle_ldk_events(
                 .await
                 .unwrap();
 
+                // send the consignment to the channel counterparty over the encrypted p2p link
                 let consignment_path =
                     unlocked_state.rgb_get_send_consignment_path(&asset_id, &funding_txid_str);
-                let proxy_url = TransportEndpoint::new(unlocked_state.proxy_endpoint.clone())
-                    .unwrap()
-                    .endpoint;
-                let unlocked_state_copy = unlocked_state.clone();
-                let res = tokio::task::spawn_blocking(move || {
-                    unlocked_state_copy.rgb_post_consignment(
-                        &proxy_url,
+                let consignment_bytes = fs::read(&consignment_path)
+                    .expect("consignment we just generated must be readable");
+                if unlocked_state
+                    .rgb_file_transfer_handler
+                    .queue_consignment(
+                        counterparty_node_id,
                         funding_txid_str.clone(),
-                        &consignment_path,
-                        funding_txid_str,
-                        None,
+                        consignment_bytes,
                     )
-                })
-                .await
-                .unwrap();
-
-                if let Err(e) = res {
-                    tracing::error!("cannot post consignment: {e}");
-                    return Err(ReplayEvent());
+                    .is_err()
+                {
+                    return abort_funding(
+                        s!("consignment is too large to send over p2p"),
+                        &unlocked_state.channel_manager,
+                        &temporary_channel_id,
+                        &counterparty_node_id,
+                    );
                 }
+
+                // send the asset's media files over the same p2p link
+                let (rgb_info, _) = get_rgb_channel_info_pending(
+                    &temporary_channel_id,
+                    &PathBuf::from(&static_state.ldk_data_dir),
+                );
+                if rgb_info.counterparty_knows_asset {
+                    tracing::info!(
+                        "counterparty already knows asset {asset_id}, not sending its media"
+                    );
+                } else {
+                    let unlocked_state_copy = unlocked_state.clone();
+                    let medias = match tokio::task::spawn_blocking(move || {
+                        unlocked_state_copy.rgb_list_asset_media(asset_id)
+                    })
+                    .await
+                    .unwrap()
+                    {
+                        Ok(medias) => medias,
+                        Err(e) => {
+                            return handle_funding_prepare_err(
+                                e,
+                                &unlocked_state.channel_manager,
+                                &temporary_channel_id,
+                                &counterparty_node_id,
+                            );
+                        }
+                    };
+                    for media in medias {
+                        let media_bytes = fs::read(&media.file_path)
+                            .expect("media file known to the wallet must be readable");
+                        if unlocked_state
+                            .rgb_file_transfer_handler
+                            .queue_media(
+                                counterparty_node_id,
+                                funding_txid_str.clone(),
+                                media.digest,
+                                media_bytes,
+                            )
+                            .is_err()
+                        {
+                            return abort_funding(
+                                s!("asset media is too large to send over p2p"),
+                                &unlocked_state.channel_manager,
+                                &temporary_channel_id,
+                                &counterparty_node_id,
+                            );
+                        }
+                    }
+                }
+
+                unlocked_state.peer_manager.process_events();
             }
 
             let channel_manager_copy = unlocked_state.channel_manager.clone();
@@ -1257,7 +1337,11 @@ async fn handle_ldk_events(
 
                 let _txid = tokio::task::spawn_blocking(move || {
                     if is_chan_colored {
-                        state_copy.rgb_send_end(psbt_str_copy).map(|r| r.txid)
+                        // the consignment was already sent to the peer over p2p at funding time, so
+                        // only perform the local DB bookkeeping here
+                        state_copy
+                            .rgb_send_end_db_update_only(psbt_str_copy)
+                            .map(|r| r.txid)
                     } else {
                         state_copy.rgb_send_btc_end(psbt_str_copy)
                     }
@@ -1285,11 +1369,16 @@ async fn handle_ldk_events(
                 let consignment =
                     RgbTransfer::load_file(consignment_path).expect("successful consignment load");
 
-                match unlocked_state.rgb_save_new_asset(consignment, funding_txid) {
+                match unlocked_state.rgb_save_new_asset(consignment, funding_txid.clone()) {
                     Ok(_) => {}
                     Err(e) if e.to_string().contains("UNIQUE constraint failed") => {}
                     Err(e) => panic!("Failed saving asset: {e}"),
                 }
+
+                // the consignment record can stop counting against the node-wide pending-consignment cap
+                unlocked_state
+                    .rgb_file_transfer_handler
+                    .forget_staged_funding(&funding_txid);
             }
         }
         Event::ChannelReady {
@@ -1318,7 +1407,7 @@ async fn handle_ldk_events(
             user_channel_id: _,
             counterparty_node_id,
             channel_capacity_sats: _,
-            channel_funding_txo: _,
+            channel_funding_txo,
             last_local_balance_msat: _,
         } => {
             tracing::info!(
@@ -1329,6 +1418,30 @@ async fn handle_ldk_events(
                     .unwrap_or("".to_owned()),
                 reason
             );
+
+            // we can remove the funding consignment since the channel has been closed
+            if let Some(funding_txo) = channel_funding_txo {
+                let funding_txid = funding_txo.txid.to_string();
+                let consignment_path = static_state
+                    .ldk_data_dir
+                    .join(format!("consignment_{funding_txid}"));
+                match fs::remove_file(&consignment_path) {
+                    Ok(()) => tracing::debug!(
+                        "Removed funding consignment for closed channel {}",
+                        channel_id
+                    ),
+                    // absent for vanilla channels, and on the channel initiator
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => tracing::warn!(
+                        "Failed to remove funding consignment for closed channel {}: {e}",
+                        channel_id
+                    ),
+                }
+                // drop the in-memory record too, so it stops counting against the node-wide cap
+                unlocked_state
+                    .rgb_file_transfer_handler
+                    .forget_staged_funding(&funding_txid);
+            }
 
             // the ChannelClosed event gets fired also after node crashes/restarts, so it's better
             // to handle the failure here (regardless what the DiscardFunding event documents)
@@ -1594,8 +1707,8 @@ impl OutputSpender for RgbOutputSpender {
                     .witness_receive(
                         None,
                         Assignment::Any,
-                        None,
-                        vec![self.proxy_endpoint.clone()],
+                        get_current_timestamp() + RGB_TRANSFER_CHAN_EXPIRATION_SECS,
+                        vec![],
                         0,
                     )
                     .unwrap();
@@ -1690,33 +1803,22 @@ impl OutputSpender for RgbOutputSpender {
         for consignment in consignments {
             let contract_id = consignment.contract_id();
 
-            let (mut vout, _, recipient_id) = asset_info[&contract_id].clone();
-            vout += 1;
-
+            // persist consignment and hand it to rgb-lib (out-of-band)
             let consignment_path = self
                 .static_state
                 .ldk_data_dir
-                .join(format!("consignment_{}", closing_txid.clone()));
+                .join(format!("consignment_{closing_txid}_{contract_id}"));
             consignment
                 .save_file(&consignment_path)
                 .expect("successful save");
-            let proxy_url = TransportEndpoint::new(self.proxy_endpoint.clone())
-                .unwrap()
-                .endpoint;
+            let consignment_path_str = consignment_path.to_string_lossy().to_string();
             let rgb_wallet_wrapper_copy = self.rgb_wallet_wrapper.clone();
-            let closing_txid_copy = closing_txid.clone();
-            let consignment_path_copy = consignment_path.clone();
             let res = futures::executor::block_on(tokio::task::spawn_blocking(move || {
-                rgb_wallet_wrapper_copy.post_consignment(
-                    &proxy_url,
-                    recipient_id,
-                    &consignment_path_copy,
-                    closing_txid_copy,
-                    Some(vout),
-                )
+                rgb_wallet_wrapper_copy
+                    .provide_out_of_band_consignment(consignment_path_str, vec![])
             }));
             if let Err(e) = res {
-                tracing::error!("cannot post consignment: {e}");
+                tracing::error!("cannot provide consignment: {e}");
                 return Err(());
             }
             fs::remove_file(&consignment_path).unwrap();
@@ -1799,28 +1901,8 @@ pub(crate) async fn start_ldk(
             }
         }
     };
-    let proxy_endpoint = if let Some(proxy_endpoint) = &unlock_request.proxy_endpoint {
-        check_rgb_proxy_endpoint(proxy_endpoint).await?;
-        tracing::info!("Using a custom proxy");
-        proxy_endpoint
-    } else {
-        tracing::info!("Using the default proxy");
-        match bitcoin_network {
-            BitcoinNetwork::Signet
-            | BitcoinNetwork::SignetCustom
-            | BitcoinNetwork::Testnet
-            | BitcoinNetwork::Testnet4
-            | BitcoinNetwork::Mainnet => PROXY_ENDPOINT_PUBLIC,
-            BitcoinNetwork::Regtest => PROXY_ENDPOINT_LOCAL,
-        }
-    };
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
     fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
-    fs::write(
-        storage_dir_path.join(BITCOIN_NETWORK_FNAME),
-        bitcoin_network.to_string(),
-    )
-    .expect("able to write");
 
     // Initialize the FeeEstimator
     // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
@@ -2022,25 +2104,6 @@ pub(crate) async fn start_ldk(
         vanilla_sync_lookback: VANILLA_SYNC_LOOKBACK,
     })?;
     fs::write(
-        static_state.storage_dir_path.join(WALLET_FINGERPRINT_FNAME),
-        account_xpub_colored.fingerprint().to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_COLORED_FNAME),
-        account_xpub_colored.to_string(),
-    )
-    .expect("able to write");
-    fs::write(
-        static_state
-            .storage_dir_path
-            .join(WALLET_ACCOUNT_XPUB_VANILLA_FNAME),
-        account_xpub_vanilla.to_string(),
-    )
-    .expect("able to write");
-    fs::write(
         static_state
             .storage_dir_path
             .join(WALLET_MASTER_FINGERPRINT_FNAME),
@@ -2063,7 +2126,6 @@ pub(crate) async fn start_ldk(
         keys_manager: keys_manager.clone(),
         fs_store: fs_store.clone(),
         txes,
-        proxy_endpoint: proxy_endpoint.to_string(),
     });
     let (sweeper_best_block, output_sweeper) = match fs_store.read(
         OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
@@ -2209,11 +2271,22 @@ pub(crate) async fn start_ldk(
         .unwrap()
         .as_secs();
     rand::thread_rng().fill_bytes(&mut ephemeral_bytes);
+    let max_aggregated_media_size_per_channel_mb =
+        static_state.max_aggregated_media_size_per_channel_mb as usize * 1024 * 1024;
+    let rgb_file_transfer_handler: Arc<RgbFileTransferHandler> =
+        Arc::new(RgbFileTransferHandler::new(
+            ldk_data_dir_path.clone(),
+            Arc::clone(&channel_manager) as Arc<dyn PeerChannelGate>,
+            static_state.max_pending_consignments,
+            max_aggregated_media_size_per_channel_mb,
+            static_state.max_media_files_per_channel,
+        ));
+    rgb_file_transfer_handler.cleanup_orphans_from_previous_run();
     let lightning_msg_handler = MessageHandler {
         chan_handler: channel_manager.clone(),
         route_handler: gossip_sync.clone(),
         onion_message_handler: onion_messenger.clone(),
-        custom_message_handler: IgnoringMessageHandler {},
+        custom_message_handler: Arc::clone(&rgb_file_transfer_handler),
         send_only_message_handler: Arc::clone(&chain_monitor),
     };
     let peer_manager: Arc<PeerManager> = Arc::new(PeerManager::new(
@@ -2324,6 +2397,7 @@ pub(crate) async fn start_ldk(
         onion_messenger: onion_messenger.clone(),
         outbound_payments,
         peer_manager: Arc::clone(&peer_manager),
+        rgb_file_transfer_handler: Arc::clone(&rgb_file_transfer_handler),
         fs_store: Arc::clone(&fs_store),
         bump_tx_event_handler,
         rgb_wallet_wrapper,
@@ -2332,7 +2406,6 @@ pub(crate) async fn start_ldk(
         router: Arc::clone(&router),
         output_sweeper: Arc::clone(&output_sweeper),
         channel_ids_map,
-        proxy_endpoint: proxy_endpoint.to_string(),
     });
 
     let recent_payments_payment_ids = channel_manager
@@ -2455,6 +2528,22 @@ pub(crate) async fn start_ldk(
         }
         None => [0; 32],
     };
+
+    // cleanup the buffers of RGB file transfers a peer started and never finished
+    let sweep_handler = Arc::clone(&rgb_file_transfer_handler);
+    let stop_sweep = Arc::clone(&stop_processing);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(REASSEMBLY_SWEEP_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if stop_sweep.load(Ordering::Acquire) {
+                return;
+            }
+            sweep_handler.sweep_stale_state();
+        }
+    });
+
     let peer_man = Arc::clone(&peer_manager);
     let chan_man = Arc::clone(&channel_manager);
     tokio::spawn(async move {

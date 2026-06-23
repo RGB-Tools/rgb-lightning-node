@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::rgb_file_transfer::RgbFileTransferHandler;
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::UserArgs,
@@ -51,8 +52,8 @@ pub(crate) const ELECTRUM_URL_SIGNET: &str = "ssl://electrum.iriswallet.com:5003
 pub(crate) const ELECTRUM_URL_TESTNET: &str = "ssl://electrum.iriswallet.com:50013";
 pub(crate) const ELECTRUM_URL_TESTNET4: &str = "ssl://electrum.iriswallet.com:50053";
 pub(crate) const ELECTRUM_URL_MAINNET: &str = "ssl://electrum.iriswallet.com:50003";
+#[cfg(test)]
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
-pub(crate) const PROXY_ENDPOINT_PUBLIC: &str = "rpcs://proxy.iriswallet.com/0.2/json-rpc";
 const PASSWORD_MIN_LENGTH: u8 = 8;
 
 pub(crate) struct AppState {
@@ -90,6 +91,9 @@ pub(crate) struct StaticState {
     pub(crate) ldk_data_dir: PathBuf,
     pub(crate) logger: Arc<FilesystemLogger>,
     pub(crate) max_media_upload_size_mb: u16,
+    pub(crate) max_aggregated_media_size_per_channel_mb: u16,
+    pub(crate) max_pending_consignments: usize,
+    pub(crate) max_media_files_per_channel: usize,
 }
 
 pub(crate) struct UnlockedAppState {
@@ -101,6 +105,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) onion_messenger: Arc<OnionMessenger>,
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
+    pub(crate) rgb_file_transfer_handler: Arc<RgbFileTransferHandler>,
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
@@ -109,7 +114,6 @@ pub(crate) struct UnlockedAppState {
     pub(crate) router: Arc<Router>,
     pub(crate) output_sweeper: Arc<OutputSweeper>,
     pub(crate) channel_ids_map: Arc<Mutex<ChannelIdsMap>>,
-    pub(crate) proxy_endpoint: String,
 }
 
 impl UnlockedAppState {
@@ -358,6 +362,9 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         ldk_data_dir,
         logger,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
+        max_aggregated_media_size_per_channel_mb: args.max_aggregated_media_size_per_channel_mb,
+        max_pending_consignments: args.max_pending_consignments,
+        max_media_files_per_channel: args.max_media_files_per_channel,
     });
 
     let app_state = Arc::new(AppState {

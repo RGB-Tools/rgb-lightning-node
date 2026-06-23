@@ -179,9 +179,6 @@ pub enum APIError {
     #[error("Invalid precision: {0}")]
     InvalidPrecision(String),
 
-    #[error("Invalid proxy endpoint")]
-    InvalidProxyEndpoint,
-
     #[error("Invalid proxy protocol version: {0}")]
     InvalidProxyProtocol(String),
 
@@ -505,7 +502,6 @@ impl IntoResponse for APIError {
             | APIError::InsufficientCapacity(_)
             | APIError::InsufficientFunds(_)
             | APIError::InvalidIndexer(_)
-            | APIError::InvalidProxyEndpoint
             | APIError::InvalidProxyProtocol(_)
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)

@@ -48,7 +48,6 @@ docker build -t rgb-lightning-node .
 In order to operate, the node will need:
 - a bitcoind node
 - an indexer instance (electrum or esplora)
-- an [RGB proxy server] instance
 
 Once services are running, daemons can be started.
 Each daemon needs to be started in a separate shell with `rgb-lightning-node`,
@@ -133,7 +132,6 @@ When unlocking regtest nodes use the following local services:
 - bitcoind_rpc_host: localhost
 - bitcoind_rpc_port: 18443
 - indexer_url: 127.0.0.1:50001
-- proxy_endpoint: rpc://127.0.0.1:3000/json-rpc
 
 To unlock a regtest nodes running in docker use the following local services:
 - bitcoind_rpc_username: user
@@ -141,7 +139,6 @@ To unlock a regtest nodes running in docker use the following local services:
 - bitcoind_rpc_host: bitcoind
 - bitcoind_rpc_port: 18443
 - indexer_url: electrs:50001
-- proxy_endpoint: rpc://proxy:3000/json-rpc
 
 ### Testnet
 
@@ -176,7 +173,6 @@ When unlocking testnet3 nodes you can use the following services:
 - bitcoind_rpc_host: electrum.iriswallet.com
 - bitcoind_rpc_port: 18332
 - indexer_url: ssl://electrum.iriswallet.com:50013
-- proxy_endpoint: rpcs://proxy.iriswallet.com/0.2/json-rpc
 
 #### Testnet4
 
@@ -404,7 +400,6 @@ Here is a list of projects using RLN, in alphabetical order:
 
 
 [Biscuit tokens]: https://www.biscuitsec.org/
-[RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
 [rgb-lightning-sample]: https://github.com/RGB-Tools/rgb-lightning-sample

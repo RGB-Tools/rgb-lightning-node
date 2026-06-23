@@ -28,6 +28,18 @@ struct Args {
     #[arg(long, default_value_t = 5)]
     max_media_upload_size_mb: u16,
 
+    /// Max aggregate size of RGB media accepted over p2p per channel-open (in MB)
+    #[arg(long, default_value_t = crate::rgb_file_transfer::MAX_MEDIA_MB_PER_CHANNEL)]
+    max_aggregated_media_size_per_channel_mb: u16,
+
+    /// Max number of pending channel-open consignments buffered over p2p at once
+    #[arg(long, default_value_t = crate::rgb_file_transfer::MAX_PENDING_CONSIGNMENTS)]
+    max_pending_consignments: usize,
+
+    /// Max number of RGB media files accepted over p2p per channel-open
+    #[arg(long, default_value_t = crate::rgb_file_transfer::MAX_MEDIA_FILES_PER_CHANNEL)]
+    max_media_files_per_channel: usize,
+
     /// Root public key for biscuit token authentication (hex-encoded)
     #[arg(long)]
     root_public_key: Option<String>,
@@ -43,6 +55,9 @@ pub(crate) struct UserArgs {
     pub(crate) ldk_peer_listening_port: u16,
     pub(crate) network: BitcoinNetwork,
     pub(crate) max_media_upload_size_mb: u16,
+    pub(crate) max_aggregated_media_size_per_channel_mb: u16,
+    pub(crate) max_pending_consignments: usize,
+    pub(crate) max_media_files_per_channel: usize,
     pub(crate) root_public_key: Option<biscuit_auth::PublicKey>,
 }
 
@@ -64,6 +79,9 @@ pub(crate) fn parse_startup_args() -> Result<UserArgs, AppError> {
         ldk_peer_listening_port,
         network,
         max_media_upload_size_mb: args.max_media_upload_size_mb,
+        max_aggregated_media_size_per_channel_mb: args.max_aggregated_media_size_per_channel_mb,
+        max_pending_consignments: args.max_pending_consignments,
+        max_media_files_per_channel: args.max_media_files_per_channel,
         root_public_key,
     })
 }

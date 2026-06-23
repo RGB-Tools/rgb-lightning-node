@@ -60,7 +60,7 @@ use rgb_lib::{
         WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
-    BitcoinNetwork as RgbLibNetwork, ContractId, RgbTransport,
+    BitcoinNetwork as RgbLibNetwork, ContractId,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -520,6 +520,7 @@ pub(crate) struct DecodeRGBInvoiceResponse {
     pub(crate) network: BitcoinNetwork,
     pub(crate) expiration_timestamp: Option<u64>,
     pub(crate) transport_endpoints: Vec<String>,
+    pub(crate) unknown_query_params: HashMap<String, String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1068,16 +1069,17 @@ pub(crate) struct RgbAllocation {
 pub(crate) struct RgbInvoiceRequest {
     pub(crate) asset_id: Option<String>,
     pub(crate) assignment: Option<Assignment>,
-    pub(crate) expiration_timestamp: Option<u64>,
+    pub(crate) expiration_timestamp: u64,
     pub(crate) min_confirmations: u8,
     pub(crate) witness: bool,
+    pub(crate) transport_endpoints: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct RgbInvoiceResponse {
     pub(crate) recipient_id: String,
     pub(crate) invoice: String,
-    pub(crate) expiration_timestamp: Option<u64>,
+    pub(crate) expiration_timestamp: u64,
     pub(crate) batch_transfer_idx: i32,
 }
 
@@ -1122,7 +1124,7 @@ pub(crate) struct SendRgbRequest {
     pub(crate) donation: bool,
     pub(crate) fee_rate: u64,
     pub(crate) min_confirmations: u8,
-    pub(crate) expiration_timestamp: Option<u64>,
+    pub(crate) expiration_timestamp: u64,
     pub(crate) recipient_map: HashMap<String, Vec<Recipient>>,
 }
 
@@ -1343,6 +1345,7 @@ pub(crate) enum TransferStatus {
     WaitingCounterparty,
     WaitingSafeHeight,
     WaitingConfirmations,
+    WaitingBroadcast,
     Settled,
     Failed,
 }
@@ -1367,7 +1370,6 @@ pub(crate) struct UnlockRequest {
     pub(crate) bitcoind_rpc_host: String,
     pub(crate) bitcoind_rpc_port: u16,
     pub(crate) indexer_url: Option<String>,
-    pub(crate) proxy_endpoint: Option<String>,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
 }
@@ -1385,6 +1387,7 @@ pub(crate) struct Utxo {
     pub(crate) btc_amount: u64,
     pub(crate) colorable: bool,
     pub(crate) exists: bool,
+    pub(crate) derivation_index: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1784,6 +1787,7 @@ pub(crate) async fn decode_rgb_invoice(
         network: invoice_data.network.into(),
         expiration_timestamp: invoice_data.expiration_timestamp,
         transport_endpoints: invoice_data.transport_endpoints,
+        unknown_query_params: invoice_data.unknown_query_params,
     }))
 }
 
@@ -2714,6 +2718,7 @@ pub(crate) async fn list_transfers(
                 rgb_lib::TransferStatus::WaitingConfirmations => {
                     TransferStatus::WaitingConfirmations
                 }
+                rgb_lib::TransferStatus::WaitingBroadcast => TransferStatus::WaitingBroadcast,
                 rgb_lib::TransferStatus::Settled => TransferStatus::Settled,
                 rgb_lib::TransferStatus::Failed => TransferStatus::Failed,
             },
@@ -2763,6 +2768,7 @@ pub(crate) async fn list_unspents(
                 btc_amount: unspent.utxo.btc_amount,
                 colorable: unspent.utxo.colorable,
                 exists: unspent.utxo.exists,
+                derivation_index: unspent.utxo.derivation_index,
             },
             rgb_allocations: unspent
                 .rgb_allocations
@@ -3368,7 +3374,7 @@ pub(crate) async fn open_channel(
         };
 
         // checks on balances here are not precise since they do not take fees into account
-        let (consignment_endpoint, schema) = if let Some((contract_id, asset_amount)) = &colored_info {
+        let (rgb_asset, schema) = if let Some((contract_id, asset_amount)) = &colored_info {
             let balance = unlocked_state.rgb_get_btc_balance(true)?;
             if payload.capacity_sat > balance.colored.spendable {
                 return Err(APIError::InsufficientFunds(payload.capacity_sat - balance.colored.spendable));
@@ -3377,11 +3383,10 @@ pub(crate) async fn open_channel(
             if *asset_amount > balance.spendable {
                 return Err(APIError::InsufficientAssets);
             }
-            let consignment_endpoint = RgbTransport::from_str(&unlocked_state.proxy_endpoint).unwrap();
             let schema = unlocked_state
                 .rgb_get_asset_metadata(*contract_id)?
                 .asset_schema;
-            (Some(consignment_endpoint), Some(schema))
+            (Some((*contract_id, payload.push_asset_amount)), Some(schema))
         } else {
             let balance = unlocked_state.rgb_get_btc_balance(true)?;
             if payload.capacity_sat > balance.vanilla.spendable {
@@ -3399,8 +3404,7 @@ pub(crate) async fn open_channel(
                 0,
                 temporary_channel_id,
                 Some(config),
-                consignment_endpoint,
-                payload.push_asset_amount,
+                rgb_asset,
             )
             .map_err(|e| {
                 tracing::error!("Open channel failure: {e:?}");
@@ -3433,6 +3437,8 @@ pub(crate) async fn open_channel(
                 local_rgb_amount: *asset_amount - push_amount,
                 remote_rgb_amount: push_amount,
                 batch_transfer_idx: None,
+                // set when the acceptor's accept_channel says it already knows the asset
+                counterparty_knows_asset: false,
             };
             write_rgb_channel_info(
                 &get_rgb_channel_info_path(
@@ -3577,6 +3583,10 @@ pub(crate) async fn rgb_invoice(
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
+        if payload.transport_endpoints.is_empty() {
+            unimplemented!("out-of-band RGB exchange is not supported yet");
+        }
+
         let assignment = payload.assignment.unwrap_or(Assignment::Any).into();
 
         let receive_data = if payload.witness {
@@ -3584,7 +3594,7 @@ pub(crate) async fn rgb_invoice(
                 payload.asset_id,
                 assignment,
                 payload.expiration_timestamp,
-                vec![unlocked_state.proxy_endpoint.clone()],
+                payload.transport_endpoints,
                 payload.min_confirmations,
             )?
         } else {
@@ -3592,7 +3602,7 @@ pub(crate) async fn rgb_invoice(
                 payload.asset_id,
                 assignment,
                 payload.expiration_timestamp,
-                vec![unlocked_state.proxy_endpoint.clone()],
+                payload.transport_endpoints,
                 payload.min_confirmations,
             )?
         };
@@ -3885,6 +3895,15 @@ pub(crate) async fn send_rgb(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
+
+        if payload
+            .recipient_map
+            .values()
+            .flatten()
+            .any(|r| r.transport_endpoints.is_empty())
+        {
+            unimplemented!("out-of-band RGB exchange is not supported yet");
+        }
 
         let recipient_map: HashMap<String, Vec<RgbLibRecipient>> = payload
             .recipient_map

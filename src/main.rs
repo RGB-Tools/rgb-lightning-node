@@ -6,6 +6,7 @@ mod disk;
 mod error;
 mod ldk;
 mod rgb;
+mod rgb_file_transfer;
 mod routes;
 mod swap;
 mod utils;
