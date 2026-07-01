@@ -33,24 +33,24 @@ use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
     ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
-    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
-    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
-    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, HTLCStatus,
-    InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
+    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeOfferRequest, DecodeOfferResponse,
+    DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse, DecodeSwapstringRequest,
+    DecodeSwapstringResponse, DisconnectPeerRequest, EmptyResponse, FailTransfersRequest,
+    FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest,
+    GetChannelIdResponse, GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse,
+    HTLCStatus, InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
     InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
     IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
     IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
-    LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse, ListChannelsResponse,
-    ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
-    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
-    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
-    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
-    PostAssetMediaResponse, Recipient, RefreshRequest, RestoreRequest, RevokeTokenRequest,
-    RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest, SendBtcResponse, SendPaymentRequest,
-    SendPaymentResponse, SendRgbRequest, SendRgbResponse, Swap, SwapStatus, TakerRequest,
-    Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
+    LNInvoiceResponse, LNOfferRequest, LNOfferResponse, ListAssetsRequest, ListAssetsResponse,
+    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
+    ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse,
+    ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
+    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
+    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, Recipient, RefreshRequest,
+    RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest, SendRgbResponse,
+    Swap, SwapStatus, TakerRequest, Transaction, Transfer, UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
 
@@ -509,6 +509,24 @@ async fn decode_ln_invoice(node_address: SocketAddr, invoice: &str) -> DecodeLNI
     check_response_is_ok(res)
         .await
         .json::<DecodeLNInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn decode_offer(node_address: SocketAddr, offer: &str) -> DecodeOfferResponse {
+    println!("decoding offer {offer} for node {node_address}");
+    let payload = DecodeOfferRequest {
+        offer: offer.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/decodeoffer"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<DecodeOfferResponse>()
         .await
         .unwrap()
 }
@@ -1079,6 +1097,35 @@ async fn ln_invoice(
     check_response_is_ok(res)
         .await
         .json::<LNInvoiceResponse>()
+        .await
+        .unwrap()
+}
+
+async fn ln_offer(
+    node_address: SocketAddr,
+    amt_msat: Option<u64>,
+    description: Option<&str>,
+    expiry_sec: Option<u32>,
+) -> LNOfferResponse {
+    println!("generating offer for node {node_address}");
+    let payload = LNOfferRequest {
+        amt_msat,
+        description: description.map(|d| d.to_string()),
+        issuer: None,
+        expiry_sec,
+        supported_quantity_max: None,
+        asset_id: None,
+        asset_amount: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/lnoffer"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<LNOfferResponse>()
         .await
         .unwrap()
 }
@@ -1865,6 +1912,30 @@ async fn wait_for_ln_payment(
     }
 }
 
+// Wait for an outbound payment identified by its payment_id (not payment_hash).
+// BOLT12 offer payments do not expose the payment hash up front, so they are
+// tracked and looked up by payment_id via getpayment.
+async fn wait_for_ln_payment_by_id(
+    node_address: SocketAddr,
+    payment_id: &str,
+    expected_status: HTLCStatus,
+) -> Payment {
+    println!(
+        "waiting for LN payment {payment_id} to become {expected_status:?} on node {node_address}"
+    );
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let payment = get_payment(node_address, payment_id).await;
+        if payment.status == expected_status {
+            return payment;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 40.0 {
+            panic!("cannot find payment in status {expected_status}")
+        }
+    }
+}
+
 async fn wait_for_swap_status(
     node_address: SocketAddr,
     payment_hash: &str,
@@ -2044,6 +2115,7 @@ pub fn mock_fee(fee: u32) -> u32 {
 
 mod authentication;
 mod backup_and_restore;
+mod bolt12;
 mod close_coop_nobtc_acceptor;
 mod close_coop_other_side;
 mod close_coop_standard;
