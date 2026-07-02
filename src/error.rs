@@ -4,7 +4,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use rgb_lib::{BitcoinNetwork, Error as RgbLibError};
+#[cfg(feature = "block-sync")]
+use rgb_lib::BitcoinNetwork;
+use rgb_lib::Error as RgbLibError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -74,6 +76,7 @@ pub enum APIError {
     #[error("Failed to sync BDK: {0}")]
     FailedBdkSync(String),
 
+    #[cfg(feature = "block-sync")]
     #[error("Failed to connect to bitcoind client: {0}")]
     FailedBitcoindConnection(String),
 
@@ -263,6 +266,7 @@ pub enum APIError {
     #[error("Network error: {0}")]
     Network(String),
 
+    #[cfg(feature = "block-sync")]
     #[error("The network of the given bitcoind ({0}) doesn't match the node's chain ({1})")]
     NetworkMismatch(String, BitcoinNetwork),
 
@@ -523,7 +527,6 @@ impl APIError {
             | APIError::ChangingState
             | APIError::DuplicatePayment(_)
             | APIError::FailedBdkSync(_)
-            | APIError::FailedBitcoindConnection(_)
             | APIError::FailedBroadcast(_)
             | APIError::FailedPeerConnection
             | APIError::InsufficientAssets
@@ -534,7 +537,6 @@ impl APIError {
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)
             | APIError::MinFeeNotMet(_)
-            | APIError::NetworkMismatch(_, _)
             | APIError::NoAvailableUtxos
             | APIError::NoRoute
             | APIError::NotInitialized
@@ -550,6 +552,10 @@ impl APIError {
             | APIError::UnsupportedInflation(_)
             | APIError::UnsupportedLayer1(_)
             | APIError::UnsupportedTransportType => StatusCode::FORBIDDEN,
+            #[cfg(feature = "block-sync")]
+            APIError::FailedBitcoindConnection(_) | APIError::NetworkMismatch(_, _) => {
+                StatusCode::FORBIDDEN
+            }
             APIError::Network(_) | APIError::NoValidTransportEndpoint => {
                 StatusCode::SERVICE_UNAVAILABLE
             }

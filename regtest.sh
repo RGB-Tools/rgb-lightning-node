@@ -65,12 +65,26 @@ _wait_for_electrs() {
     done
 }
 
+_wait_for_esplora() {
+    # wait for the esplora REST API to become responsive
+    start_time=$(date +%s)
+    until curl -sf http://localhost:3002/blocks/tip/height >/dev/null 2>&1; do
+        current_time=$(date +%s)
+        if [ $((current_time - start_time)) -gt $TIMEOUT ]; then
+            echo "Timeout waiting for esplora to start"
+            $COMPOSE logs esplora
+            exit 1
+        fi
+        sleep 1
+    done
+}
+
 _start_services() {
     _stop_services
 
-    mkdir -p data{core,index,ldk0,ldk1,ldk2}
+    mkdir -p data{core,index,esplora,ldk0,ldk1,ldk2}
     # see compose.yaml for the exposed ports
-    EXPOSED_PORTS=(3000 50001)
+    EXPOSED_PORTS=(3000 3002 50001)
     for port in "${EXPOSED_PORTS[@]}"; do
         if _is_port_bound "$port"; then
             _die "port $port is already bound, services can't be started"
@@ -85,11 +99,13 @@ _start_services() {
     $COMPOSE up -d
     echo "waiting for electrs to have completed startup"
     _wait_for_electrs
+    echo "waiting for esplora to have completed startup"
+    _wait_for_esplora
 }
 
 _stop_services() {
     $COMPOSE down -v --remove-orphans
-    rm -rf data{core,index,ldk0,ldk1,ldk2}
+    rm -rf data{core,index,esplora,ldk0,ldk1,ldk2}
 }
 
 _mine() {

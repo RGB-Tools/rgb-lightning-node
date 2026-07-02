@@ -2228,6 +2228,61 @@ components:
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
         status:
           $ref: '#/components/schemas/HTLCStatus'
+    LdkChainSync:
+      oneOf:
+        - $ref: '#/components/schemas/LdkChainSyncBlockSync'
+        - $ref: '#/components/schemas/LdkChainSyncTransactionSync'
+      discriminator:
+        propertyName: mode
+        mapping:
+          BlockSync: '#/components/schemas/LdkChainSyncBlockSync'
+          TransactionSync: '#/components/schemas/LdkChainSyncTransactionSync'
+    LdkChainSyncBlockSync:
+      type: object
+      required:
+        - mode
+        - config
+      properties:
+        mode:
+          type: string
+          enum: [BlockSync]
+        config:
+          type: object
+          required:
+            - bitcoind_rpc_username
+            - bitcoind_rpc_password
+            - bitcoind_rpc_host
+            - bitcoind_rpc_port
+          properties:
+            bitcoind_rpc_username:
+              type: string
+              example: user
+            bitcoind_rpc_password:
+              type: string
+              example: password
+            bitcoind_rpc_host:
+              type: string
+              example: localhost
+            bitcoind_rpc_port:
+              type: integer
+              example: 18443
+    LdkChainSyncTransactionSync:
+      type: object
+      required:
+        - mode
+        - config
+      properties:
+        mode:
+          type: string
+          enum: [TransactionSync]
+        config:
+          type: object
+          properties:
+            indexer_url:
+              type:
+                - string
+                - 'null'
+              example: 127.0.0.1:50001
     ListAssetsRequest:
       type: object
       required:
@@ -3436,28 +3491,15 @@ components:
       type: object
       required:
         - password
-        - bitcoind_rpc_username
-        - bitcoind_rpc_password
-        - bitcoind_rpc_host
-        - bitcoind_rpc_port
+        - ldk_chain_sync
         - indexer_url
         - announce_addresses
       properties:
         password:
           type: string
           example: nodepassword
-        bitcoind_rpc_username:
-          type: string
-          example: user
-        bitcoind_rpc_password:
-          type: string
-          example: password
-        bitcoind_rpc_host:
-          type: string
-          example: localhost
-        bitcoind_rpc_port:
-          type: integer
-          example: 18443
+        ldk_chain_sync:
+          $ref: '#/components/schemas/LdkChainSync'
         indexer_url:
           type: string
           example: 127.0.0.1:50001

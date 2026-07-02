@@ -1399,9 +1399,9 @@ dependencies = [
 
 [[package]]
 name = "electrum-client"
-version = "0.20.0"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c7b1f8783238bb18e6e137875b0a66f3dffe6c7ea84066e05d033cf180b150f"
+checksum = "a5059f13888a90486e7268bbce59b175f5f76b1c55e5b9c568ceaa42d2b8507c"
 dependencies = [
  "bitcoin",
  "byteorder",
@@ -2553,6 +2553,17 @@ dependencies = [
  "bitcoin-io",
  "bitcoin_hashes",
  "lightning",
+]
+
+[[package]]
+name = "lightning-transaction-sync"
+version = "0.2.1"
+dependencies = [
+ "bitcoin",
+ "electrum-client 0.24.1",
+ "esplora-client",
+ "lightning",
+ "lightning-macros 0.2.1",
 ]
 
 [[package]]
@@ -3770,7 +3781,8 @@ dependencies = [
  "clap",
  "dircmp",
  "dirs",
- "electrum-client 0.20.0",
+ "electrum-client 0.24.1",
+ "esplora-client",
  "futures",
  "hex-conservative 0.3.2",
  "http",
@@ -3784,6 +3796,7 @@ dependencies = [
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
+ "lightning-transaction-sync",
  "once_cell",
  "rand 0.8.7",
  "regex",

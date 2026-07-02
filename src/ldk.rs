@@ -6,10 +6,15 @@ use bitcoin::secp256k1::{All, PublicKey, Secp256k1};
 use bitcoin::{io, Amount, Network};
 use bitcoin::{BlockHash, TxOut};
 use bitcoin_bech32::WitnessProgram;
+#[cfg(feature = "block-sync")]
+use lightning::chain;
+#[cfg(feature = "transaction-sync")]
+use lightning::chain::Confirm;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
+use lightning::impl_writeable_tlv_based;
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
@@ -31,6 +36,7 @@ use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
+use lightning::routing::utxo::UtxoLookup;
 use lightning::sign::{
     EntropySource, InMemorySigner, KeysManager, NodeSigner, OutputSpender,
     SpendableOutputDescriptor,
@@ -45,13 +51,9 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::{ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
-use lightning::{chain, impl_writeable_tlv_based};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
-use lightning_block_sync::gossip::TokioSpawner;
-use lightning_block_sync::init;
-use lightning_block_sync::poll;
-use lightning_block_sync::SpvClient;
-use lightning_block_sync::UnboundedCache;
+#[cfg(feature = "block-sync")]
+use lightning_block_sync::{init, poll, SpvClient, UnboundedCache};
 use lightning_dns_resolver::OMDomainResolver;
 use lightning_invoice::PaymentSecret;
 use lightning_net_tokio::SocketDescriptor;
@@ -96,17 +98,25 @@ use tokio::runtime::Handle;
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
-use crate::bitcoind::BitcoindClient;
 use crate::disk::{
     self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
 };
 use crate::error::APIError;
+#[cfg(feature = "block-sync")]
+use crate::ldk_chain_backend::block_sync::{BitcoindClient, BlockSyncGossipVerifier};
+#[cfg(feature = "transaction-sync")]
+use crate::ldk_chain_backend::sync_chain_data;
+#[cfg(feature = "transaction-sync")]
+use crate::ldk_chain_backend::transaction_sync::{
+    IndexerClient, IndexerGossipVerifier, IndexerSyncClient,
+};
+use crate::ldk_chain_backend::{ChainBackend, ChainSetup, DynBroadcaster, DynFeeEstimator};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::{
     PeerChannelGate, RgbFileTransferHandler, REASSEMBLY_SWEEP_INTERVAL,
 };
-use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
+use crate::routes::{HTLCStatus, LdkChainSync, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
@@ -493,8 +503,8 @@ impl UnlockedAppState {
 pub(crate) type ChainMonitor = chainmonitor::ChainMonitor<
     InMemorySigner,
     Arc<dyn Filter + Send + Sync>,
-    Arc<BitcoindClient>,
-    Arc<BitcoindClient>,
+    Arc<DynBroadcaster>,
+    Arc<DynFeeEstimator>,
     Arc<FilesystemLogger>,
     Arc<
         MonitorUpdatingPersister<
@@ -502,23 +512,22 @@ pub(crate) type ChainMonitor = chainmonitor::ChainMonitor<
             Arc<FilesystemLogger>,
             Arc<KeysManager>,
             Arc<KeysManager>,
-            Arc<BitcoindClient>,
-            Arc<BitcoindClient>,
+            Arc<DynBroadcaster>,
+            Arc<DynFeeEstimator>,
         >,
     >,
     Arc<KeysManager>,
 >;
 
-pub(crate) type GossipVerifier = lightning_block_sync::gossip::GossipVerifier<
-    TokioSpawner,
-    Arc<lightning_block_sync::rpc::RpcClient>,
-    Arc<FilesystemLogger>,
->;
+// the UTXO lookup is a trait object so it can be backed either by the block-sync or by the
+// transaction-sync gossip verifier
+pub(crate) type PeerGossipSync =
+    P2PGossipSync<Arc<NetworkGraph>, Arc<dyn UtxoLookup + Send + Sync>, Arc<FilesystemLogger>>;
 
 pub(crate) type PeerManager = LdkPeerManager<
     SocketDescriptor,
     Arc<ChannelManager>,
-    Arc<P2PGossipSync<Arc<NetworkGraph>, Arc<GossipVerifier>, Arc<FilesystemLogger>>>,
+    Arc<PeerGossipSync>,
     Arc<OnionMessenger>,
     Arc<FilesystemLogger>,
     Arc<RgbFileTransferHandler>,
@@ -538,7 +547,7 @@ pub(crate) type Router = DefaultRouter<
 >;
 
 pub(crate) type ChannelManager =
-    SimpleArcChannelManager<ChainMonitor, BitcoindClient, BitcoindClient, FilesystemLogger>;
+    SimpleArcChannelManager<ChainMonitor, DynBroadcaster, DynFeeEstimator, FilesystemLogger>;
 
 impl PeerChannelGate for ChannelManager {
     fn channel_count_with(&self, peer: &PublicKey) -> usize {
@@ -569,7 +578,7 @@ pub(crate) type OnionMessenger = LdkOnionMessenger<
 >;
 
 pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
-    Arc<BitcoindClient>,
+    Arc<DynBroadcaster>,
     Arc<Wallet<Arc<RgbLibWalletWrapper>, Arc<FilesystemLogger>>>,
     Arc<KeysManager>,
     Arc<FilesystemLogger>,
@@ -586,9 +595,9 @@ pub(crate) struct RgbOutputSpender {
 }
 
 pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
-    Arc<BitcoindClient>,
+    Arc<DynBroadcaster>,
     Arc<RgbLibWalletWrapper>,
-    Arc<BitcoindClient>,
+    Arc<DynFeeEstimator>,
     Arc<dyn Filter + Send + Sync>,
     Arc<FilesystemStore>,
     Arc<FilesystemLogger>,
@@ -1949,37 +1958,6 @@ pub(crate) async fn start_ldk(
     let network: Network = bitcoin_network.into();
     let ldk_peer_listening_port = static_state.ldk_peer_listening_port;
 
-    // Initialize our bitcoind client.
-    let bitcoind_client = match BitcoindClient::new(
-        unlock_request.bitcoind_rpc_host.clone(),
-        unlock_request.bitcoind_rpc_port,
-        unlock_request.bitcoind_rpc_username.clone(),
-        unlock_request.bitcoind_rpc_password.clone(),
-        tokio::runtime::Handle::current(),
-        Arc::clone(&logger),
-    )
-    .await
-    {
-        Ok(client) => Arc::new(client),
-        Err(e) => {
-            return Err(APIError::FailedBitcoindConnection(e.to_string()));
-        }
-    };
-
-    // Check that the bitcoind we've connected to is running the network we expect
-    let bitcoind_chain = bitcoind_client.get_blockchain_info().await.chain;
-    if bitcoind_chain
-        != match bitcoin_network {
-            BitcoinNetwork::Mainnet => "main",
-            BitcoinNetwork::Testnet => "test",
-            BitcoinNetwork::Testnet4 => "testnet4",
-            BitcoinNetwork::Regtest => "regtest",
-            BitcoinNetwork::Signet | BitcoinNetwork::SignetCustom => "signet",
-        }
-    {
-        return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
-    }
-
     // RGB setup
     let indexer_url = &unlock_request.indexer_url;
     let indexer_protocol = check_indexer_url(indexer_url, bitcoin_network)?;
@@ -1990,14 +1968,112 @@ pub(crate) async fn start_ldk(
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
     fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
 
-    // Initialize the FeeEstimator
-    // BitcoindClient implements the FeeEstimator trait, so it'll act as our fee estimator.
-    let fee_estimator = bitcoind_client.clone();
+    // Initialize the chain backend for the requested sync mode
+    let handle = tokio::runtime::Handle::current();
+    let ChainSetup {
+        backend,
+        fee_estimator,
+        broadcaster,
+        chain_filter,
+        initial_best_block,
+    } = match &unlock_request.ldk_chain_sync {
+        #[cfg(feature = "block-sync")]
+        LdkChainSync::BlockSync {
+            bitcoind_rpc_username,
+            bitcoind_rpc_password,
+            bitcoind_rpc_host,
+            bitcoind_rpc_port,
+        } => {
+            // Initialize our bitcoind client.
+            let bitcoind_client = match BitcoindClient::new(
+                bitcoind_rpc_host.clone(),
+                *bitcoind_rpc_port,
+                bitcoind_rpc_username.clone(),
+                bitcoind_rpc_password.clone(),
+                handle.clone(),
+                Arc::clone(&logger),
+            )
+            .await
+            {
+                Ok(client) => Arc::new(client),
+                Err(e) => {
+                    return Err(APIError::FailedBitcoindConnection(e.to_string()));
+                }
+            };
 
-    // Initialize the BroadcasterInterface
-    // BitcoindClient implements the BroadcasterInterface trait, so it'll act as our transaction
-    // broadcaster.
-    let broadcaster = bitcoind_client.clone();
+            // Check that the bitcoind we've connected to is running the network we expect
+            let bitcoind_chain = bitcoind_client.get_blockchain_info().await.chain;
+            if bitcoind_chain
+                != match bitcoin_network {
+                    BitcoinNetwork::Mainnet => "main",
+                    BitcoinNetwork::Testnet => "test",
+                    BitcoinNetwork::Testnet4 => "testnet4",
+                    BitcoinNetwork::Regtest => "regtest",
+                    BitcoinNetwork::Signet | BitcoinNetwork::SignetCustom => "signet",
+                }
+            {
+                return Err(APIError::NetworkMismatch(bitcoind_chain, bitcoin_network));
+            }
+
+            // Poll for the best chain tip, used by the channel manager & spv client
+            let polled_chain_tip = init::validate_best_block_header(bitcoind_client.as_ref())
+                .await
+                .expect("Failed to fetch best block header and best block");
+            let initial_best_block = polled_chain_tip.to_best_block();
+
+            ChainSetup {
+                fee_estimator: bitcoind_client.clone(),
+                broadcaster: bitcoind_client.clone(),
+                backend: ChainBackend::BlockSync {
+                    client: bitcoind_client,
+                    polled_chain_tip,
+                },
+                chain_filter: None,
+                initial_best_block,
+            }
+        }
+        #[cfg(feature = "transaction-sync")]
+        LdkChainSync::TransactionSync {
+            indexer_url: ln_indexer_url,
+        } => {
+            // default to the wallet's indexer, but allow a dedicated one so the RGB wallet and
+            // LDK can use different sources
+            let ln_indexer_url = ln_indexer_url.as_deref().unwrap_or(indexer_url);
+            let indexer_protocol = check_indexer_url(ln_indexer_url, bitcoin_network)?;
+            let indexer_client = Arc::new(
+                IndexerClient::new(
+                    ln_indexer_url.to_string(),
+                    indexer_protocol.clone(),
+                    handle.clone(),
+                    Arc::clone(&logger),
+                )
+                .map_err(|e| APIError::InvalidIndexer(e.to_string()))?,
+            );
+            let tx_sync = Arc::new(
+                IndexerSyncClient::new(
+                    ln_indexer_url.to_string(),
+                    indexer_protocol,
+                    Arc::clone(&logger),
+                )
+                .map_err(|e| APIError::InvalidIndexer(e.to_string()))?,
+            );
+            let initial_best_block = indexer_client
+                .get_best_block()
+                .map_err(|e| APIError::InvalidIndexer(e.to_string()))?;
+
+            let chain_filter: Arc<dyn Filter + Send + Sync> = tx_sync.clone();
+            ChainSetup {
+                fee_estimator: indexer_client.clone(),
+                broadcaster: indexer_client.clone(),
+                backend: ChainBackend::TransactionSync {
+                    client: indexer_client,
+                    tx_sync,
+                },
+                chain_filter: Some(chain_filter),
+                initial_best_block,
+            }
+        }
+    };
 
     // Initialize the KeysManager
     // The key seed that we use to derive the node privkey (that corresponds to the node pubkey) and
@@ -2032,13 +2108,15 @@ pub(crate) async fn start_ldk(
         1000,
         Arc::clone(&keys_manager),
         Arc::clone(&keys_manager),
-        Arc::clone(&bitcoind_client),
-        Arc::clone(&bitcoind_client),
+        Arc::clone(&broadcaster),
+        Arc::clone(&fee_estimator),
     ));
 
     // Initialize the ChainMonitor
+    // in transaction-sync mode `chain_filter` is the indexer chain source, so only relevant
+    // transactions are watched; in block-sync mode it is `None` since full blocks are consumed
     let chain_monitor: Arc<ChainMonitor> = Arc::new(chainmonitor::ChainMonitor::new(
-        None,
+        chain_filter.clone(),
         Arc::clone(&broadcaster),
         Arc::clone(&logger),
         Arc::clone(&fee_estimator),
@@ -2049,11 +2127,6 @@ pub(crate) async fn start_ldk(
 
     // Read ChannelMonitor state from disk
     let mut channelmonitors = persister.read_all_channel_monitors_with_updates().unwrap();
-
-    // Poll for the best chain tip, which may be used by the channel manager & spv client
-    let polled_chain_tip = init::validate_best_block_header(bitcoind_client.as_ref())
-        .await
-        .expect("Failed to fetch best block header and best block");
 
     // Initialize routing ProbabilisticScorer
     let network_graph_path = ldk_data_dir.join("network_graph");
@@ -2093,9 +2166,14 @@ pub(crate) async fn start_ldk(
         .channel_handshake_config
         .negotiate_anchors_zero_fee_htlc_tx = true;
     user_config.manually_accept_inbound_channels = true;
-    let mut restarting_node = true;
+    let manager_file = fs::File::open(ldk_data_dir.join("manager"));
+    // `restarting_node` and `channel_manager_blockhash` are only consumed by the block-sync
+    // restart path
+    #[cfg_attr(not(feature = "block-sync"), allow(unused_variables))]
+    let restarting_node = manager_file.is_ok();
+    #[cfg_attr(not(feature = "block-sync"), allow(unused_variables))]
     let (channel_manager_blockhash, channel_manager) = {
-        if let Ok(f) = fs::File::open(ldk_data_dir.join("manager")) {
+        if let Ok(f) = manager_file {
             let mut channel_monitor_references = Vec::new();
             for (_, channel_monitor) in channelmonitors.iter() {
                 channel_monitor_references.push(channel_monitor);
@@ -2117,13 +2195,9 @@ pub(crate) async fn start_ldk(
             <(BlockHash, ChannelManager)>::read(&mut BufReader::new(f), read_args).unwrap()
         } else {
             // We're starting a fresh node.
-            restarting_node = false;
-
-            let polled_best_block = polled_chain_tip.to_best_block();
-            let polled_best_block_hash = polled_best_block.block_hash;
             let chain_params = ChainParameters {
                 network,
-                best_block: polled_best_block,
+                best_block: initial_best_block,
             };
             let fresh_channel_manager = channelmanager::ChannelManager::new(
                 fee_estimator.clone(),
@@ -2140,7 +2214,7 @@ pub(crate) async fn start_ldk(
                 cur.as_secs() as u32,
                 ldk_data_dir_path.clone(),
             );
-            (polled_best_block_hash, fresh_channel_manager)
+            (initial_best_block.block_hash, fresh_channel_manager)
         }
     };
 
@@ -2213,6 +2287,8 @@ pub(crate) async fn start_ldk(
         fs_store: fs_store.clone(),
         txes,
     });
+    // `sweeper_best_block` is only used by the block-sync restart path.
+    #[cfg_attr(not(feature = "block-sync"), allow(unused_variables))]
     let (sweeper_best_block, output_sweeper) = match fs_store.read(
         OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
         OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
@@ -2249,79 +2325,107 @@ pub(crate) async fn start_ldk(
     };
 
     // Sync ChannelMonitors, ChannelManager and OutputSweeper to chain tip
-    let mut chain_listener_channel_monitors = Vec::new();
-    let mut cache = UnboundedCache::new();
-    let chain_tip = if restarting_node {
-        let mut chain_listeners = vec![
-            (
-                channel_manager_blockhash,
-                &channel_manager as &(dyn chain::Listen + Send + Sync),
-            ),
-            (
-                sweeper_best_block.block_hash,
-                &output_sweeper as &(dyn chain::Listen + Send + Sync),
-            ),
-        ];
+    // block-sync replays blocks from bitcoind before the SPV client takes over, while
+    // transaction-sync relies on the indexer via the `Confirm` interface
+    #[cfg(feature = "block-sync")]
+    let mut block_sync_cache = UnboundedCache::new();
+    // with only block-sync built this is always set below, hence the allow
+    #[cfg(feature = "block-sync")]
+    #[cfg_attr(not(feature = "transaction-sync"), allow(unused_assignments))]
+    let mut block_sync_chain_tip: Option<lightning_block_sync::poll::ValidatedBlockHeader> = None;
 
-        for (blockhash, channel_monitor) in channelmonitors.drain(..) {
-            let outpoint = channel_monitor.get_funding_txo();
-            chain_listener_channel_monitors.push((
-                blockhash,
-                (
-                    channel_monitor,
-                    broadcaster.clone(),
-                    fee_estimator.clone(),
-                    logger.clone(),
-                ),
-                outpoint,
-            ));
-        }
+    match &backend {
+        #[cfg(feature = "block-sync")]
+        ChainBackend::BlockSync {
+            client,
+            polled_chain_tip,
+        } => {
+            let mut chain_listener_channel_monitors = Vec::new();
+            let chain_tip = if restarting_node {
+                let mut chain_listeners = vec![
+                    (
+                        channel_manager_blockhash,
+                        &channel_manager as &(dyn chain::Listen + Send + Sync),
+                    ),
+                    (
+                        sweeper_best_block.block_hash,
+                        &output_sweeper as &(dyn chain::Listen + Send + Sync),
+                    ),
+                ];
 
-        for monitor_listener_info in chain_listener_channel_monitors.iter_mut() {
-            chain_listeners.push((
-                monitor_listener_info.0,
-                &monitor_listener_info.1 as &(dyn chain::Listen + Send + Sync),
-            ));
-        }
-
-        let mut attempts = 3;
-        loop {
-            match init::synchronize_listeners(
-                bitcoind_client.as_ref(),
-                network,
-                &mut cache,
-                chain_listeners.clone(),
-            )
-            .await
-            {
-                Ok(res) => break res,
-                Err(e) => {
-                    tracing::error!("Error synchronizing chain: {:?}", e);
-                    attempts -= 1;
-                    if attempts == 0 {
-                        return Err(APIError::FailedBitcoindConnection(
-                            e.into_inner().to_string(),
-                        ));
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                for (blockhash, channel_monitor) in channelmonitors.drain(..) {
+                    let outpoint = channel_monitor.get_funding_txo();
+                    chain_listener_channel_monitors.push((
+                        blockhash,
+                        (
+                            channel_monitor,
+                            broadcaster.clone(),
+                            fee_estimator.clone(),
+                            logger.clone(),
+                        ),
+                        outpoint,
+                    ));
                 }
+
+                for monitor_listener_info in chain_listener_channel_monitors.iter_mut() {
+                    chain_listeners.push((
+                        monitor_listener_info.0,
+                        &monitor_listener_info.1 as &(dyn chain::Listen + Send + Sync),
+                    ));
+                }
+
+                let mut attempts = 3;
+                loop {
+                    match init::synchronize_listeners(
+                        client.as_ref(),
+                        network,
+                        &mut block_sync_cache,
+                        chain_listeners.clone(),
+                    )
+                    .await
+                    {
+                        Ok(res) => break res,
+                        Err(e) => {
+                            tracing::error!("Error synchronizing chain: {:?}", e);
+                            attempts -= 1;
+                            if attempts == 0 {
+                                return Err(APIError::FailedBitcoindConnection(
+                                    e.into_inner().to_string(),
+                                ));
+                            }
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            } else {
+                *polled_chain_tip
+            };
+            block_sync_chain_tip = Some(chain_tip);
+
+            // Give ChannelMonitors to ChainMonitor
+            for (_, (channel_monitor, _, _, _), _) in chain_listener_channel_monitors {
+                let channel_id = channel_monitor.channel_id();
+                assert_eq!(
+                    chain_monitor.load_existing_monitor(channel_id, channel_monitor),
+                    Ok(ChannelMonitorUpdateStatus::Completed)
+                );
             }
         }
-    } else {
-        polled_chain_tip
-    };
-
-    // Give ChannelMonitors to ChainMonitor
-    for (_, (channel_monitor, _, _, _), _) in chain_listener_channel_monitors {
-        let channel_id = channel_monitor.channel_id();
-        assert_eq!(
-            chain_monitor.load_existing_monitor(channel_id, channel_monitor),
-            Ok(ChannelMonitorUpdateStatus::Completed)
-        );
+        #[cfg(feature = "transaction-sync")]
+        ChainBackend::TransactionSync { .. } => {
+            // Give ChannelMonitors to ChainMonitor
+            for (_, channel_monitor) in channelmonitors.drain(..) {
+                let channel_id = channel_monitor.channel_id();
+                assert_eq!(
+                    chain_monitor.load_existing_monitor(channel_id, channel_monitor),
+                    Ok(ChannelMonitorUpdateStatus::Completed)
+                );
+            }
+        }
     }
 
     // Optional: Initialize the P2PGossipSync
-    let gossip_sync = Arc::new(P2PGossipSync::new(
+    let gossip_sync: Arc<PeerGossipSync> = Arc::new(P2PGossipSync::new(
         Arc::clone(&network_graph),
         None,
         Arc::clone(&logger),
@@ -2383,14 +2487,27 @@ pub(crate) async fn start_ldk(
         Arc::clone(&keys_manager),
     ));
 
-    // Install a GossipVerifier in in the P2PGossipSync
-    let utxo_lookup = GossipVerifier::new(
-        Arc::clone(&bitcoind_client.bitcoind_rpc_client),
-        TokioSpawner,
-        Arc::clone(&gossip_sync),
-        Arc::clone(&peer_manager),
-    );
-    gossip_sync.add_utxo_lookup(Some(Arc::new(utxo_lookup)));
+    // Install a UTXO lookup in the P2PGossipSync
+    let peer_manager_wake = Arc::new({
+        let peer_manager = Arc::clone(&peer_manager);
+        move || peer_manager.process_events()
+    });
+    let utxo_lookup: Arc<dyn UtxoLookup + Send + Sync> = match &backend {
+        #[cfg(feature = "block-sync")]
+        ChainBackend::BlockSync { client, .. } => Arc::new(BlockSyncGossipVerifier::new(
+            Arc::clone(&client.bitcoind_rpc_client),
+            Arc::clone(&gossip_sync),
+            peer_manager_wake,
+            handle.clone(),
+        )),
+        #[cfg(feature = "transaction-sync")]
+        ChainBackend::TransactionSync { client, .. } => Arc::new(IndexerGossipVerifier::new(
+            Arc::clone(client),
+            Arc::clone(&gossip_sync),
+            peer_manager_wake,
+        )),
+    };
+    gossip_sync.add_utxo_lookup(Some(utxo_lookup));
 
     // ## Running LDK
     // Initialize networking
@@ -2421,28 +2538,59 @@ pub(crate) async fn start_ldk(
 
     // Connect and Disconnect Blocks
     let output_sweeper: Arc<OutputSweeper> = Arc::new(output_sweeper);
-    let channel_manager_listener = channel_manager.clone();
-    let chain_monitor_listener = chain_monitor.clone();
-    let output_sweeper_listener = output_sweeper.clone();
-    let bitcoind_block_source = bitcoind_client.clone();
     let stop_listen = Arc::clone(&stop_processing);
-    tokio::spawn(async move {
-        let chain_poller = poll::ChainPoller::new(bitcoind_block_source.as_ref(), network);
-        let chain_listener = (
-            chain_monitor_listener,
-            &(channel_manager_listener, output_sweeper_listener),
-        );
-        let mut spv_client = SpvClient::new(chain_tip, chain_poller, &mut cache, &chain_listener);
-        loop {
-            if stop_listen.load(Ordering::Acquire) {
-                return;
-            }
-            if let Err(e) = spv_client.poll_best_tip().await {
-                tracing::error!("Error while polling best tip: {:?}", e);
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+    match backend {
+        #[cfg(feature = "block-sync")]
+        ChainBackend::BlockSync { client, .. } => {
+            let channel_manager_listener = channel_manager.clone();
+            let chain_monitor_listener = chain_monitor.clone();
+            let output_sweeper_listener = output_sweeper.clone();
+            let chain_tip =
+                block_sync_chain_tip.expect("block-sync chain tip is set while syncing listeners");
+            let mut cache = block_sync_cache;
+            tokio::spawn(async move {
+                let chain_poller = poll::ChainPoller::new(client.as_ref(), network);
+                let chain_listener = (
+                    chain_monitor_listener,
+                    &(channel_manager_listener, output_sweeper_listener),
+                );
+                let mut spv_client =
+                    SpvClient::new(chain_tip, chain_poller, &mut cache, &chain_listener);
+                loop {
+                    if stop_listen.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if let Err(e) = spv_client.poll_best_tip().await {
+                        tracing::error!("Error while polling best tip: {:?}", e);
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
         }
-    });
+        #[cfg(feature = "transaction-sync")]
+        ChainBackend::TransactionSync { tx_sync, .. } => {
+            let confirmables: Vec<Arc<dyn Confirm + Send + Sync>> = vec![
+                channel_manager.clone(),
+                chain_monitor.clone(),
+                output_sweeper.clone(),
+            ];
+            // bring everything up to the current tip before starting to serve
+            sync_chain_data(tx_sync.clone(), confirmables.clone())
+                .await
+                .map_err(|e| APIError::InvalidIndexer(e.to_string()))?;
+            tokio::spawn(async move {
+                loop {
+                    if stop_listen.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if let Err(e) = sync_chain_data(tx_sync.clone(), confirmables.clone()).await {
+                        tracing::error!("Error while syncing via indexer: {:?}", e);
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
+        }
+    }
 
     let inbound_payments = Arc::new(Mutex::new(disk::read_inbound_payment_info(
         &ldk_data_dir.join(INBOUND_PAYMENTS_FNAME),

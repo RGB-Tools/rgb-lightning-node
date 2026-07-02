@@ -1,24 +1,30 @@
 use base64::{engine::general_purpose, Engine as _};
+use bitcoin::block::Block;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
+use bitcoin::constants::ChainHash;
 use bitcoin::hash_types::BlockHash;
+use bitcoin::transaction::{OutPoint, TxOut};
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::log_warn;
+use lightning::routing::utxo::{UtxoFuture, UtxoLookup, UtxoLookupError, UtxoResult};
 use lightning::util::logger::Logger;
+use lightning_block_sync::gossip::UtxoSource;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::http::JsonResponse;
 use lightning_block_sync::rpc::RpcClient;
 use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSource};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::disk::FilesystemLogger;
-#[cfg(all(test, feature = "electrum"))]
-use crate::test::mock_fee;
+use crate::ldk::PeerGossipSync;
+
+use super::{default_fee_buckets, fee_from_bucket, store_fee_estimates, MIN_FEERATE};
 
 pub struct BitcoindClient {
     pub(crate) bitcoind_rpc_client: Arc<RpcClient>,
@@ -109,9 +115,6 @@ impl TryInto<FeeResponse> for JsonResponse {
     }
 }
 
-/// The minimum feerate we are allowed to send, as specify by LDK.
-const MIN_FEERATE: u32 = 253;
-
 impl BitcoindClient {
     pub(crate) async fn new(
         host: String,
@@ -135,40 +138,9 @@ impl BitcoindClient {
                 std::io::Error::new(std::io::ErrorKind::PermissionDenied,
                 "failed to make initial call to bitcoind - please check your RPC user/password and access settings")
             })?;
-        let mut fees: HashMap<ConfirmationTarget, AtomicU32> = HashMap::new();
-        fees.insert(
-            ConfirmationTarget::MaximumFeeEstimate,
-            AtomicU32::new(50000),
-        );
-        fees.insert(ConfirmationTarget::UrgentOnChainSweep, AtomicU32::new(5000));
-        fees.insert(
-            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::AnchorChannelFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::NonAnchorChannelFee,
-            AtomicU32::new(2000),
-        );
-        fees.insert(
-            ConfirmationTarget::ChannelCloseMinimum,
-            AtomicU32::new(MIN_FEERATE),
-        );
-        fees.insert(
-            ConfirmationTarget::OutputSpendingFee,
-            AtomicU32::new(MIN_FEERATE),
-        );
-
         let client = Self {
             bitcoind_rpc_client: Arc::new(bitcoind_rpc_client),
-            fees: Arc::new(fees),
+            fees: Arc::new(default_fee_buckets()),
             handle: handle.clone(),
             logger,
         };
@@ -265,30 +237,14 @@ impl BitcoindClient {
                 )
                 .await;
 
-                fees.get(&ConfirmationTarget::MaximumFeeEstimate)
-                    .unwrap()
-                    .store(very_high_prio_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::UrgentOnChainSweep)
-                    .unwrap()
-                    .store(high_prio_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::MinAllowedAnchorChannelRemoteFee)
-                    .unwrap()
-                    .store(mempoolmin_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee)
-                    .unwrap()
-                    .store(background_estimate - 250, Ordering::Release);
-                fees.get(&ConfirmationTarget::AnchorChannelFee)
-                    .unwrap()
-                    .store(background_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::NonAnchorChannelFee)
-                    .unwrap()
-                    .store(normal_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::ChannelCloseMinimum)
-                    .unwrap()
-                    .store(background_estimate, Ordering::Release);
-                fees.get(&ConfirmationTarget::OutputSpendingFee)
-                    .unwrap()
-                    .store(background_estimate, Ordering::Release);
+                store_fee_estimates(
+                    &fees,
+                    background_estimate,
+                    normal_estimate,
+                    high_prio_estimate,
+                    very_high_prio_estimate,
+                    mempoolmin_estimate,
+                );
 
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
@@ -305,14 +261,7 @@ impl BitcoindClient {
 
 impl FeeEstimator for BitcoindClient {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        let fee = self
-            .fees
-            .get(&confirmation_target)
-            .unwrap()
-            .load(Ordering::Acquire);
-        #[cfg(all(test, feature = "electrum"))]
-        let fee = mock_fee(fee);
-        fee
+        fee_from_bucket(&self.fees, confirmation_target)
     }
 }
 
@@ -354,5 +303,138 @@ impl BroadcasterInterface for BitcoindClient {
 				}
 			}
 		});
+    }
+}
+
+// `lightning-block-sync`'s own `GossipVerifier` requires the `P2PGossipSync` to be typed with
+// `Arc<Self>` as its UTXO lookup, which is incompatible with the trait-object lookup that lets a
+// single `PeerManager` type serve both sync backends
+pub(crate) struct BlockSyncGossipVerifier {
+    source: Arc<RpcClient>,
+    gossiper: Arc<PeerGossipSync>,
+    peer_manager_wake: Arc<dyn Fn() + Send + Sync>,
+    handle: tokio::runtime::Handle,
+    block_cache: Arc<Mutex<VecDeque<(u32, Block)>>>,
+}
+
+const BLOCK_CACHE_SIZE: usize = 5;
+
+impl BlockSyncGossipVerifier {
+    pub(crate) fn new(
+        source: Arc<RpcClient>,
+        gossiper: Arc<PeerGossipSync>,
+        peer_manager_wake: Arc<dyn Fn() + Send + Sync>,
+        handle: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            source,
+            gossiper,
+            peer_manager_wake,
+            handle,
+            block_cache: Arc::new(Mutex::new(VecDeque::with_capacity(BLOCK_CACHE_SIZE))),
+        }
+    }
+
+    async fn retrieve_utxo(
+        source: Arc<RpcClient>,
+        block_cache: Arc<Mutex<VecDeque<(u32, Block)>>>,
+        short_channel_id: u64,
+    ) -> Result<TxOut, UtxoLookupError> {
+        let block_height = (short_channel_id >> (5 * 8)) as u32; // most significant three bytes
+        let transaction_index = ((short_channel_id >> (2 * 8)) & 0x00ff_ffff) as u32;
+        let output_index = (short_channel_id & 0xffff) as u16;
+
+        let (outpoint, output);
+
+        'tx_found: {
+            macro_rules! process_block {
+                ($block: expr) => {{
+                    if transaction_index as usize >= $block.txdata.len() {
+                        return Err(UtxoLookupError::UnknownTx);
+                    }
+                    let transaction = &$block.txdata[transaction_index as usize];
+                    if output_index as usize >= transaction.output.len() {
+                        return Err(UtxoLookupError::UnknownTx);
+                    }
+                    outpoint = OutPoint::new(transaction.compute_txid(), output_index.into());
+                    output = transaction.output[output_index as usize].clone();
+                }};
+            }
+            // Serve the funding output from a recently-fetched block when possible, so a burst of
+            // announcements referencing the same block only fetches it once
+            {
+                let recent_blocks = block_cache.lock().unwrap();
+                for (height, block) in recent_blocks.iter() {
+                    if *height == block_height {
+                        process_block!(block);
+                        break 'tx_found;
+                    }
+                }
+            }
+
+            let (_, tip_height_opt) = source
+                .get_best_block()
+                .await
+                .map_err(|_| UtxoLookupError::UnknownTx)?;
+            let block_hash = source
+                .get_block_hash_by_height(block_height)
+                .await
+                .map_err(|_| UtxoLookupError::UnknownTx)?;
+            if let Some(tip_height) = tip_height_opt {
+                // The BOLT spec requires nodes to wait for six confirmations before
+                // announcing a channel; give one block of headroom.
+                if block_height + 5 > tip_height {
+                    return Err(UtxoLookupError::UnknownTx);
+                }
+            }
+            let block = match source
+                .get_block(&block_hash)
+                .await
+                .map_err(|_| UtxoLookupError::UnknownTx)?
+            {
+                BlockData::HeaderOnly(_) => return Err(UtxoLookupError::UnknownTx),
+                BlockData::FullBlock(block) => block,
+            };
+            process_block!(block);
+            {
+                let mut recent_blocks = block_cache.lock().unwrap();
+                if !recent_blocks
+                    .iter()
+                    .any(|(height, _)| *height == block_height)
+                {
+                    if recent_blocks.len() >= BLOCK_CACHE_SIZE {
+                        recent_blocks.pop_front();
+                    }
+                    recent_blocks.push_back((block_height, block));
+                }
+            }
+        }
+
+        if source
+            .is_output_unspent(outpoint)
+            .await
+            .map_err(|_| UtxoLookupError::UnknownTx)?
+        {
+            Ok(output)
+        } else {
+            Err(UtxoLookupError::UnknownTx)
+        }
+    }
+}
+
+impl UtxoLookup for BlockSyncGossipVerifier {
+    fn get_utxo(&self, _chain_hash: &ChainHash, short_channel_id: u64) -> UtxoResult {
+        let res = UtxoFuture::new();
+        let fut = res.clone();
+        let source = Arc::clone(&self.source);
+        let gossiper = Arc::clone(&self.gossiper);
+        let peer_manager_wake = Arc::clone(&self.peer_manager_wake);
+        let block_cache = Arc::clone(&self.block_cache);
+        self.handle.spawn(async move {
+            let lookup = Self::retrieve_utxo(source, block_cache, short_channel_id).await;
+            fut.resolve(gossiper.network_graph(), &*gossiper, lookup);
+            peer_manager_wake();
+        });
+        UtxoResult::Async(res)
     }
 }

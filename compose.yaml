@@ -22,6 +22,27 @@ services:
       - bitcoind
     ports:
       - 50001:50001
+  # its electrum RPC is only bound inside the container, so it doesn't clash with electrs
+  esplora:
+    image: blockstream/esplora:latest
+    entrypoint: []
+    command: >
+      /srv/explorer/electrs_bitcoin/bin/electrs
+      --timestamp
+      --network regtest
+      --jsonrpc-import
+      --cookie user:password
+      --daemon-rpc-addr bitcoind:18443
+      --http-addr 0.0.0.0:3002
+      --electrum-rpc-addr 0.0.0.0:60401
+      --db-dir /data/db
+      --cors '*'
+    volumes:
+      - ./dataesplora:/data
+    depends_on:
+      - bitcoind
+    ports:
+      - 3002:3002
   proxy:
     image: ghcr.io/rgb-tools/rgb-proxy-server:0.3.0
     ports:

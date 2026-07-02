@@ -1,22 +1,28 @@
 #[cfg(not(any(feature = "electrum", feature = "esplora")))]
 compile_error!("at least one of the `electrum` and `esplora` features needs to be enabled");
 
+#[cfg(not(any(feature = "block-sync", feature = "transaction-sync")))]
+compile_error!(
+    "at least one of the `block-sync` and `transaction-sync` features needs to be enabled"
+);
+
 mod args;
 mod auth;
 mod backup;
-mod bitcoind;
 mod crypto;
 mod disk;
 mod error;
 mod ldk;
+mod ldk_chain_backend;
 mod rgb;
 mod rgb_file_transfer;
 mod routes;
 mod swap;
 mod utils;
 
-// the test suite drives a local electrs instance over the electrum protocol
-#[cfg(all(test, feature = "electrum"))]
+// the test suite drives a local electrs instance over the electrum protocol and unlocks its nodes
+// against a local bitcoind
+#[cfg(all(test, feature = "electrum", feature = "block-sync"))]
 mod test;
 
 use anyhow::Result;

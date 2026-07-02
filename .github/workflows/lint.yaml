@@ -24,6 +24,10 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
       - name: Lint (electrum only)
-        run: cargo clippy --all-targets --no-default-features --features electrum -- -D warnings
+        run: cargo clippy --all-targets --no-default-features --features electrum,block-sync,transaction-sync -- -D warnings
       - name: Lint (esplora only)
-        run: cargo clippy --all-targets --no-default-features --features esplora -- -D warnings
+        run: cargo clippy --all-targets --no-default-features --features esplora,block-sync,transaction-sync -- -D warnings
+      - name: Lint (block-sync only)
+        run: cargo clippy --all-targets --no-default-features --features block-sync,electrum,esplora -- -D warnings
+      - name: Lint (transaction-sync only)
+        run: cargo clippy --all-targets --no-default-features --features transaction-sync,electrum,esplora -- -D warnings

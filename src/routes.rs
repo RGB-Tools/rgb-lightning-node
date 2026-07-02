@@ -785,6 +785,20 @@ pub(crate) struct KeysendResponse {
     pub(crate) status: HTLCStatus,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "mode", content = "config")]
+pub(crate) enum LdkChainSync {
+    #[cfg(feature = "block-sync")]
+    BlockSync {
+        bitcoind_rpc_username: String,
+        bitcoind_rpc_password: String,
+        bitcoind_rpc_host: String,
+        bitcoind_rpc_port: u16,
+    },
+    #[cfg(feature = "transaction-sync")]
+    TransactionSync { indexer_url: Option<String> },
+}
+
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListAssetsRequest {
     pub(crate) filter_asset_schemas: Vec<AssetSchema>,
@@ -1464,10 +1478,7 @@ pub(crate) enum TransportType {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct UnlockRequest {
     pub(crate) password: String,
-    pub(crate) bitcoind_rpc_username: String,
-    pub(crate) bitcoind_rpc_password: String,
-    pub(crate) bitcoind_rpc_host: String,
-    pub(crate) bitcoind_rpc_port: u16,
+    pub(crate) ldk_chain_sync: LdkChainSync,
     pub(crate) indexer_url: String,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,

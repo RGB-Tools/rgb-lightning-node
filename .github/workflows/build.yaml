@@ -43,7 +43,13 @@ jobs:
         run: cargo build --release
       - name: Build (electrum only)
         if: matrix.name == 'linux' && matrix.toolchain == 'stable'
-        run: cargo build --release --no-default-features --features electrum
+        run: cargo build --release --no-default-features --features electrum,block-sync,transaction-sync
       - name: Build (esplora only)
         if: matrix.name == 'linux' && matrix.toolchain == 'stable'
-        run: cargo build --release --no-default-features --features esplora
+        run: cargo build --release --no-default-features --features esplora,block-sync,transaction-sync
+      - name: Build (block-sync only)
+        if: matrix.name == 'linux' && matrix.toolchain == 'stable'
+        run: cargo build --release --no-default-features --features block-sync,electrum,esplora
+      - name: Build (transaction-sync only)
+        if: matrix.name == 'linux' && matrix.toolchain == 'stable'
+        run: cargo build --release --no-default-features --features transaction-sync,electrum,esplora
