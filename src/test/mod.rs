@@ -445,6 +445,27 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
     }
 }
 
+/// Returns the txid of the confirmed commitment for the given channel.
+async fn confirmed_commitment_txid(node_test_dir: &str, channel_id: &str) -> String {
+    let needle = format!("Channel {channel_id} closed by funding output spend in txid ");
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let txid = ldk_log_lines(node_test_dir)
+            .iter()
+            .find_map(|l| l.split_once(&needle).map(|(_, rest)| rest.to_string()));
+        // a log line caught mid-write may be truncated, retry in that case
+        if let Some(txid) = txid {
+            if txid.len() >= 64 {
+                return txid[..64].to_string();
+            }
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("confirmed commitment for channel {channel_id} not seen in logs");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
 async fn connect_peer(node_address: SocketAddr, peer_pubkey: &str, peer_addr: &str) {
     println!("connecting peer {peer_pubkey} from node {node_address}");
     let payload = ConnectPeerRequest {
@@ -910,6 +931,18 @@ async fn keysend_with_ln_balance(
         &res.payment_hash,
     )
     .await;
+}
+
+/// Lines of a node's LDK log file (empty if the log doesn't exist yet).
+fn ldk_log_lines(node_test_dir: &str) -> Vec<String> {
+    let log_path = PathBuf::from(node_test_dir)
+        .join(LDK_DIR)
+        .join(LOGS_DIR)
+        .join(LDK_LOGS_FILE);
+    let Ok(file) = File::open(log_path) else {
+        return vec![];
+    };
+    BufReader::new(file).lines().map_while(Result::ok).collect()
 }
 
 async fn list_assets(node_address: SocketAddr) -> ListAssetsResponse {
@@ -1560,24 +1593,32 @@ async fn provide_out_of_band_consignment(
         .unwrap()
 }
 
-async fn refresh_transfers(node_address: SocketAddr) -> RefreshResponse {
-    println!("refreshing transfers for node {node_address}");
+async fn refresh_transfers_raw(node_address: SocketAddr) -> Result<Response, reqwest::Error> {
     let payload = RefreshRequest {
         asset_id: None,
         filter: vec![],
         skip_sync: false,
     };
-    let res = reqwest::Client::new()
+    reqwest::Client::new()
         .post(format!("http://{node_address}/refreshtransfers"))
         .json(&payload)
         .send()
         .await
-        .unwrap();
+}
+
+async fn refresh_transfers(node_address: SocketAddr) -> RefreshResponse {
+    println!("refreshing transfers for node {node_address}");
+    let res = refresh_transfers_raw(node_address).await.unwrap();
     check_response_is_ok(res)
         .await
         .json::<RefreshResponse>()
         .await
         .unwrap()
+}
+
+/// Best-effort refresh for nodes that may not be able to serve it yet.
+async fn refresh_transfers_tolerant(node_address: SocketAddr) {
+    let _ = refresh_transfers_raw(node_address).await;
 }
 
 async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
@@ -1851,6 +1892,12 @@ async fn shutdown(node_sockets: &[SocketAddr]) {
     }
 }
 
+/// Total spendable BTC across the vanilla and colored wallets.
+async fn spendable_sats(node_address: SocketAddr) -> u64 {
+    let balance = btc_balance(node_address).await;
+    balance.vanilla.spendable + balance.colored.spendable
+}
+
 async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
     println!("taking swap {swapstring} on node {node_address}");
     let payload = TakerRequest { swapstring };
@@ -1889,6 +1936,31 @@ async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
         .send()
         .await
         .unwrap()
+}
+
+/// Output values (in sats) of an on-chain transaction.
+fn tx_output_sats(txid: &str) -> Vec<u64> {
+    let output = Command::new("docker")
+        .stdin(Stdio::null())
+        .arg("compose")
+        .args(bitcoin_cli())
+        .arg("getrawtransaction")
+        .arg(txid)
+        .arg("true")
+        .output()
+        .expect("able to call getrawtransaction");
+    assert!(output.status.success());
+    let tx: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid tx JSON");
+    tx["vout"]
+        .as_array()
+        .expect("vout array")
+        .iter()
+        .map(|v| {
+            Amount::from_btc(v["value"].as_f64().expect("output value"))
+                .expect("valid amount")
+                .to_sat()
+        })
+        .collect()
 }
 
 async fn unlock(node_address: SocketAddr, password: &str) {
@@ -2164,6 +2236,7 @@ mod close_coop_vanilla;
 mod close_coop_zero_balance;
 mod close_force_nobtc_acceptor;
 mod close_force_other_side;
+mod close_force_pending_htlc;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;

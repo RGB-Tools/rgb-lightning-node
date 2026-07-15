@@ -119,6 +119,39 @@ const VANILLA_SYNC_LOOKBACK: u32 = 20;
 #[cfg(test)]
 pub(crate) static IGNORE_INBOUND_CHANNELS_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
+/// Test-only: the node with this pubkey holds incoming payments instead of
+/// claiming them, keeping their HTLCs pending.
+#[cfg(test)]
+pub(crate) static HOLD_PAYMENT_CLAIMABLE_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
+/// Test-only: number of payments held via [`HOLD_PAYMENT_CLAIMABLE_ON_NODE`].
+#[cfg(test)]
+pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Sets [`HOLD_PAYMENT_CLAIMABLE_ON_NODE`] and clears it on drop, so a
+/// panicking test cannot leak the hold into the next one.
+#[cfg(test)]
+pub(crate) struct HoldPaymentClaimableGuard;
+
+#[cfg(test)]
+impl HoldPaymentClaimableGuard {
+    pub(crate) fn set(node_id: PublicKey) -> Self {
+        HELD_PAYMENT_CLAIMABLE_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+        *HOLD_PAYMENT_CLAIMABLE_ON_NODE.lock().unwrap() = Some(node_id);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for HoldPaymentClaimableGuard {
+    fn drop(&mut self) {
+        if let Ok(mut hold) = HOLD_PAYMENT_CLAIMABLE_ON_NODE.lock() {
+            *hold = None;
+        }
+    }
+}
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,
@@ -978,6 +1011,17 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
+            #[cfg(test)]
+            if HOLD_PAYMENT_CLAIMABLE_ON_NODE
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|id| *id == unlocked_state.channel_manager.get_our_node_id())
+            {
+                tracing::info!("TEST: holding PaymentClaimable for {}", payment_hash);
+                HELD_PAYMENT_CLAIMABLE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(());
+            }
             let payment_preimage = match purpose {
                 PaymentPurpose::Bolt11InvoicePayment {
                     payment_preimage, ..

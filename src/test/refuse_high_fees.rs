@@ -1,11 +1,3 @@
-use crate::disk::LDK_LOGS_FILE;
-use crate::utils::LDK_DIR;
-use std::{
-    fs::File,
-    io::{BufRead, BufReader},
-    path::PathBuf,
-};
-
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/refuse_high_fees/";
@@ -80,21 +72,9 @@ async fn refuse_high_fees() {
         ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
     let _ = send_payment_with_status(node1_addr, invoice, HTLCStatus::Failed).await;
 
-    let file = File::open(
-        PathBuf::from(test_dir_node1)
-            .join(LDK_DIR)
-            .join(LOGS_DIR)
-            .join(LDK_LOGS_FILE),
-    )
-    .unwrap();
-    let reader = BufReader::new(file);
-
     let mut found_log = false;
-    for line in reader.lines() {
-        if line
-            .unwrap()
-            .contains("due to exceeding max total routing fee limit")
-        {
+    for line in ldk_log_lines(&test_dir_node1) {
+        if line.contains("due to exceeding max total routing fee limit") {
             found_log = true;
             break;
         }

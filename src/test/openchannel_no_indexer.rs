@@ -45,16 +45,8 @@ async fn openchannel_no_indexer() {
         let t_0 = OffsetDateTime::now_utc();
         'outer: loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let file = File::open(
-                PathBuf::from(node_dir)
-                    .join(LDK_DIR)
-                    .join(LOGS_DIR)
-                    .join(LDK_LOGS_FILE),
-            )
-            .unwrap();
-            let reader = BufReader::new(file);
-            for line in reader.lines() {
-                if line.unwrap().contains("Failed to connect to indexer") {
+            for line in ldk_log_lines(node_dir) {
+                if line.contains("Failed to connect to indexer") {
                     break 'outer;
                 }
             }

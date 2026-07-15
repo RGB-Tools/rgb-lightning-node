@@ -90,17 +90,9 @@ async fn swap_fail_whitelist() {
     }
 
     // check the payment failed for the correct reason
-    let file = File::open(
-        PathBuf::from(test_dir_node1)
-            .join(LDK_DIR)
-            .join(LOGS_DIR)
-            .join(LDK_LOGS_FILE),
-    )
-    .unwrap();
-    let reader = BufReader::new(file);
     let mut found_log = false;
-    for line in reader.lines() {
-        if line.unwrap().contains("rejecting non-Waiting swap") {
+    for line in ldk_log_lines(&test_dir_node1) {
+        if line.contains("rejecting non-Waiting swap") {
             found_log = true;
             break;
         }
