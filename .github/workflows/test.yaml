@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  test_and_coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -19,6 +19,21 @@ jobs:
           submodules: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          components: llvm-tools-preview
+          toolchain: stable
           rustflags: ""
-      - name: Tests
-        run: cargo test -- --test-threads=1
+      - name: Install llvm-cov
+        env:
+          LLVM_COV_RELEASES: https://github.com/taiki-e/cargo-llvm-cov/releases
+        run: |
+          host=$(rustc -Vv | grep host | sed 's/host: //')
+          curl -fsSL $LLVM_COV_RELEASES/latest/download/cargo-llvm-cov-$host.tar.gz | tar xzf - -C "$HOME/.cargo/bin"
+      - name: Tests and coverage report
+        run: ./coverage.sh --ci
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v6
+        with:
+          fail_ci_if_error: true
+          file: coverage.lcov
+          flags: rust
+          token: ${{ secrets.CODECOV_TOKEN }}

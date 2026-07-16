@@ -376,6 +376,23 @@ Tests can be executed with:
 cargo test
 ```
 
+### Coverage
+
+Tests can also be run gathering code coverage, using [cargo-llvm-cov].
+
+To run the tests and generate an HTML coverage report:
+```sh
+./coverage.sh
+```
+The report path is output at the end of the run.
+
+To only run some test(s):
+```sh
+./coverage.sh -t <test_name>
+```
+
+See `./coverage.sh --help` for the available options.
+
 ## Projects using RLN
 
 Here is a list of projects using RLN, in alphabetical order:
@@ -399,3 +416,4 @@ Here is a list of projects using RLN, in alphabetical order:
 [Spectrum]: https://rgbspectrum.pages.dev/
 [Thunderstack]: https://thunderstack.org/
 [Tiramisu Wallet]: https://mainnet.tiramisuwallet.com/
+[cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
