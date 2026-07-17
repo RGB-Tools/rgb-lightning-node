@@ -16,8 +16,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [ nightly, stable, 1.88.0 ]
+        toolchain: [ stable, 1.88.0, beta ]
         name: [ linux, windows, macos ]
+        exclude:
+          - name: windows
+            toolchain: beta
+          - name: macos
+            toolchain: beta
         include:
           - name: linux
             os: ubuntu-latest
