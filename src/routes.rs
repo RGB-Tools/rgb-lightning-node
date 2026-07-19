@@ -1111,6 +1111,11 @@ pub(crate) struct RefreshRequest {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct RefreshResponse {
+    pub(crate) transfers: HashMap<i32, RefreshedTransfer>,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) enum RefreshTransferStatus {
     WaitingCounterparty,
     WaitingConfirmations,
@@ -3729,21 +3734,25 @@ pub(crate) async fn provide_out_of_band_consignment(
 pub(crate) async fn refresh_transfers(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<RefreshRequest>, APIError>,
-) -> Result<Json<EmptyResponse>, APIError> {
+) -> Result<Json<RefreshResponse>, APIError> {
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
         let unlocked_state_copy = unlocked_state.clone();
 
         let filter = payload.filter.into_iter().map(|f| f.into()).collect();
-        tokio::task::spawn_blocking(move || {
+        let refresh_result = tokio::task::spawn_blocking(move || {
             unlocked_state_copy.rgb_refresh(payload.asset_id, filter, payload.skip_sync)
         })
         .await
         .unwrap()?;
 
         tracing::info!("Refresh complete");
-        Ok(Json(EmptyResponse {}))
+        let transfers = refresh_result
+            .into_iter()
+            .map(|(idx, t)| (idx, t.into()))
+            .collect();
+        Ok(Json(RefreshResponse { transfers }))
     })
     .await
 }

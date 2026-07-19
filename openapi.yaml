@@ -880,7 +880,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmptyResponse'
+                $ref: '#/components/schemas/RefreshResponse'
   /restore:
     post:
       tags:
@@ -2840,6 +2840,15 @@ components:
         skip_sync:
           type: boolean
           example: false
+    RefreshResponse:
+      type: object
+      required:
+        - transfers
+      properties:
+        transfers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RefreshedTransfer'
     RefreshTransferStatus:
       type: string
       enum:

@@ -49,10 +49,10 @@ use crate::routes::{
     MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
     OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, ProvideOutOfBandAckRequest,
     ProvideOutOfBandAckResponse, ProvideOutOfBandConsignmentResponse, Recipient, RefreshRequest,
-    RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest,
-    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest, SendRgbResponse,
-    Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus, UnlockRequest, Unspent,
-    WitnessData,
+    RefreshResponse, RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse,
+    SendBtcRequest, SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest,
+    SendRgbResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus,
+    UnlockRequest, Unspent, WitnessData,
 };
 use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
 
@@ -1560,7 +1560,7 @@ async fn provide_out_of_band_consignment(
         .unwrap()
 }
 
-async fn refresh_transfers(node_address: SocketAddr) {
+async fn refresh_transfers(node_address: SocketAddr) -> RefreshResponse {
     println!("refreshing transfers for node {node_address}");
     let payload = RefreshRequest {
         asset_id: None,
@@ -1575,9 +1575,9 @@ async fn refresh_transfers(node_address: SocketAddr) {
         .unwrap();
     check_response_is_ok(res)
         .await
-        .json::<EmptyResponse>()
+        .json::<RefreshResponse>()
         .await
-        .unwrap();
+        .unwrap()
 }
 
 async fn restore(node_address: SocketAddr, backup_path: &str, password: &str) {
