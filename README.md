@@ -53,11 +53,10 @@ In order to operate, the node will need:
 Once services are running, daemons can be started.
 Each daemon needs to be started in a separate shell with `rgb-lightning-node`,
 specifying:
-- bitcoind user, password, host and port
-- node data directory
-- node listening port
-- LN peer listening port
-- network
+- node data directory (positional argument)
+- node listening port (`--daemon-listening-port`, default: 3001)
+- LN peer listening port (`--ldk-peer-listening-port`, default: 9735)
+- network (`--network`, default: testnet)
 
 ### Regtest
 
