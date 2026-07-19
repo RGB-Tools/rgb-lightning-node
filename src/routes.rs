@@ -1376,6 +1376,7 @@ pub(crate) struct UnlockRequest {
 pub(crate) struct Unspent {
     pub(crate) utxo: Utxo,
     pub(crate) rgb_allocations: Vec<RgbAllocation>,
+    pub(crate) pending_blinded: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1383,6 +1384,7 @@ pub(crate) struct Utxo {
     pub(crate) outpoint: String,
     pub(crate) btc_amount: u64,
     pub(crate) colorable: bool,
+    pub(crate) exists: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2760,6 +2762,7 @@ pub(crate) async fn list_unspents(
                 outpoint: unspent.utxo.outpoint.to_string(),
                 btc_amount: unspent.utxo.btc_amount,
                 colorable: unspent.utxo.colorable,
+                exists: unspent.utxo.exists,
             },
             rgb_allocations: unspent
                 .rgb_allocations
@@ -2770,6 +2773,7 @@ pub(crate) async fn list_unspents(
                     settled: a.settled,
                 })
                 .collect(),
+            pending_blinded: unspent.pending_blinded,
         })
     }
     Ok(Json(ListUnspentsResponse { unspents }))
