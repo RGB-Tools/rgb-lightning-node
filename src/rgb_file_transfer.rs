@@ -81,7 +81,7 @@ const CONSIGNMENT_TTL: Duration = Duration::from_secs(600);
 pub(crate) const MAX_PENDING_CONSIGNMENTS: usize = 10;
 
 // Cap on the size of a single funding consignment.
-const MAX_CONSIGNMENT_SIZE: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_CONSIGNMENT_SIZE: usize = 16 * 1024 * 1024;
 
 // Default cap on the total media bytes staged for one channel, across any number of files.
 //

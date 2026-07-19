@@ -44,8 +44,23 @@ pub enum APIError {
     #[error("Batch transfer cannot be set to failed status")]
     CannotFailBatchTransfer,
 
+    #[error("Cannot provide out-of-band ACK: {0}")]
+    CannotProvideOutOfBandAck(String),
+
+    #[error("Cannot provide out-of-band consignment: {0}")]
+    CannotProvideOutOfBandConsignment(String),
+
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
+
+    #[error("Consignment file is empty")]
+    ConsignmentFileEmpty,
+
+    #[error("Consignment file has not been provided")]
+    ConsignmentFileNotProvided,
+
+    #[error("Consignment not found")]
+    ConsignmentNotFound,
 
     #[error("Another payment for this invoice is already in status {0}")]
     DuplicatePayment(String),
@@ -130,6 +145,9 @@ pub enum APIError {
 
     #[error("Invalid channel ID")]
     InvalidChannelID,
+
+    #[error("Invalid consignment")]
+    InvalidConsignment,
 
     #[error("Invalid details: {0}")]
     InvalidDetails(String),
@@ -306,16 +324,16 @@ pub enum APIError {
     WrongPassword,
 }
 
+pub(crate) fn error_name(e: &impl std::error::Error) -> String {
+    format!("{e:?}")
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect()
+}
+
 impl APIError {
-    fn name(&self) -> String {
-        format!("{self:?}")
-            .split('(')
-            .next()
-            .unwrap()
-            .split(" {")
-            .next()
-            .unwrap()
-            .to_string()
+    pub(crate) fn name(&self) -> String {
+        error_name(self)
     }
 }
 
@@ -339,6 +357,12 @@ impl From<RgbLibError> for APIError {
             RgbLibError::BatchTransferNotFound { .. } => APIError::BatchTransferNotFound,
             RgbLibError::CannotEstimateFees => APIError::CannotEstimateFees,
             RgbLibError::CannotFailBatchTransfer => APIError::CannotFailBatchTransfer,
+            RgbLibError::CannotProvideOutOfBandAck { details } => {
+                APIError::CannotProvideOutOfBandAck(details)
+            }
+            RgbLibError::CannotProvideOutOfBandConsignment { details } => {
+                APIError::CannotProvideOutOfBandConsignment(details)
+            }
             RgbLibError::EmptyFile { .. } => APIError::MediaFileEmpty,
             RgbLibError::FailedBdkSync { details } => APIError::FailedBdkSync(details),
             RgbLibError::FailedBroadcast { details } => APIError::FailedBroadcast(details),
@@ -419,9 +443,9 @@ impl From<RgbLibError> for APIError {
     }
 }
 
-impl IntoResponse for APIError {
-    fn into_response(self) -> Response {
-        let (status, error, name) = match self {
+impl APIError {
+    fn status_code(&self) -> StatusCode {
+        match self {
             APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
@@ -431,12 +455,13 @@ impl IntoResponse for APIError {
             | APIError::FailedPeerDisconnection(_)
             | APIError::FailedSendingOnionMessage(_)
             | APIError::IO(_)
-            | APIError::Unexpected(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                self.to_string(),
-                self.name(),
-            ),
+            | APIError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
             APIError::AnchorsRequired
+            | APIError::CannotProvideOutOfBandAck(_)
+            | APIError::CannotProvideOutOfBandConsignment(_)
+            | APIError::ConsignmentFileEmpty
+            | APIError::ConsignmentFileNotProvided
+            | APIError::ConsignmentNotFound
             | APIError::ExpiredSwapOffer
             | APIError::IncompleteRGBInfo
             | APIError::InvalidAddress(_)
@@ -449,6 +474,7 @@ impl IntoResponse for APIError {
             | APIError::InvalidBackupPath
             | APIError::InvalidBiscuitToken
             | APIError::InvalidChannelID
+            | APIError::InvalidConsignment
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
             | APIError::InvalidExpiration
@@ -480,10 +506,8 @@ impl IntoResponse for APIError {
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
-            | APIError::UnsupportedBackupVersion { .. } => {
-                (StatusCode::BAD_REQUEST, self.to_string(), self.name())
-            }
-            APIError::WrongPassword => (StatusCode::UNAUTHORIZED, self.to_string(), self.name()),
+            | APIError::UnsupportedBackupVersion { .. } => StatusCode::BAD_REQUEST,
+            APIError::WrongPassword => StatusCode::UNAUTHORIZED,
             APIError::AllocationsAlreadyAvailable
             | APIError::AlreadyInitialized
             | APIError::AlreadyUnlocked
@@ -521,28 +545,27 @@ impl IntoResponse for APIError {
             | APIError::UnlockedNode
             | APIError::UnsupportedInflation(_)
             | APIError::UnsupportedLayer1(_)
-            | APIError::UnsupportedTransportType => {
-                (StatusCode::FORBIDDEN, self.to_string(), self.name())
+            | APIError::UnsupportedTransportType => StatusCode::FORBIDDEN,
+            APIError::Network(_) | APIError::NoValidTransportEndpoint => {
+                StatusCode::SERVICE_UNAVAILABLE
             }
-            APIError::Network(_) | APIError::NoValidTransportEndpoint => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                self.to_string(),
-                self.name(),
-            ),
-        };
+        }
+    }
+}
 
-        let error = error.replace("\n", " ");
+impl IntoResponse for APIError {
+    fn into_response(self) -> Response {
+        let status = self.status_code();
+        let error = self.to_string().replace("\n", " ");
+        let name = self.name();
 
         tracing::error!("APIError: {error}");
 
-        let body = Json(
-            serde_json::to_value(APIErrorResponse {
-                error,
-                code: status.as_u16(),
-                name,
-            })
-            .unwrap(),
-        );
+        let body = Json(APIErrorResponse {
+            error,
+            code: status.as_u16(),
+            name,
+        });
 
         (status, body).into_response()
     }

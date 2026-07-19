@@ -368,6 +368,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetChannelIdResponse'
+  /getconsignment:
+    post:
+      tags:
+        - RGB
+      summary: Get a send consignment
+      description: Get the hex string of the consignment bytes for a send transfer,
+        identified by its asset ID and txid. Useful to hand the consignment to
+        the counterparty out-of-band when the node filesystem is not accessible
+        from the API caller.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetConsignmentRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetConsignmentResponse'
   /getpayment:
     post:
       tags:
@@ -804,6 +825,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PostAssetMediaResponse'
+  /provideoutofbandack:
+    post:
+      tags:
+        - RGB
+      summary: Provide an out-of-band ACK
+      description: Record the out-of-band ACK received from a recipient of an outgoing transfer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvideOutOfBandAckRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvideOutOfBandAckResponse'
+  /provideoutofbandconsignment:
+    post:
+      tags:
+        - RGB
+      summary: Provide an out-of-band consignment
+      description: Provide a consignment received out-of-band, as a binary upload,
+        along with any media files it references (one `media` field per file)
+        The consignment is validated and the matching incoming transfer(s) are processed.
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProvideOutOfBandConsignmentRequest'
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvideOutOfBandConsignmentResponse'
   /refreshtransfers:
     post:
       tags:
@@ -1849,6 +1908,26 @@ components:
         channel_id:
           type: string
           example: 8129afe1b1d7cf60d5e1bf4c04b09bec925ed4df5417ceee0484e24f816a105a
+    GetConsignmentRequest:
+      type: object
+      required:
+        - asset_id
+        - txid
+      properties:
+        asset_id:
+          type: string
+          example: rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zt
+        txid:
+          type: string
+          example: 33cf3e42fb1c6faa0d47e6a498a9d4e5c56e8a06ea0d295c6d90e2b6c85f7a1e
+    GetConsignmentResponse:
+      type: object
+      required:
+        - bytes_hex
+      properties:
+        bytes_hex:
+          type: string
+          example: 52474200
     GetPaymentRequest:
       type: object
       required:
@@ -2539,6 +2618,23 @@ components:
         temporary_channel_id:
           type: string
           example: a8b60c8ce3067b5fc881d4831323e24751daec3b64353c8df3205ec5d838f1c5
+    OperationResult:
+      type: object
+      required:
+        - txid
+        - batch_transfer_idx
+        - entropy
+      properties:
+        txid:
+          type: string
+          example: 33cf3e42fb1c6faa0d47e6a498a9d4e5c56e8a06ea0d295c6d90e2b6c85f7a1e
+        batch_transfer_idx:
+          type: integer
+          example: 3
+        entropy:
+          type: integer
+          format: int64
+          example: 12345678901234567890
     Payment:
       type: object
       required:
@@ -2622,6 +2718,43 @@ components:
           items:
             type: integer
           example: [6, 36, 87, 13, 5, 17]
+    ProvideOutOfBandAckRequest:
+      type: object
+      required:
+        - recipient_id
+      properties:
+        recipient_id:
+          type: string
+          example: utxob:2Bwv2Vx-t7VD8XjTh-9EMbpBFKh-J5HDFY4pj-eywu4tKKk-hjTvzJa
+    ProvideOutOfBandAckResponse:
+      type: object
+      properties:
+        operation:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/OperationResult'
+    ProvideOutOfBandConsignmentRequest:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+        media:
+          type: array
+          items:
+            type: string
+            format: binary
+    ProvideOutOfBandConsignmentResponse:
+      type: object
+      required:
+        - transfers
+      properties:
+        transfers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RefreshedTransfer'
     Recipient:
       type: object
       required:
@@ -2648,6 +2781,37 @@ components:
       enum:
         - Blind
         - Witness
+    RefreshedTransfer:
+      type: object
+      properties:
+        updated_status:
+          nullable: true
+          type: string
+          enum:
+            - Initiated
+            - WaitingCounterparty
+            - WaitingSafeHeight
+            - WaitingConfirmations
+            - WaitingBroadcast
+            - Settled
+            - Failed
+          example: WaitingBroadcast
+        failure:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/RefreshFailure'
+    RefreshFailure:
+      type: object
+      required:
+        - name
+        - message
+      properties:
+        name:
+          type: string
+          example: InvalidConsignment
+        message:
+          type: string
+          example: Invalid consignment
     RefreshFilter:
       type: object
       required:

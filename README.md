@@ -65,9 +65,12 @@ To easily start the required services on a regtest network, run:
 ```
 
 This command will create the directories needed by the services, start the
-docker containers and mine some blocks. The test environment will always start
-in a clean state, taking down previous running services (if any) and
-re-creating data directories.
+docker containers and mine some blocks. The regtest docker stack also starts
+an RGB proxy on port 3000; it is only needed when using proxy-based
+`transport_endpoints` (see [RGB consignment transport](#rgb-consignment-transport)).
+
+The test environment will always start in a clean state, taking down previous
+running services (if any) and re-creating data directories.
 
 Here's an example of how to start three regtest nodes, each one using the
 shared regtest services provided by docker compose:
@@ -212,6 +215,7 @@ The node currently exposes the following APIs:
 - `/failtransfers` (POST)
 - `/getassetmedia` (POST)
 - `/getchannelid` (POST)
+- `/getconsignment` (POST)
 - `/getpayment` (POST)
 - `/getswap` (POST)
 - `/inflate` (POST)
@@ -238,6 +242,8 @@ The node currently exposes the following APIs:
 - `/nodeinfo` (GET)
 - `/openchannel` (POST)
 - `/postassetmedia` (POST)
+- `/provideoutofbandack` (POST)
+- `/provideoutofbandconsignment` (POST)
 - `/refreshtransfers` (POST)
 - `/restore` (POST)
 - `/revoketoken` (POST)
@@ -360,6 +366,26 @@ The node exposes a `/revoketoken` endpoint for this purpose.
 Internally, the node extracts the token’s revocation identifiers and adds them
 to its revocation list. Every request checks this list before authenticating.
 
+### RGB consignment transport
+
+RGB consignments can be exchanged in three ways:
+
+- **Lightning P2P**: automatic during channel opening and LN RGB payments.
+- **Out-of-band**: pass empty `transport_endpoints` to `/rgbinvoice` and
+  `/sendrgb`, then exchange the consignment and ACK manually via
+  `/getconsignment`, `/provideoutofbandconsignment`, and
+  `/provideoutofbandack`. No extra service required.
+- **RGB proxy**: pass proxy URLs in `transport_endpoints`; consignments and
+  ACKs are relayed automatically by an [RGB proxy server]. Use
+  `/checkproxyendpoint` to validate a URL.
+
+Example proxy URLs (only when using proxy transport):
+
+| Environment | `transport_endpoints` |
+|-------------|-----------------------|
+| Local | `rpc://127.0.0.1:3000/json-rpc` |
+| Public | `rpcs://proxy.iriswallet.com/0.2/json-rpc` |
+
 ## Test
 
 Tests for a few scenarios using the regtest network are included. The same
@@ -400,6 +426,7 @@ Here is a list of projects using RLN, in alphabetical order:
 
 
 [Biscuit tokens]: https://www.biscuitsec.org/
+[RGB proxy server]: https://github.com/RGB-Tools/rgb-proxy-server
 [ldk-sample]: https://github.com/lightningdevkit/ldk-sample
 [OpenAPI specification]: /openapi.yaml
 [rgb-lightning-sample]: https://github.com/RGB-Tools/rgb-lightning-sample

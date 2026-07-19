@@ -52,19 +52,21 @@ use rgb_lib::{
         },
         AssetCFA as RgbLibAssetCFA, AssetIFA as RgbLibAssetIFA, AssetNIA as RgbLibAssetNIA,
         AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
-        Invoice as RgbLibInvoice, Media as RgbLibMedia, ProofOfReserves as RgbLibProofOfReserves,
-        Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
-        RefreshFilter as RgbLibRefreshFilter, RefreshTransferStatus as RgbLibRefreshTransferStatus,
-        SyncKeychain as RgbLibSyncKeychain, SyncOptions as RgbLibSyncOptions,
-        SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken, TokenLight as RgbLibTokenLight,
-        WitnessData as RgbLibWitnessData,
+        Invoice as RgbLibInvoice, Media as RgbLibMedia, OperationResult as RgbLibOperationResult,
+        ProofOfReserves as RgbLibProofOfReserves, Recipient as RgbLibRecipient, RecipientInfo,
+        RecipientType as RgbLibRecipientType, RefreshFilter as RgbLibRefreshFilter,
+        RefreshTransferStatus as RgbLibRefreshTransferStatus,
+        RefreshedTransfer as RgbLibRefreshedTransfer, SyncKeychain as RgbLibSyncKeychain,
+        SyncOptions as RgbLibSyncOptions, SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken,
+        TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
     },
     AssetSchema as RgbLibAssetSchema, Assignment as RgbLibAssignment,
-    BitcoinNetwork as RgbLibNetwork, ContractId,
+    BitcoinNetwork as RgbLibNetwork, ContractId, Error as RgbLibError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io::Write,
     net::ToSocketAddrs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -77,7 +79,6 @@ use tokio::{
     sync::MutexGuard as TokioMutexGuard,
 };
 
-use crate::ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
@@ -95,6 +96,10 @@ use crate::{
     utils::{
         connect_peer_if_necessary, get_current_timestamp, no_cancel, parse_peer_info, AppState,
     },
+};
+use crate::{
+    error::error_name,
+    ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS},
 };
 
 const UTXO_NUM: u8 = 4;
@@ -604,6 +609,17 @@ pub(crate) struct GetChannelIdResponse {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct GetConsignmentRequest {
+    pub(crate) asset_id: String,
+    pub(crate) txid: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct GetConsignmentResponse {
+    pub(crate) bytes_hex: String,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct GetPaymentRequest {
     pub(crate) payment_hash: String,
 }
@@ -937,6 +953,23 @@ pub(crate) struct OpenChannelResponse {
     pub(crate) temporary_channel_id: String,
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct OperationResult {
+    pub(crate) txid: String,
+    pub(crate) batch_transfer_idx: i32,
+    pub(crate) entropy: u64,
+}
+
+impl From<RgbLibOperationResult> for OperationResult {
+    fn from(value: RgbLibOperationResult) -> Self {
+        Self {
+            txid: value.txid,
+            batch_transfer_idx: value.batch_transfer_idx,
+            entropy: value.entropy,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct Payment {
     pub(crate) amt_msat: Option<u64>,
@@ -977,6 +1010,21 @@ impl From<RgbLibProofOfReserves> for ProofOfReserves {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct ProvideOutOfBandAckRequest {
+    pub(crate) recipient_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ProvideOutOfBandAckResponse {
+    pub(crate) operation: Option<OperationResult>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct ProvideOutOfBandConsignmentResponse {
+    pub(crate) transfers: HashMap<i32, RefreshedTransfer>,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) struct Recipient {
     pub(crate) recipient_id: String,
     pub(crate) witness_data: Option<WitnessData>,
@@ -1006,6 +1054,36 @@ impl From<RgbLibRecipientType> for RecipientType {
         match value {
             RgbLibRecipientType::Blind => Self::Blind,
             RgbLibRecipientType::Witness => Self::Witness,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct RefreshedTransfer {
+    pub(crate) updated_status: Option<TransferStatus>,
+    pub(crate) failure: Option<RefreshFailure>,
+}
+
+impl From<RgbLibRefreshedTransfer> for RefreshedTransfer {
+    fn from(value: RgbLibRefreshedTransfer) -> Self {
+        Self {
+            updated_status: value.updated_status.map(|s| s.into()),
+            failure: value.failure.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct RefreshFailure {
+    pub(crate) name: String,
+    pub(crate) message: String,
+}
+
+impl From<RgbLibError> for RefreshFailure {
+    fn from(error: RgbLibError) -> Self {
+        Self {
+            name: error_name(&error),
+            message: error.to_string(),
         }
     }
 }
@@ -1348,6 +1426,20 @@ pub(crate) enum TransferStatus {
     WaitingBroadcast,
     Settled,
     Failed,
+}
+
+impl From<rgb_lib::TransferStatus> for TransferStatus {
+    fn from(value: rgb_lib::TransferStatus) -> Self {
+        match value {
+            rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
+            rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
+            rgb_lib::TransferStatus::WaitingSafeHeight => TransferStatus::WaitingSafeHeight,
+            rgb_lib::TransferStatus::WaitingConfirmations => TransferStatus::WaitingConfirmations,
+            rgb_lib::TransferStatus::WaitingBroadcast => TransferStatus::WaitingBroadcast,
+            rgb_lib::TransferStatus::Settled => TransferStatus::Settled,
+            rgb_lib::TransferStatus::Failed => TransferStatus::Failed,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1929,6 +2021,28 @@ pub(crate) async fn get_channel_id(
     };
 
     Ok(Json(GetChannelIdResponse { channel_id }))
+}
+
+pub(crate) async fn get_consignment(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<GetConsignmentRequest>, APIError>,
+) -> Result<Json<GetConsignmentResponse>, APIError> {
+    let file_path = state
+        .check_unlocked()
+        .await?
+        .clone()
+        .unwrap()
+        .rgb_get_send_consignment_path(&payload.asset_id, &payload.txid);
+    if !file_path.exists() {
+        return Err(APIError::ConsignmentNotFound);
+    }
+
+    let mut buf_reader = BufReader::new(File::open(file_path).await?);
+    let mut file_bytes = Vec::new();
+    buf_reader.read_to_end(&mut file_bytes).await?;
+    let bytes_hex = hex_str(&file_bytes);
+
+    Ok(Json(GetConsignmentResponse { bytes_hex }))
 }
 
 pub(crate) async fn get_payment(
@@ -2711,17 +2825,7 @@ pub(crate) async fn list_transfers(
             idx: transfer.idx,
             created_at: transfer.created_at,
             updated_at: transfer.updated_at,
-            status: match transfer.status {
-                rgb_lib::TransferStatus::Initiated => TransferStatus::Initiated,
-                rgb_lib::TransferStatus::WaitingCounterparty => TransferStatus::WaitingCounterparty,
-                rgb_lib::TransferStatus::WaitingSafeHeight => TransferStatus::WaitingSafeHeight,
-                rgb_lib::TransferStatus::WaitingConfirmations => {
-                    TransferStatus::WaitingConfirmations
-                }
-                rgb_lib::TransferStatus::WaitingBroadcast => TransferStatus::WaitingBroadcast,
-                rgb_lib::TransferStatus::Settled => TransferStatus::Settled,
-                rgb_lib::TransferStatus::Failed => TransferStatus::Failed,
-            },
+            status: transfer.status.into(),
             requested_assignment: transfer.requested_assignment.map(|a| a.into()),
             assignments: transfer.assignments.into_iter().map(|a| a.into()).collect(),
             kind: match transfer.kind {
@@ -3514,6 +3618,114 @@ pub(crate) async fn post_asset_media(
     .await
 }
 
+pub(crate) async fn provide_out_of_band_ack(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<ProvideOutOfBandAckRequest>, APIError>,
+) -> Result<Json<ProvideOutOfBandAckResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        let unlocked_state_copy = unlocked_state.clone();
+        let operation = tokio::task::spawn_blocking(move || {
+            unlocked_state_copy.rgb_provide_out_of_band_ack(payload.recipient_id)
+        })
+        .await
+        .unwrap()?;
+
+        Ok(Json(ProvideOutOfBandAckResponse {
+            operation: operation.map(|o| o.into()),
+        }))
+    })
+    .await
+}
+
+pub(crate) async fn provide_out_of_band_consignment(
+    State(state): State<Arc<AppState>>,
+    WithRejection(mut multipart, _): WithRejection<Multipart, APIError>,
+) -> Result<Json<ProvideOutOfBandConsignmentResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        let mut consignment_bytes = None;
+        let mut media_files_bytes = Vec::new();
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|_| APIError::ConsignmentFileNotProvided)?
+        {
+            let field_name = field.name().map(|n| n.to_string());
+            let field_bytes = field
+                .bytes()
+                .await
+                .map_err(|e| APIError::Unexpected(format!("Failed to read bytes: {e}")))?;
+            match field_name.as_deref() {
+                Some("media") => {
+                    if field_bytes.is_empty() {
+                        return Err(APIError::MediaFileEmpty);
+                    }
+                    media_files_bytes.push(field_bytes);
+                }
+                _ => {
+                    if field_bytes.is_empty() {
+                        return Err(APIError::ConsignmentFileEmpty);
+                    }
+                    consignment_bytes = Some(field_bytes);
+                }
+            }
+        }
+        let consignment_bytes = consignment_bytes.ok_or(APIError::ConsignmentFileNotProvided)?;
+
+        // persist the received consignment and media to temp files and hand their paths to rgb-lib
+        let unlocked_state_copy = unlocked_state.clone();
+        let ldk_data_dir = state.static_state.ldk_data_dir.clone();
+        let refresh_result = tokio::task::spawn_blocking(
+            move || -> Result<HashMap<i32, RgbLibRefreshedTransfer>, APIError> {
+                let write_temp = |prefix: &str, bytes: &[u8]| -> Result<_, APIError> {
+                    let mut file = tempfile::Builder::new()
+                        .prefix(prefix)
+                        .tempfile_in(&ldk_data_dir)?;
+                    file.write_all(bytes)?;
+                    file.flush()?;
+                    Ok(file)
+                };
+
+                let consignment_file = write_temp("consignment_oob_", &consignment_bytes)?;
+                let consignment_path = consignment_file.path().to_string_lossy().to_string();
+
+                // the temp files must stay alive until rgb-lib has read them: a NamedTempFile
+                // deletes its file on drop, so hold the handles and derive the paths from them
+                let media_files = media_files_bytes
+                    .iter()
+                    .map(|bytes| write_temp("media_oob_", bytes))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let media_file_paths = media_files
+                    .iter()
+                    .map(|f| f.path().to_string_lossy().to_string())
+                    .collect();
+
+                unlocked_state_copy
+                    .rgb_provide_out_of_band_consignment(consignment_path, media_file_paths)
+                    .map_err(|e| match e {
+                        RgbLibError::InvalidFilePath { .. } => APIError::InvalidConsignment,
+                        other => other.into(),
+                    })
+            },
+        )
+        .await
+        .unwrap()?;
+
+        let transfers = refresh_result
+            .into_iter()
+            .map(|(idx, t)| (idx, t.into()))
+            .collect();
+
+        Ok(Json(ProvideOutOfBandConsignmentResponse { transfers }))
+    })
+    .await
+}
+
 pub(crate) async fn refresh_transfers(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<RefreshRequest>, APIError>,
@@ -3582,10 +3794,6 @@ pub(crate) async fn rgb_invoice(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
-
-        if payload.transport_endpoints.is_empty() {
-            unimplemented!("out-of-band RGB exchange is not supported yet");
-        }
 
         let assignment = payload.assignment.unwrap_or(Assignment::Any).into();
 
@@ -3895,15 +4103,6 @@ pub(crate) async fn send_rgb(
     no_cancel(async move {
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
-
-        if payload
-            .recipient_map
-            .values()
-            .flatten()
-            .any(|r| r.transport_endpoints.is_empty())
-        {
-            unimplemented!("out-of-band RGB exchange is not supported yet");
-        }
 
         let recipient_map: HashMap<String, Vec<RgbLibRecipient>> = payload
             .recipient_map

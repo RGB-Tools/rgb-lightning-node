@@ -242,6 +242,23 @@ impl UnlockedAppState {
             .list_unspents(settled_only, skip_sync)
     }
 
+    pub(crate) fn rgb_provide_out_of_band_ack(
+        &self,
+        recipient_id: String,
+    ) -> Result<Option<OperationResult>, RgbLibError> {
+        self.rgb_wallet_wrapper
+            .provide_out_of_band_ack(recipient_id)
+    }
+
+    pub(crate) fn rgb_provide_out_of_band_consignment(
+        &self,
+        consignment_path: String,
+        media_file_paths: Vec<String>,
+    ) -> Result<RefreshResult, RgbLibError> {
+        self.rgb_wallet_wrapper
+            .provide_out_of_band_consignment(consignment_path, media_file_paths)
+    }
+
     pub(crate) fn rgb_refresh(
         &self,
         asset_id: Option<String>,
@@ -612,6 +629,14 @@ impl RgbLibWalletWrapper {
         let online = if skip_sync { None } else { Some(self.online) };
         self.get_rgb_wallet()
             .list_unspents(online, settled_only, skip_sync)
+    }
+
+    pub(crate) fn provide_out_of_band_ack(
+        &self,
+        recipient_id: String,
+    ) -> Result<Option<OperationResult>, RgbLibError> {
+        self.get_rgb_wallet()
+            .provide_out_of_band_ack(self.online, recipient_id)
     }
 
     pub(crate) fn provide_out_of_band_consignment(
