@@ -1025,6 +1025,13 @@ impl From<RefreshFilter> for RgbLibRefreshFilter {
 }
 
 #[derive(Deserialize, Serialize)]
+pub(crate) struct RefreshRequest {
+    pub(crate) asset_id: Option<String>,
+    pub(crate) filter: Vec<RefreshFilter>,
+    pub(crate) skip_sync: bool,
+}
+
+#[derive(Deserialize, Serialize)]
 pub(crate) enum RefreshTransferStatus {
     WaitingCounterparty,
     WaitingConfirmations,
@@ -1037,13 +1044,6 @@ impl From<RefreshTransferStatus> for RgbLibRefreshTransferStatus {
             RefreshTransferStatus::WaitingConfirmations => Self::WaitingConfirmations,
         }
     }
-}
-
-#[derive(Deserialize, Serialize)]
-pub(crate) struct RefreshRequest {
-    pub(crate) asset_id: Option<String>,
-    pub(crate) filter: Vec<RefreshFilter>,
-    pub(crate) skip_sync: bool,
 }
 
 #[derive(Deserialize, Serialize)]
