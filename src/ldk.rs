@@ -1676,8 +1676,8 @@ async fn handle_ldk_events(
     Ok(())
 }
 
-impl OutputSpender for RgbOutputSpender {
-    fn spend_spendable_outputs(
+impl RgbOutputSpender {
+    fn try_spend_spendable_outputs(
         &self,
         descriptors: &[&SpendableOutputDescriptor],
         outputs: Vec<TxOut>,
@@ -1685,7 +1685,7 @@ impl OutputSpender for RgbOutputSpender {
         feerate_sat_per_1000_weight: u32,
         locktime: Option<LockTime>,
         secp_ctx: &Secp256k1<All>,
-    ) -> Result<bitcoin::Transaction, ()> {
+    ) -> Result<bitcoin::Transaction, String> {
         let mut hasher = DefaultHasher::new();
         descriptors.hash(&mut hasher);
         let descriptors_hash = hasher.finish();
@@ -1718,7 +1718,12 @@ impl OutputSpender for RgbOutputSpender {
                 continue;
             };
             let transfer_info = read_rgb_transfer_info(&transfer_info_path);
-            if transfer_info.rgb_amount == 0 {
+            let amt_rgb = transfer_info
+                .output_map
+                .get(&outpoint.index.into())
+                .copied()
+                .expect("transfer info covers every spendable output of the transaction");
+            if amt_rgb == 0 {
                 continue;
             }
 
@@ -1727,16 +1732,16 @@ impl OutputSpender for RgbOutputSpender {
             let closing_height = self
                 .rgb_wallet_wrapper
                 .get_tx_height(txid_str.clone())
-                .map_err(|_| ())?;
+                .map_err(|e| format!("cannot get height of {txid_str}: {e}"))?
+                .ok_or_else(|| format!("transaction {txid_str} is not confirmed yet"))?;
             let update_res = self
                 .rgb_wallet_wrapper
-                .update_witnesses(
-                    closing_height.unwrap(),
-                    vec![RgbTxid::from_str(&txid_str).unwrap()],
-                )
-                .unwrap();
+                .update_witnesses(closing_height, vec![RgbTxid::from_str(&txid_str).unwrap()])
+                .map_err(|e| format!("error while updating witnesses for {txid_str}: {e}"))?;
             if !update_res.failed.is_empty() {
-                return Err(());
+                return Err(format!(
+                    "failed to update witnesses for {txid_str}: {update_res:?}"
+                ));
             }
 
             let contract_id = transfer_info.contract_id;
@@ -1755,7 +1760,7 @@ impl OutputSpender for RgbOutputSpender {
                         vec![],
                         0,
                     )
-                    .unwrap();
+                    .map_err(|e| format!("cannot get a witness receive script: {e}"))?;
                 let script_pubkey = script_buf_from_recipient_id(receive_data.recipient_id.clone())
                     .unwrap()
                     .unwrap();
@@ -1765,8 +1770,6 @@ impl OutputSpender for RgbOutputSpender {
                 });
                 receive_data.recipient_id
             };
-
-            let amt_rgb = transfer_info.rgb_amount;
 
             asset_info
                 .entry(contract_id)
@@ -1781,14 +1784,17 @@ impl OutputSpender for RgbOutputSpender {
         }
 
         if vanilla_descriptor {
-            return self.keys_manager.spend_spendable_outputs(
-                descriptors.as_ref(),
-                txouts,
-                change_destination_script,
-                feerate_sat_per_1000_weight,
-                locktime,
-                secp_ctx,
-            );
+            return self
+                .keys_manager
+                .spend_spendable_outputs(
+                    descriptors.as_ref(),
+                    txouts,
+                    change_destination_script,
+                    feerate_sat_per_1000_weight,
+                    locktime,
+                    secp_ctx,
+                )
+                .map_err(|()| s!("cannot spend vanilla spendable outputs"));
         }
 
         let feerate_sat_per_1000_weight = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
@@ -1801,7 +1807,7 @@ impl OutputSpender for RgbOutputSpender {
                 feerate_sat_per_1000_weight,
                 locktime,
             )
-            .unwrap();
+            .map_err(|()| s!("cannot create the spendable outputs PSBT"))?;
 
         let mut asset_info_map = map![];
         for (contract_id, (vout, amt_rgb, _)) in asset_info.clone() {
@@ -1820,11 +1826,11 @@ impl OutputSpender for RgbOutputSpender {
             nonce: None,
         };
 
-        let mut psbt = RgbLibPsbt::from_str(&psbt.to_string()).unwrap();
+        let mut psbt = RgbLibPsbt::from_str(&psbt.to_string()).expect("valid PSBT");
         let consignments = self
             .rgb_wallet_wrapper
             .color_psbt_and_consume(&mut psbt, coloring_info)
-            .unwrap();
+            .expect("coloring matches the amounts assigned to the spent outputs");
 
         let mut psbt = Psbt::from_str(&psbt.to_string()).expect("valid transaction");
 
@@ -1854,26 +1860,48 @@ impl OutputSpender for RgbOutputSpender {
                 .join(format!("consignment_{closing_txid}_{contract_id}"));
             consignment
                 .save_file(&consignment_path)
-                .expect("successful save");
+                .map_err(|e| format!("cannot save consignment: {e}"))?;
             let consignment_path_str = consignment_path.to_string_lossy().to_string();
             let rgb_wallet_wrapper_copy = self.rgb_wallet_wrapper.clone();
-            let res = futures::executor::block_on(tokio::task::spawn_blocking(move || {
+            futures::executor::block_on(tokio::task::spawn_blocking(move || {
                 rgb_wallet_wrapper_copy
                     .provide_out_of_band_consignment(consignment_path_str, vec![])
-            }));
-            if let Err(e) = res {
-                tracing::error!("cannot provide consignment: {e}");
-                return Err(());
-            }
+            }))
+            .unwrap()
+            .map_err(|e| format!("cannot provide consignment: {e}"))?;
             fs::remove_file(&consignment_path).unwrap();
         }
 
         txes.insert(descriptors_hash, spending_tx.clone());
         self.fs_store
             .write("", "", OUTPUT_SPENDER_TXES, txes.encode())
-            .unwrap();
+            .map_err(|e| format!("cannot persist output spender txes: {e}"))?;
 
         Ok(spending_tx)
+    }
+}
+
+impl OutputSpender for RgbOutputSpender {
+    fn spend_spendable_outputs(
+        &self,
+        descriptors: &[&SpendableOutputDescriptor],
+        outputs: Vec<TxOut>,
+        change_destination_script: ScriptBuf,
+        feerate_sat_per_1000_weight: u32,
+        locktime: Option<LockTime>,
+        secp_ctx: &Secp256k1<All>,
+    ) -> Result<bitcoin::Transaction, ()> {
+        self.try_spend_spendable_outputs(
+            descriptors,
+            outputs,
+            change_destination_script,
+            feerate_sat_per_1000_weight,
+            locktime,
+            secp_ctx,
+        )
+        .map_err(|e| {
+            tracing::error!("cannot spend spendable outputs, will retry: {e}");
+        })
     }
 }
 
