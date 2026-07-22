@@ -25,8 +25,7 @@ async fn missing_acceptor() {
     let node3_info = node_info(node3_addr).await;
     let node3_pubkey = node3_info.pubkey;
 
-    *IGNORE_INBOUND_CHANNELS_ON_NODE.lock().unwrap() =
-        Some(PublicKey::from_str(&node2_pubkey).unwrap());
+    let ignore_guard = NodeOverrideGuard::set(&IGNORE_INBOUND_CHANNELS_ON_NODE, &node2_pubkey);
 
     // opening a channel where the acceptor is missing should not lock the funds
     let stuck_channel = open_channel_raw(
@@ -68,7 +67,7 @@ async fn missing_acceptor() {
     )
     .await;
 
-    *IGNORE_INBOUND_CHANNELS_ON_NODE.lock().unwrap() = None;
+    drop(ignore_guard);
 
     assert_eq!(list_channels(node1_addr).await.len(), 2);
 

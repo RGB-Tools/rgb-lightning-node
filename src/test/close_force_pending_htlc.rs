@@ -1,7 +1,3 @@
-use std::sync::atomic::Ordering;
-
-use crate::ldk::{HoldPaymentClaimableGuard, HELD_PAYMENT_CLAIMABLE_COUNT};
-
 use super::*;
 
 const TEST_DIR_BASE: &str = "tmp/close_force_pending_htlc/";
@@ -46,7 +42,8 @@ async fn close_force_pending_htlc() {
     let node2_spendable_before = spendable_sats(node2_addr).await;
 
     // node2 holds the incoming payment: the 10-asset HTLC stays pending.
-    let _hold_guard = HoldPaymentClaimableGuard::set(PublicKey::from_str(&node2_pubkey).unwrap());
+    HELD_PAYMENT_CLAIMABLE_COUNT.store(0, Ordering::SeqCst);
+    let _hold_guard = NodeOverrideGuard::set(&HOLD_PAYMENT_CLAIMABLE_ON_NODE, &node2_pubkey);
 
     let LNInvoiceResponse { invoice } = ln_invoice(
         node2_addr,
@@ -67,7 +64,7 @@ async fn close_force_pending_htlc() {
 
     // Force close from node2 with the HTLC held: its commitment carries it.
     close_channel(node2_addr, &channel.channel_id, &node1_pubkey, true).await;
-    let commitment_txid = confirmed_commitment_txid(&test_dir_node1, &channel.channel_id).await;
+    let commitment_txid = wait_for_funding_spend_txid(&test_dir_node1, &channel.channel_id).await;
     assert!(
         tx_output_sats(&commitment_txid).contains(&(crate::routes::HTLC_MIN_MSAT / 1000)),
         "confirmed commitment must carry the pending HTLC output"

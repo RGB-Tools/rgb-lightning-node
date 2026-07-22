@@ -20,7 +20,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use std::sync::{Mutex, Once, RwLock};
+use std::sync::{atomic::Ordering, Mutex, Once, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
@@ -28,7 +28,10 @@ use tracing_test::traced_test;
 
 use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
-use crate::ldk::{FEE_RATE, IGNORE_INBOUND_CHANNELS_ON_NODE};
+use crate::ldk::{
+    FEE_RATE, HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE,
+    IGNORE_INBOUND_CHANNELS_ON_NODE,
+};
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
@@ -120,6 +123,23 @@ impl Drop for ElectrsRestartGuard {
             .status()
             .expect("failed to stop electrs");
         assert!(status.success(), "failed to stop electrs");
+    }
+}
+
+// Sets a test-override static to a node's pubkey and clears it on drop, so a
+// panicking test cannot leak the override into the next one
+struct NodeOverrideGuard(&'static Mutex<Option<PublicKey>>);
+
+impl NodeOverrideGuard {
+    fn set(target: &'static Mutex<Option<PublicKey>>, node_pubkey: &str) -> Self {
+        *target.lock().unwrap() = Some(PublicKey::from_str(node_pubkey).unwrap());
+        Self(target)
+    }
+}
+
+impl Drop for NodeOverrideGuard {
+    fn drop(&mut self) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -445,15 +465,16 @@ async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: 
     }
 }
 
-/// Returns the txid of the confirmed commitment for the given channel.
-async fn confirmed_commitment_txid(node_test_dir: &str, channel_id: &str) -> String {
+// Waits until the channel's funding output is spent by a confirmed tx
+// (commitment or cooperative close) and returns the spending txid
+async fn wait_for_funding_spend_txid(node_test_dir: &str, channel_id: &str) -> String {
     let needle = format!("Channel {channel_id} closed by funding output spend in txid ");
     let t_0 = OffsetDateTime::now_utc();
     loop {
         let txid = ldk_log_lines(node_test_dir)
             .iter()
             .find_map(|l| l.split_once(&needle).map(|(_, rest)| rest.to_string()));
-        // a log line caught mid-write may be truncated, retry in that case
+        // defensive: a partially-flushed line would be shorter than a txid; retry rather than panic
         if let Some(txid) = txid {
             if txid.len() >= 64 {
                 return txid[..64].to_string();
@@ -933,7 +954,7 @@ async fn keysend_with_ln_balance(
     .await;
 }
 
-/// Lines of a node's LDK log file (empty if the log doesn't exist yet).
+// Lines of a node's LDK log file (empty if the log doesn't exist yet)
 fn ldk_log_lines(node_test_dir: &str) -> Vec<String> {
     let log_path = PathBuf::from(node_test_dir)
         .join(LDK_DIR)
@@ -1594,6 +1615,7 @@ async fn provide_out_of_band_consignment(
 }
 
 async fn refresh_transfers_raw(node_address: SocketAddr) -> Result<Response, reqwest::Error> {
+    println!("refreshing transfers for node {node_address}");
     let payload = RefreshRequest {
         asset_id: None,
         filter: vec![],
@@ -1607,7 +1629,6 @@ async fn refresh_transfers_raw(node_address: SocketAddr) -> Result<Response, req
 }
 
 async fn refresh_transfers(node_address: SocketAddr) -> RefreshResponse {
-    println!("refreshing transfers for node {node_address}");
     let res = refresh_transfers_raw(node_address).await.unwrap();
     check_response_is_ok(res)
         .await
@@ -1616,7 +1637,7 @@ async fn refresh_transfers(node_address: SocketAddr) -> RefreshResponse {
         .unwrap()
 }
 
-/// Best-effort refresh for nodes that may not be able to serve it yet.
+// Best-effort refresh for nodes that may not be able to serve it yet
 async fn refresh_transfers_tolerant(node_address: SocketAddr) {
     let _ = refresh_transfers_raw(node_address).await;
 }
@@ -1892,7 +1913,7 @@ async fn shutdown(node_sockets: &[SocketAddr]) {
     }
 }
 
-/// Total spendable BTC across the vanilla and colored wallets.
+// Total spendable BTC across the vanilla and colored wallets
 async fn spendable_sats(node_address: SocketAddr) -> u64 {
     let balance = btc_balance(node_address).await;
     balance.vanilla.spendable + balance.colored.spendable
@@ -1938,7 +1959,7 @@ async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
         .unwrap()
 }
 
-/// Output values (in sats) of an on-chain transaction.
+// Output values (in sats) of an on-chain transaction
 fn tx_output_sats(txid: &str) -> Vec<u64> {
     let output = Command::new("docker")
         .stdin(Stdio::null())
