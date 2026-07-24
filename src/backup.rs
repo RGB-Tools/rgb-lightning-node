@@ -13,8 +13,10 @@ use std::fs::{create_dir_all, read_to_string, remove_file, write, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
+
 use crate::error::APIError;
-use crate::utils::LOGS_DIR;
+use crate::utils::{DB_FILE_NAME, LOGS_DIR};
 
 const BACKUP_BUFFER_LEN_ENCRYPT: usize = 239; // 255 max, leaving 16 for the checksum
 const BACKUP_BUFFER_LEN_DECRYPT: usize = BACKUP_BUFFER_LEN_ENCRYPT + 16;
@@ -42,10 +44,11 @@ struct CypherSecrets {
 /// Scrypt is used for hashing and xchacha20poly1305 is used for encryption. A random salt for
 /// hashing and a random nonce for encrypting are randomly generated and included in the final
 /// backup file, along with the backup version
-pub(crate) fn do_backup(
+pub(crate) async fn do_backup(
     wallet_dir: &Path,
     backup_file: &Path,
     password: &str,
+    database: &DatabaseConnection,
 ) -> Result<(), APIError> {
     // setup
     tracing::info!("starting backup...");
@@ -67,9 +70,21 @@ pub(crate) fn do_backup(
         .collect();
     tracing::debug!("using generated nonce: {}", &nonce);
 
+    // snapshot the live DB transactionally; the live rln_db* files are skipped while zipping
+    let db_tempdir = tempfile::tempdir_in(&tmp_base_path)?;
+    let db_snapshot = db_tempdir.path().join(DB_FILE_NAME);
+    let vacuum_sql = format!(
+        "VACUUM INTO '{}'",
+        db_snapshot.display().to_string().replace('\'', "''")
+    );
+    database
+        .execute(Statement::from_string(DbBackend::Sqlite, vacuum_sql))
+        .await
+        .map_err(|e| APIError::Unexpected(format!("Failed to snapshot database: {e}")))?;
+
     // create zip archive of wallet data
     tracing::debug!("\nzipping {:?} to {:?}", &wallet_dir, &files.zip);
-    zip_dir(wallet_dir, &files.zip)?;
+    zip_dir(wallet_dir, &files.zip, Some(&db_snapshot))?;
 
     // encrypt the backup file
     tracing::debug!("\nencrypting {:?} to {:?}", &files.zip, &files.encrypted);
@@ -80,7 +95,7 @@ pub(crate) fn do_backup(
     write(files.salt, salt)?;
     write(files.version, BACKUP_VERSION.to_string())?;
     tracing::debug!("\nzipping {:?} to {:?}", &files.tempdir, &backup_file);
-    zip_dir(files.tempdir.path(), backup_file)?;
+    zip_dir(files.tempdir.path(), backup_file, None)?;
 
     tracing::info!("backup completed");
     Ok(())
@@ -152,7 +167,7 @@ fn get_parent_path(file: &Path) -> Result<PathBuf, APIError> {
     }
 }
 
-fn zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
+fn zip_dir(path_in: &Path, path_out: &Path, db_snapshot: Option<&Path>) -> Result<(), APIError> {
     // setup
     let writer = File::create(path_out)?;
     let mut zip = zip::ZipWriter::new(writer);
@@ -171,6 +186,12 @@ fn zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
             .ok_or_else(|| APIError::Unexpected(s!("Failed to convert file name to string")))?;
         if path.is_file() {
             if path.ends_with("log") {
+                continue;
+            }
+            // the live DB files are replaced by the transactional snapshot
+            if db_snapshot.is_some()
+                && (name_str == DB_FILE_NAME || name_str.starts_with(&format!("{DB_FILE_NAME}-")))
+            {
                 continue;
             }
             tracing::debug!("adding file {path:?} as {name:?}");
@@ -194,6 +215,23 @@ fn zip_dir(path_in: &Path, path_out: &Path) -> Result<(), APIError> {
             zip.add_directory(name_str, options).map_err(|e| {
                 APIError::Unexpected(format!("Failed to add directory to zip: {e}"))
             })?;
+        }
+    }
+
+    // append the DB snapshot under the canonical name
+    if let Some(db_snapshot) = db_snapshot {
+        tracing::debug!("adding DB snapshot {db_snapshot:?} as {DB_FILE_NAME:?}");
+        zip.start_file(DB_FILE_NAME, options).map_err(|e| {
+            APIError::Unexpected(format!("Failed creating file in the archive: {e}"))
+        })?;
+        let mut f = File::open(db_snapshot)?;
+        loop {
+            let read_count = f.read(&mut buffer)?;
+            if read_count != 0 {
+                zip.write_all(&buffer[..read_count])?;
+            } else {
+                break;
+            }
         }
     }
 

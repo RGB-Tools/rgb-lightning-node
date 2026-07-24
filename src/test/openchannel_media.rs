@@ -1,6 +1,7 @@
 use super::*;
 
-use lightning::rgb_utils::parse_rgb_channel_info;
+use crate::kv_store::SeaOrmKvStore;
+use lightning::rgb_utils::RgbKvStoreExt;
 
 const TEST_DIR_BASE: &str = "tmp/openchannel_media/";
 
@@ -51,10 +52,7 @@ async fn openchannel_media() {
     .await;
 
     // node2 didn't know the asset, so it asked for the media (accept_channel known_asset = false)
-    assert!(!counterparty_knows_asset(
-        &test_dir_node1,
-        &channel.channel_id
-    ));
+    assert!(!counterparty_knows_asset(&test_dir_node1, &channel.channel_id).await);
 
     // the acceptor now has the media
     let media_hex = get_asset_media(node2_addr, &digest).await;
@@ -76,10 +74,7 @@ async fn openchannel_media() {
         Some(&asset.asset_id),
     )
     .await;
-    assert!(counterparty_knows_asset(
-        &test_dir_node1,
-        &channel.channel_id
-    ));
+    assert!(counterparty_knows_asset(&test_dir_node1, &channel.channel_id).await);
 
     // and the media is still there and intact
     let media_hex = get_asset_media(node2_addr, &digest).await;
@@ -88,7 +83,13 @@ async fn openchannel_media() {
 
 // read the counterparty_knows_asset flag the node recorded in the channel's RgbInfo when it
 // received accept_channel
-fn counterparty_knows_asset(test_dir_node: &str, channel_id: &str) -> bool {
-    let info_path = PathBuf::from(test_dir_node).join(LDK_DIR).join(channel_id);
-    parse_rgb_channel_info(&info_path).counterparty_knows_asset
+async fn counterparty_knows_asset(test_dir_node: &str, channel_id: &str) -> bool {
+    let conn = crate::utils::connect_db(&crate::utils::get_db_path(Path::new(test_dir_node)))
+        .await
+        .unwrap();
+    let kv_store = SeaOrmKvStore::from_connection(Arc::new(conn));
+    kv_store
+        .read_rgb_channel_info(channel_id, false)
+        .unwrap()
+        .counterparty_knows_asset
 }

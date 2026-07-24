@@ -1,3 +1,4 @@
+use crate::kv_store::SeaOrmKvStore;
 use amplify::s;
 use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
@@ -10,27 +11,30 @@ use lightning::routing::router::{
 };
 use lightning::{
     onion_message::packet::OnionMessageContents,
-    sign::KeysManager,
+    util::persist::KVStoreSync,
     util::ser::{Writeable, Writer},
 };
-use lightning_persister::fs_store::FilesystemStore;
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
+use rln_migration::{Migrator, MigratorTrait};
+use sea_orm::sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
+use sea_orm::{DatabaseConnection, SqlxSqliteConnector};
 use std::{
     collections::HashSet,
     fmt::Write,
-    fs,
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, RwLock},
     time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
-use crate::ldk::{ChannelIdsMap, Router};
+use crate::ldk::{ChannelIdsMap, KeysManager, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::RgbFileTransferHandler;
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
@@ -46,6 +50,7 @@ use crate::{
 };
 
 pub(crate) const LDK_DIR: &str = ".ldk";
+pub(crate) const DB_FILE_NAME: &str = "rln_db";
 pub(crate) const LOGS_DIR: &str = "logs";
 pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 pub(crate) const ELECTRUM_URL_SIGNET: &str = "ssl://electrum.iriswallet.com:50033";
@@ -67,6 +72,10 @@ pub(crate) struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn get_db(&self) -> SeaOrmKvStore {
+        SeaOrmKvStore::from_connection(self.static_state.db())
+    }
+
     pub(crate) fn get_changing_state(&self) -> MutexGuard<'_, bool> {
         self.changing_state.lock().unwrap()
     }
@@ -94,6 +103,13 @@ pub(crate) struct StaticState {
     pub(crate) max_aggregated_media_size_per_channel_mb: u16,
     pub(crate) max_pending_consignments: usize,
     pub(crate) max_media_files_per_channel: usize,
+    database: RwLock<Arc<DatabaseConnection>>,
+}
+
+impl StaticState {
+    pub(crate) fn db(&self) -> Arc<DatabaseConnection> {
+        self.database.read().unwrap().clone()
+    }
 }
 
 pub(crate) struct UnlockedAppState {
@@ -106,7 +122,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) outbound_payments: Arc<Mutex<OutboundPaymentInfoStorage>>,
     pub(crate) peer_manager: Arc<PeerManager>,
     pub(crate) rgb_file_transfer_handler: Arc<RgbFileTransferHandler>,
-    pub(crate) fs_store: Arc<FilesystemStore>,
+    pub(crate) kv_store: Arc<SeaOrmKvStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) taker_swaps: Arc<Mutex<SwapMap>>,
@@ -159,8 +175,9 @@ impl Writeable for UserOnionMessageContents {
     }
 }
 
-pub(crate) fn check_already_initialized(mnemonic_path: &Path) -> Result<(), APIError> {
-    if mnemonic_path.exists() {
+pub(crate) fn check_already_initialized(database: &DatabaseConnection) -> Result<(), APIError> {
+    let db = SeaOrmKvStore::from_connection(Arc::new(database.clone()));
+    if db.is_initialized()? {
         return Err(APIError::AlreadyInitialized);
     }
     Ok(())
@@ -177,13 +194,13 @@ pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> 
 
 pub(crate) fn check_password_validity(
     password: &str,
-    storage_dir_path: &Path,
+    database: &DatabaseConnection,
 ) -> Result<Mnemonic, APIError> {
-    let mnemonic_path = get_mnemonic_path(storage_dir_path);
-    if let Ok(encrypted_mnemonic) = fs::read_to_string(mnemonic_path) {
+    let db = SeaOrmKvStore::from_connection(Arc::new(database.clone()));
+    if let Some(config) = db.get_config()? {
         let mcrypt = new_magic_crypt!(password, 256);
         let mnemonic_str = mcrypt
-            .decrypt_base64_to_string(encrypted_mnemonic)
+            .decrypt_base64_to_string(config.encrypted_mnemonic)
             .map_err(|_| APIError::WrongPassword)?;
         Ok(Mnemonic::from_str(&mnemonic_str).expect("valid mnemonic"))
     } else {
@@ -209,27 +226,21 @@ pub(crate) fn check_port_is_available(port: u16) -> Result<(), AppError> {
     Ok(())
 }
 
-pub(crate) fn get_mnemonic_path(storage_dir_path: &Path) -> PathBuf {
-    storage_dir_path.join("mnemonic")
+pub(crate) fn get_db_path(storage_dir_path: &Path) -> PathBuf {
+    storage_dir_path.join(DB_FILE_NAME)
 }
 
 pub(crate) fn encrypt_and_save_mnemonic(
     password: String,
     mnemonic: String,
-    mnemonic_path: &Path,
+    database: &DatabaseConnection,
 ) -> Result<(), APIError> {
     let mcrypt = new_magic_crypt!(password, 256);
     let encrypted_mnemonic = mcrypt.encrypt_str_to_base64(mnemonic);
-    match fs::write(mnemonic_path, encrypted_mnemonic) {
-        Ok(()) => {
-            tracing::info!("Created a new wallet");
-            Ok(())
-        }
-        Err(e) => Err(APIError::FailedKeysCreation(
-            mnemonic_path.to_string_lossy().to_string(),
-            e.to_string(),
-        )),
-    }
+    let db = SeaOrmKvStore::from_connection(Arc::new(database.clone()));
+    db.save_mnemonic(encrypted_mnemonic)?;
+    tracing::info!("Created a new wallet");
+    Ok(())
 }
 
 pub(crate) async fn connect_peer_if_necessary(
@@ -348,10 +359,59 @@ pub(crate) fn parse_peer_info(
     Ok((pubkey.unwrap(), peer_addr))
 }
 
+pub(crate) async fn connect_db(db_path: &Path) -> Result<DatabaseConnection, AppError> {
+    let connect_options = SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(Duration::from_secs(5))
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(8)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(5 * 60))
+        .max_lifetime(Duration::from_secs(60 * 60))
+        .connect_with(connect_options)
+        .await
+        .map_err(|e| {
+            AppError::IO(std::io::Error::other(format!(
+                "Database connection failed: {e}"
+            )))
+        })?;
+    Ok(SqlxSqliteConnector::from_sqlx_sqlite_pool(pool))
+}
+
+/// Closes the current connection pool and reopens it on the on-disk database, so no connection
+/// keeps serving the pre-restore file inode.
+pub(crate) async fn reconnect_db(static_state: &StaticState) -> Result<(), APIError> {
+    let old = static_state.db();
+    old.get_sqlite_connection_pool().close().await;
+    let db_path = get_db_path(&static_state.storage_dir_path);
+    let database = connect_db(&db_path)
+        .await
+        .map_err(|e| APIError::Unexpected(format!("failed to reopen database: {e:?}")))?;
+    Migrator::up(&database, None)
+        .await
+        .map_err(|e| APIError::Unexpected(format!("migration failed: {e}")))?;
+    *static_state.database.write().unwrap() = Arc::new(database);
+    Ok(())
+}
+
 pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppError> {
     // Initialize the Logger (creates ldk_data_dir and its logs directory)
     let ldk_data_dir = args.storage_dir_path.join(LDK_DIR);
     let logger = Arc::new(FilesystemLogger::new(ldk_data_dir.clone()));
+
+    let db_path = get_db_path(&args.storage_dir_path);
+    let database = connect_db(&db_path).await?;
+
+    Migrator::up(&database, None)
+        .await
+        .map_err(|e| AppError::IO(std::io::Error::other(format!("Migration failed: {e}"))))?;
+
+    tracing::info!(db_path = %db_path.display(), "Shared database initialized");
 
     let cancel_token = CancellationToken::new();
 
@@ -365,6 +425,7 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         max_aggregated_media_size_per_channel_mb: args.max_aggregated_media_size_per_channel_mb,
         max_pending_consignments: args.max_pending_consignments,
         max_media_files_per_channel: args.max_media_files_per_channel,
+        database: RwLock::new(Arc::new(database)),
     });
 
     let app_state = Arc::new(AppState {
@@ -377,7 +438,6 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         revoked_tokens: Arc::new(Mutex::new(HashSet::new())),
     });
 
-    // Load revoked tokens from file if authentication is enabled
     if app_state.root_public_key.is_some() {
         let loaded_tokens = app_state.load_revoked_tokens()?;
         *app_state.revoked_tokens.lock().unwrap() = loaded_tokens;
@@ -395,13 +455,13 @@ pub(crate) fn get_current_timestamp() -> u64 {
 
 pub(crate) fn get_max_local_rgb_amount<'r>(
     contract_id: ContractId,
-    ldk_data_dir_path: &Path,
     channels: impl Iterator<Item = &'r ChannelDetails>,
+    kv_store: &dyn KVStoreSync,
 ) -> u64 {
     let mut max_balance = 0;
     for chan_info in channels {
-        if let Some((rgb_info, _)) =
-            get_rgb_channel_info_optional(&chan_info.channel_id, ldk_data_dir_path, false)
+        if let Some(rgb_info) =
+            get_rgb_channel_info_optional(&chan_info.channel_id, false, kv_store)
         {
             if rgb_info.contract_id == contract_id && rgb_info.local_rgb_amount > max_balance {
                 max_balance = rgb_info.local_rgb_amount;
@@ -416,7 +476,7 @@ pub(crate) fn get_max_local_rgb_amount<'r>(
 pub(crate) fn get_route(
     channel_manager: &crate::ldk::ChannelManager,
     router: &crate::ldk::Router,
-    ldk_data_dir_path: &Path,
+    kv_store: &dyn KVStoreSync,
     start: PublicKey,
     dest: PublicKey,
     final_value_msat: Option<u64>,
@@ -431,8 +491,8 @@ pub(crate) fn get_route(
             .iter()
             .filter(|channel| match rgb_payment {
                 Some((contract_id, _)) => {
-                    get_rgb_channel_info_optional(&channel.channel_id, ldk_data_dir_path, false)
-                        .is_some_and(|(rgb_info, _)| rgb_info.contract_id == contract_id)
+                    get_rgb_channel_info_optional(&channel.channel_id, false, kv_store)
+                        .is_some_and(|rgb_info| rgb_info.contract_id == contract_id)
                 }
                 None => true,
             })

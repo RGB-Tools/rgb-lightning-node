@@ -2031,6 +2031,33 @@ async fn wait_for_ln_balance(node_address: SocketAddr, asset_id: &str, expected_
     }
 }
 
+async fn wait_for_channel_sat_balance(
+    node_address: SocketAddr,
+    channel_id: &str,
+    expected_balance: u64,
+) {
+    println!(
+        "waiting for channel {channel_id} local sat balance to become {expected_balance} \
+              on node {node_address}"
+    );
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node_address).await;
+        let balance = channels
+            .iter()
+            .find(|c| c.channel_id == channel_id)
+            .unwrap()
+            .local_balance_sat;
+        if balance == expected_balance {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 70.0 {
+            panic!("balance ({balance}) is not becoming the expected one ({expected_balance})");
+        }
+    }
+}
+
 async fn wait_for_usable_channels(node_address: SocketAddr, expected_num_usable_channels: usize) {
     let t_0 = OffsetDateTime::now_utc();
     loop {
@@ -2269,6 +2296,7 @@ mod inflate;
 mod init;
 mod invoice;
 mod issue;
+mod kv_store_write_ordering;
 mod lock_unlock_changepassword;
 mod missing_acceptor;
 mod multi_hop;
