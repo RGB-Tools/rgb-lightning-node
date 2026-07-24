@@ -149,42 +149,32 @@ async fn swap_roundtrip_sell() {
     let payments_taker = list_payments(taker_addr).await;
     assert!(payments_taker.is_empty());
 
-    let channels_1 = list_channels(node1_addr).await;
-    let channels_2 = list_channels(node2_addr).await;
-    let chan_1_12 = channels_1
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_1_21 = channels_1
-        .iter()
-        .find(|c| c.channel_id == channel_21.channel_id)
-        .unwrap();
-    let chan_2_12 = channels_2
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_2_21 = channels_2
-        .iter()
-        .find(|c| c.channel_id == channel_21.channel_id)
-        .unwrap();
     let btc_leg_diff = (HTLC_MIN_MSAT + qty_to) / 1000;
     let htlc_min_sat = HTLC_MIN_MSAT / 1000;
-    assert_eq!(
-        chan_1_12.local_balance_sat,
-        chan_1_12_before.local_balance_sat - btc_leg_diff
-    );
-    assert_eq!(
-        chan_1_21.local_balance_sat,
-        chan_1_21_before.local_balance_sat + htlc_min_sat
-    );
-    assert_eq!(
-        chan_2_12.local_balance_sat,
-        chan_2_12_before.local_balance_sat + btc_leg_diff
-    );
-    assert_eq!(
-        chan_2_21.local_balance_sat,
-        chan_2_21_before.local_balance_sat - htlc_min_sat
-    );
+    wait_for_channel_sat_balance(
+        node1_addr,
+        &channel_12.channel_id,
+        chan_1_12_before.local_balance_sat - btc_leg_diff,
+    )
+    .await;
+    wait_for_channel_sat_balance(
+        node1_addr,
+        &channel_21.channel_id,
+        chan_1_21_before.local_balance_sat + htlc_min_sat,
+    )
+    .await;
+    wait_for_channel_sat_balance(
+        node2_addr,
+        &channel_12.channel_id,
+        chan_2_12_before.local_balance_sat + btc_leg_diff,
+    )
+    .await;
+    wait_for_channel_sat_balance(
+        node2_addr,
+        &channel_21.channel_id,
+        chan_2_21_before.local_balance_sat - htlc_min_sat,
+    )
+    .await;
 
     println!("\nclose channels");
     close_channel(node1_addr, &channel_12.channel_id, &node2_pubkey, false).await;

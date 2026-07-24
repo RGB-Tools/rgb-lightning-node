@@ -107,24 +107,18 @@ async fn swap_reverse_same_channel() {
     let swap_taker = swaps_taker.taker.first().unwrap();
     assert_eq!(swap_taker.status, SwapStatus::Succeeded);
 
-    let channels_1 = list_channels(node1_addr).await;
-    let channels_2 = list_channels(node2_addr).await;
-    let chan_1_12 = channels_1
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    let chan_2_12 = channels_2
-        .iter()
-        .find(|c| c.channel_id == channel_12.channel_id)
-        .unwrap();
-    assert_eq!(
-        chan_1_12.local_balance_sat,
-        chan_1_12_before.local_balance_sat + qty_from / 1000
-    );
-    assert_eq!(
-        chan_2_12.local_balance_sat,
-        chan_2_12_before.local_balance_sat - qty_from / 1000
-    );
+    wait_for_channel_sat_balance(
+        node1_addr,
+        &channel_12.channel_id,
+        chan_1_12_before.local_balance_sat + qty_from / 1000,
+    )
+    .await;
+    wait_for_channel_sat_balance(
+        node2_addr,
+        &channel_12.channel_id,
+        chan_2_12_before.local_balance_sat - qty_from / 1000,
+    )
+    .await;
 
     println!("\nsetup reverse swap");
     let maker_addr = node2_addr;

@@ -81,7 +81,9 @@ async fn backup_and_restore() {
 
     restore(node1_addr, &node1_backup_path, &node1_password).await;
 
-    let ignores = RegexSet::new([r"log*"]).unwrap();
+    // the DB is backed up as a VACUUM snapshot, so it cannot be compared byte by byte;
+    // its content is verified by the assertions after the post-restore unlock
+    let ignores = RegexSet::new([r"log*", r"rln_db.*"]).unwrap();
     let cmp = dircmp::Comparison::new(ignores);
     let diff = cmp
         .compare(old_test_dir_node1_path, Path::new(&test_dir_node1))
