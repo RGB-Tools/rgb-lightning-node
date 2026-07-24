@@ -62,6 +62,44 @@ async fn close_force_pending_htlc() {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
+    // Restart the payer with the colored HTLC still pending: its channel must
+    // round-trip through persistence with the HTLC in flight.
+    shutdown(&[node1_addr]).await;
+    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node1_addr).await;
+        if channels
+            .iter()
+            .any(|c| c.channel_id == channel.channel_id && c.ready)
+        {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("channel not re-established after restart");
+        }
+    }
+
+    // Restart the payee as well: its side holds the same HTLC as pending
+    // inbound, covering the inbound deserialization path.
+    shutdown(&[node2_addr]).await;
+    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let channels = list_channels(node2_addr).await;
+        if channels
+            .iter()
+            .any(|c| c.channel_id == channel.channel_id && c.ready)
+        {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("channel not re-established after payee restart");
+        }
+    }
+
     // Force close from node2 with the HTLC held: its commitment carries it.
     close_channel(node2_addr, &channel.channel_id, &node1_pubkey, true).await;
     let commitment_txid = wait_for_funding_spend_txid(&test_dir_node1, &channel.channel_id).await;
