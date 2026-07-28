@@ -885,3 +885,25 @@ pub(crate) fn get_rgb_channel_info_optional(
     let rgb_info = parse_rgb_channel_info(&info_file_path);
     Some((rgb_info, info_file_path))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitcoin_network_serialization_round_trips() {
+        for network in [
+            BitcoinNetwork::Mainnet,
+            BitcoinNetwork::Testnet,
+            BitcoinNetwork::Testnet4,
+            BitcoinNetwork::Signet,
+            BitcoinNetwork::Regtest,
+            BitcoinNetwork::SignetCustom,
+        ] {
+            assert!(
+                Network::from_str(&network.to_string().to_lowercase()).is_ok(),
+                "{network:?} does not parse back"
+            );
+        }
+    }
+}
