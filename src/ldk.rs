@@ -130,6 +130,12 @@ pub(crate) static HOLD_PAYMENT_CLAIMABLE_ON_NODE: Mutex<Option<PublicKey>> = Mut
 #[cfg(test)]
 pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+// Test-only: the node with this pubkey emits a `push_asset_amount` greater than the channel asset
+// amount on the wire in `open_channel`, regardless of the value validated by its REST layer. Used
+// to model a channel counterparty whose wire client is not bound by the sender-side clamp.
+#[cfg(test)]
+pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
     peer_manager: Arc<PeerManager>,

@@ -79,6 +79,8 @@ use tokio::{
     sync::MutexGuard as TokioMutexGuard,
 };
 
+#[cfg(test)]
+use crate::ldk::FORCE_PUSH_ASSET_AMOUNT_ON_NODE;
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
@@ -3495,7 +3497,16 @@ pub(crate) async fn open_channel(
             let schema = unlocked_state
                 .rgb_get_asset_metadata(*contract_id)?
                 .asset_schema;
-            (Some((*contract_id, payload.push_asset_amount)), Some(schema))
+            #[cfg(not(test))]
+            let wire_push_asset_amount = payload.push_asset_amount;
+            #[cfg(test)]
+            let wire_push_asset_amount = match *FORCE_PUSH_ASSET_AMOUNT_ON_NODE.lock().unwrap() {
+                Some(node) if node == unlocked_state.channel_manager.get_our_node_id() => {
+                    Some(*asset_amount + 1)
+                }
+                _ => payload.push_asset_amount,
+            };
+            (Some((*contract_id, wire_push_asset_amount)), Some(schema))
         } else {
             let balance = unlocked_state.rgb_get_btc_balance(true)?;
             if payload.capacity_sat > balance.vanilla.spendable {

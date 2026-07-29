@@ -29,8 +29,8 @@ use tracing_test::traced_test;
 use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
 use crate::ldk::{
-    FEE_RATE, HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE,
-    IGNORE_INBOUND_CHANNELS_ON_NODE,
+    FEE_RATE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE, HELD_PAYMENT_CLAIMABLE_COUNT,
+    HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE,
 };
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
@@ -2281,6 +2281,7 @@ mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
 mod out_of_band;
 mod payment;
+mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
 mod restart;
 mod send_receive;
