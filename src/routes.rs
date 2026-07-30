@@ -3492,6 +3492,19 @@ pub(crate) async fn open_channel(
             if *asset_amount > balance.spendable {
                 return Err(APIError::InsufficientAssets);
             }
+            // funding the channel will need a colorable UTXO for the change allocation
+            if !unlocked_state
+                .rgb_list_unspents(false, true)?
+                .iter()
+                .any(|u| {
+                    u.utxo.colorable
+                        && u.utxo.exists
+                        && u.pending_blinded == 0
+                        && u.rgb_allocations.is_empty()
+                })
+            {
+                return Err(APIError::NoAvailableUtxos);
+            }
             let schema = unlocked_state
                 .rgb_get_asset_metadata(*contract_id)?
                 .asset_schema;
