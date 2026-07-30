@@ -21,6 +21,36 @@ async fn openchannel_fail() {
     let node2_info = node_info(node2_addr).await;
     let node2_pubkey = node2_info.pubkey;
 
+    // no colorable UTXO left for the change allocation
+    let res = open_channel_raw(
+        node1_addr,
+        &node2_pubkey,
+        Some(NODE2_PEER_PORT),
+        Some(31_000),
+        None,
+        Some(500),
+        Some(&asset_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+        true,
+    )
+    .await;
+    check_response_is_nok(
+        res.unwrap_err(),
+        reqwest::StatusCode::FORBIDDEN,
+        "No uncolored UTXOs are available",
+        "NoAvailableUtxos",
+    )
+    .await;
+
+    let channels_1 = list_channels(node1_addr).await;
+    let channels_2 = list_channels(node2_addr).await;
+    assert_eq!(channels_1.len(), 0);
+    assert_eq!(channels_2.len(), 0);
+
     // insufficient BTC funds
     let res = open_channel_raw(
         node1_addr,
