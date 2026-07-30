@@ -121,8 +121,9 @@ impl Drop for ElectrsRestartGuard {
             .arg("start")
             .arg("electrs")
             .status()
-            .expect("failed to stop electrs");
-        assert!(status.success(), "failed to stop electrs");
+            .expect("failed to start electrs");
+        assert!(status.success(), "failed to start electrs");
+        wait_electrs_sync();
     }
 }
 
@@ -2201,16 +2202,12 @@ fn wait_electrs_sync() {
     let blockcount = get_block_count();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let mut all_synced = true;
-        let electrum =
-            electrum_client::Client::new(ELECTRUM_URL).expect("cannot get electrum client");
-        if electrum.block_header(blockcount as usize).is_err() {
-            all_synced = false;
-        }
-        if all_synced {
+        let synced = electrum_client::Client::new(ELECTRUM_URL)
+            .is_ok_and(|electrum| electrum.block_header(blockcount as usize).is_ok());
+        if synced {
             break;
         };
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
             panic!("electrs not syncing with bitcoind");
         }
     }
