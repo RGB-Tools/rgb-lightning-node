@@ -97,6 +97,11 @@ async fn swap_roundtrip_buy() {
     assert_eq!(swap_taker.status, SwapStatus::Waiting);
 
     println!("\nexecute swap");
+    // the swap payment is routed in a circle, so the maker is also its final recipient: deferring
+    // the claim keeps both sides of the swap pending until the guard is dropped, instead of
+    // racing against a swap that can settle before the statuses below are checked
+    let maker_pubkey = node_info(maker_addr).await.pubkey;
+    let defer_guard = defer_payment_claimable(&maker_pubkey);
     maker_execute(
         maker_addr,
         maker_init_response.swapstring,
@@ -104,11 +109,22 @@ async fn swap_roundtrip_buy() {
         node2_pubkey.clone(),
     )
     .await;
+    wait_for_deferred_payment().await;
 
     let swaps_maker = list_swaps(maker_addr).await;
     assert_eq!(swaps_maker.maker.len(), 1);
     let swap_maker = swaps_maker.maker.first().unwrap();
     assert_eq!(swap_maker.status, SwapStatus::Pending);
+    wait_for_swap_status(
+        taker_addr,
+        &maker_init_response.payment_hash,
+        SwapStatus::Pending,
+    )
+    .await;
+
+    // both sides of the swap have been observed pending: let the swap settle
+    drop(defer_guard);
+
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,

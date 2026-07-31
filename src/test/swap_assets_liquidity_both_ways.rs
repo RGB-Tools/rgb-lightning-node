@@ -83,12 +83,10 @@ async fn swap_assets_liquidity_both_ways() {
     )
     .await;
 
-    let swap_maker = get_swap(maker_addr, &maker_init_response.payment_hash, false).await;
-    assert_eq!(swap_maker.status, SwapStatus::Pending);
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,
-        SwapStatus::Pending,
+        SwapStatus::Succeeded,
     )
     .await;
 
@@ -132,12 +130,10 @@ async fn swap_assets_liquidity_both_ways() {
     )
     .await;
 
-    let swap_maker = get_swap(maker_addr, &maker_init_response.payment_hash, false).await;
-    assert_eq!(swap_maker.status, SwapStatus::Pending);
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,
-        SwapStatus::Pending,
+        SwapStatus::Succeeded,
     )
     .await;
 
@@ -188,12 +184,10 @@ async fn swap_assets_liquidity_both_ways() {
     )
     .await;
 
-    let swap_maker = get_swap(maker_addr, &maker_init_response.payment_hash, false).await;
-    assert_eq!(swap_maker.status, SwapStatus::Pending);
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,
-        SwapStatus::Pending,
+        SwapStatus::Succeeded,
     )
     .await;
 

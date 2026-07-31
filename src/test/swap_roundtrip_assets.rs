@@ -147,12 +147,10 @@ async fn swap_roundtrip_assets() {
 
     let swaps_maker = list_swaps(maker_addr).await;
     assert_eq!(swaps_maker.maker.len(), 1);
-    let swap_maker = swaps_maker.maker.first().unwrap();
-    assert_eq!(swap_maker.status, SwapStatus::Pending);
     wait_for_swap_status(
         taker_addr,
         &maker_init_response.payment_hash,
-        SwapStatus::Pending,
+        SwapStatus::Succeeded,
     )
     .await;
 

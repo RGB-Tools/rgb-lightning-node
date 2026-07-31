@@ -69,6 +69,9 @@ async fn concurrent_btc_payments() {
     let LNInvoiceResponse { invoice: invoice_2 } =
         ln_invoice(node1_addr, Some(amt_msat_2), None, None, 900).await;
 
+    // node1 defers claiming, so the payments cannot settle before they are checked below
+    let defer_guard = defer_payment_claimable(&node1_pubkey);
+
     // send payments
     let payload_1 = SendPaymentRequest {
         invoice: invoice_1.clone(),
@@ -102,9 +105,13 @@ async fn concurrent_btc_payments() {
         .unwrap();
 
     // check there are 2 concurrent pending payments
+    wait_for_deferred_payment().await;
     let payments_1 = list_payments(node1_addr).await;
     assert_eq!(payments_1.len(), 2);
     assert!(payments_1.iter().all(|p| p.status == HTLCStatus::Pending));
+
+    // let node1 claim, so the payments can settle
+    drop(defer_guard);
 
     // wait for payments to have succeeded
     let t_0 = OffsetDateTime::now_utc();

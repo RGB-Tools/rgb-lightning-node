@@ -88,6 +88,8 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+#[cfg(test)]
+use std::time::Instant;
 use std::time::{Duration, SystemTime};
 use time::OffsetDateTime;
 use tokio::runtime::Handle;
@@ -118,6 +120,23 @@ pub(crate) const MIN_CHANNEL_CONFIRMATIONS: u8 = 6;
 const RGB_TRANSFER_CHAN_EXPIRATION_SECS: u64 = 86400;
 const VANILLA_SYNC_LOOKBACK: u32 = 20;
 
+// Test-only: while set, the node with this pubkey defers claiming incoming payments; handling of
+// the PaymentClaimable event is suspended until the gate is cleared
+#[cfg(test)]
+pub(crate) static DEFER_PAYMENT_CLAIMABLE_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
+// Test-only: whether a payment has been deferred via DEFER_PAYMENT_CLAIMABLE_ON_NODE since the
+// gate was set. This is a flag rather than a count because a node handles its events sequentially:
+// while a PaymentClaimable is being deferred no further event is handled, so at most one payment
+// can be deferred at a time
+#[cfg(test)]
+pub(crate) static PAYMENT_CLAIMABLE_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+// Test-only: a payment is never deferred for longer than this, so that a test failing to release
+// the gate fails on its own assertions instead of hanging the node's event handling
+#[cfg(test)]
+const MAX_PAYMENT_DEFERRAL: Duration = Duration::from_secs(60);
+
 #[cfg(test)]
 pub(crate) static IGNORE_INBOUND_CHANNELS_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
@@ -135,6 +154,19 @@ pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0
 // to model a channel counterparty whose wire client is not bound by the sender-side clamp.
 #[cfg(test)]
 pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
+// Test-only: whether the given override targets the node we are running as
+#[cfg(test)]
+pub(crate) fn node_override_matches(
+    target: &Mutex<Option<PublicKey>>,
+    our_node_id: PublicKey,
+) -> bool {
+    target
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|id| *id == our_node_id)
+}
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -996,15 +1028,31 @@ async fn handle_ldk_events(
                 amount_msat,
             );
             #[cfg(test)]
-            if HOLD_PAYMENT_CLAIMABLE_ON_NODE
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|id| *id == unlocked_state.channel_manager.get_our_node_id())
-            {
+            if node_override_matches(
+                &HOLD_PAYMENT_CLAIMABLE_ON_NODE,
+                unlocked_state.channel_manager.get_our_node_id(),
+            ) {
                 tracing::info!("TEST: holding PaymentClaimable for {}", payment_hash);
                 HELD_PAYMENT_CLAIMABLE_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 return Ok(());
+            }
+            #[cfg(test)]
+            {
+                let our_node_id = unlocked_state.channel_manager.get_our_node_id();
+                if node_override_matches(&DEFER_PAYMENT_CLAIMABLE_ON_NODE, our_node_id) {
+                    tracing::info!("TEST: deferring PaymentClaimable for {}", payment_hash);
+                    PAYMENT_CLAIMABLE_DEFERRED.store(true, Ordering::SeqCst);
+                    let deferred_at = Instant::now();
+                    while node_override_matches(&DEFER_PAYMENT_CLAIMABLE_ON_NODE, our_node_id) {
+                        if deferred_at.elapsed() > MAX_PAYMENT_DEFERRAL {
+                            panic!(
+                                "TEST: PaymentClaimable for {payment_hash} deferred for too long"
+                            )
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    tracing::info!("TEST: resuming PaymentClaimable for {}", payment_hash);
+                }
             }
             let payment_preimage = match purpose {
                 PaymentPurpose::Bolt11InvoicePayment {
@@ -1132,12 +1180,10 @@ async fn handle_ldk_events(
             ..
         } => {
             #[cfg(test)]
-            if IGNORE_INBOUND_CHANNELS_ON_NODE
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|id| *id == unlocked_state.channel_manager.get_our_node_id())
-            {
+            if node_override_matches(
+                &IGNORE_INBOUND_CHANNELS_ON_NODE,
+                unlocked_state.channel_manager.get_our_node_id(),
+            ) {
                 tracing::info!(
                     "TEST: ignoring inbound channel {} from {}",
                     temporary_channel_id,

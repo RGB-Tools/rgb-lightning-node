@@ -80,7 +80,7 @@ use tokio::{
 };
 
 #[cfg(test)]
-use crate::ldk::FORCE_PUSH_ASSET_AMOUNT_ON_NODE;
+use crate::ldk::{node_override_matches, FORCE_PUSH_ASSET_AMOUNT_ON_NODE};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
@@ -3500,11 +3500,13 @@ pub(crate) async fn open_channel(
             #[cfg(not(test))]
             let wire_push_asset_amount = payload.push_asset_amount;
             #[cfg(test)]
-            let wire_push_asset_amount = match *FORCE_PUSH_ASSET_AMOUNT_ON_NODE.lock().unwrap() {
-                Some(node) if node == unlocked_state.channel_manager.get_our_node_id() => {
-                    Some(*asset_amount + 1)
-                }
-                _ => payload.push_asset_amount,
+            let wire_push_asset_amount = if node_override_matches(
+                &FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
+                unlocked_state.channel_manager.get_our_node_id(),
+            ) {
+                Some(*asset_amount + 1)
+            } else {
+                payload.push_asset_amount
             };
             (Some((*contract_id, wire_push_asset_amount)), Some(schema))
         } else {
