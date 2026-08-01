@@ -62,6 +62,9 @@ pub enum APIError {
     #[error("Consignment not found")]
     ConsignmentNotFound,
 
+    #[error("The stored mnemonic is corrupted: {0}")]
+    CorruptedMnemonic(String),
+
     #[error("Another payment for this invoice is already in status {0}")]
     DuplicatePayment(String),
 
@@ -446,7 +449,8 @@ impl From<RgbLibError> for APIError {
 impl APIError {
     fn status_code(&self) -> StatusCode {
         match self {
-            APIError::FailedClosingChannel(_)
+            APIError::CorruptedMnemonic(_)
+            | APIError::FailedClosingChannel(_)
             | APIError::FailedInvoiceCreation(_)
             | APIError::FailedIssuingAsset(_)
             | APIError::FailedKeysCreation(_, _)

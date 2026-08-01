@@ -33,7 +33,6 @@ lightning-macros = { version = "0.2.0" }
 lightning-net-tokio = { version = "0.2.0" }
 lightning-persister = { version = "0.2.0", path = "./rust-lightning/lightning-persister", features = ["tokio"] }
 lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/lightning-rapid-gossip-sync" }
-magic-crypt = "4.0.1"
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
 rgb-lib = { version = "=0.3.0-beta.7", features = [
@@ -52,7 +51,6 @@ tower-http = { version = "0.6.1", features = ["cors", "limit", "trace"] }
 tracing = "0.1"
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-typenum = "1.17.0"
 uuid = { version = "1.11.0", default-features = false, features = ["v4"] }
 walkdir = "2.5.0"
 zip = { version = "2.2.0", default-features = false, features = ["time", "zstd"] }

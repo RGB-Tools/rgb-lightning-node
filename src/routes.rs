@@ -2239,6 +2239,7 @@ pub(crate) async fn init(
         };
 
         encrypt_and_save_mnemonic(payload.password, mnemonic.clone(), &mnemonic_path)?;
+        tracing::info!("Created a new wallet");
 
         Ok(Json(InitResponse { mnemonic }))
     })
