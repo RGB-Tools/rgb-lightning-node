@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::disk::FilesystemLogger;
-#[cfg(test)]
+#[cfg(all(test, feature = "electrum"))]
 use crate::test::mock_fee;
 
 pub struct BitcoindClient {
@@ -310,7 +310,7 @@ impl FeeEstimator for BitcoindClient {
             .get(&confirmation_target)
             .unwrap()
             .load(Ordering::Acquire);
-        #[cfg(test)]
+        #[cfg(all(test, feature = "electrum"))]
         let fee = mock_fee(fee);
         fee
     }

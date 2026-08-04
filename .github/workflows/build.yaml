@@ -41,3 +41,9 @@ jobs:
           rustflags: ""
       - name: Build
         run: cargo build --release
+      - name: Build (electrum only)
+        if: matrix.name == 'linux' && matrix.toolchain == 'stable'
+        run: cargo build --release --no-default-features --features electrum
+      - name: Build (esplora only)
+        if: matrix.name == 'linux' && matrix.toolchain == 'stable'
+        run: cargo build --release --no-default-features --features esplora

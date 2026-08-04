@@ -7,6 +7,13 @@ rust-version = "1.88.0"
 [[bin]]
 name = "rgb-lightning-node"
 
+[features]
+default = ["electrum", "esplora"]
+# support indexers implementing the electrum protocol
+electrum = ["rgb-lib/electrum", "lightning/electrum"]
+# support indexers implementing the esplora protocol
+esplora = ["rgb-lib/esplora", "lightning/esplora"]
+
 [dependencies]
 amplify = { version = "=4.8.1", default-features = false }
 anyhow = "1.0.93"
@@ -35,10 +42,7 @@ lightning-persister = { version = "0.2.0", path = "./rust-lightning/lightning-pe
 lightning-rapid-gossip-sync = { version = "0.2.0", path = "./rust-lightning/lightning-rapid-gossip-sync" }
 rand = "0.8.5"
 regex = { version = "1.11", default-features = false }
-rgb-lib = { version = "=0.3.0-beta.7", features = [
-    "electrum",
-    "esplora",
-] }
+rgb-lib = { version = "=0.3.0-beta.7", default-features = false }
 scrypt = "0.11.0"
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = "1.0"

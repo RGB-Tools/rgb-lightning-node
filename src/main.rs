@@ -1,3 +1,6 @@
+#[cfg(not(any(feature = "electrum", feature = "esplora")))]
+compile_error!("at least one of the `electrum` and `esplora` features needs to be enabled");
+
 mod args;
 mod auth;
 mod backup;
@@ -12,7 +15,8 @@ mod routes;
 mod swap;
 mod utils;
 
-#[cfg(test)]
+// the test suite drives a local electrs instance over the electrum protocol
+#[cfg(all(test, feature = "electrum"))]
 mod test;
 
 use anyhow::Result;

@@ -43,6 +43,21 @@ The docker image can be built with:
 docker build -t rgb-lightning-node .
 ```
 
+### Indexer support
+
+Support for the indexer protocols is behind cargo features, `electrum` and
+`esplora` (both enabled by default). At least one of them needs to be enabled.
+
+To support electrum indexers only:
+```sh
+cargo install --locked --path . --no-default-features --features electrum
+```
+
+To support esplora indexers only:
+```sh
+cargo install --locked --path . --no-default-features --features esplora
+```
+
 ## Run
 
 In order to operate, the node will need:
