@@ -111,7 +111,7 @@ use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
     hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4,
+    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, FATAL_ERROR,
 };
 
 pub(crate) const FEE_RATE: u64 = 7;
@@ -2533,7 +2533,7 @@ pub(crate) async fn start_ldk(
 
     // Background Processing
     let (bp_exit, bp_exit_check) = tokio::sync::watch::channel(());
-    let background_processor = tokio::spawn(process_events_async(
+    let bp_fut = process_events_async(
         persister,
         event_handler,
         chain_monitor.clone(),
@@ -2562,7 +2562,21 @@ pub(crate) async fn start_ldk(
                     .unwrap(),
             )
         },
-    ));
+    );
+    let background_processor = tokio::spawn({
+        let stop = Arc::clone(&stop_processing);
+        let cancel = app_state.cancel_token.clone();
+        async move {
+            let res = bp_fut.await;
+            if !stop.load(Ordering::Acquire) {
+                let msg = format!("background processor exited: {res:?}");
+                tracing::error!("{msg}");
+                let _ = FATAL_ERROR.set(msg);
+                cancel.cancel();
+            }
+            res
+        }
+    });
 
     // Regularly reconnect to channel peers.
     let connect_cm = Arc::clone(&channel_manager);

@@ -57,7 +57,7 @@ use crate::routes::{
     send_btc, send_onion_message, send_payment, send_rgb, shutdown, sign_message, sync, taker,
     unlock,
 };
-use crate::utils::{start_daemon, AppState, LOGS_DIR};
+use crate::utils::{start_daemon, AppState, FATAL_ERROR, LOGS_DIR};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -87,12 +87,26 @@ async fn main() -> Result<()> {
 
     let (router, app_state) = app(args).await?;
 
+    let default_panic_hook = std::panic::take_hook();
+    let cancel_token = app_state.cancel_token.clone();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        tracing::error!("{panic_info}");
+        let _ = FATAL_ERROR.set(panic_info.to_string());
+        cancel_token.cancel();
+        default_panic_hook(panic_info);
+    }));
+
     tracing::info!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal(app_state))
         .await
         .unwrap();
+
+    if let Some(fatal_error) = FATAL_ERROR.get() {
+        tracing::error!("Shutting down due to fatal error: {fatal_error}");
+        std::process::exit(70); // sysexits EX_SOFTWARE
+    }
 
     Ok(())
 }

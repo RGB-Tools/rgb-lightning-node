@@ -23,7 +23,7 @@ use std::{
     path::Path,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
@@ -55,6 +55,8 @@ pub(crate) const ELECTRUM_URL_MAINNET: &str = "ssl://electrum.iriswallet.com:500
 #[cfg(test)]
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
 const PASSWORD_MIN_LENGTH: u8 = 8;
+
+pub(crate) static FATAL_ERROR: OnceLock<String> = OnceLock::new();
 
 pub(crate) struct AppState {
     pub(crate) static_state: Arc<StaticState>,
