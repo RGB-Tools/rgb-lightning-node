@@ -800,8 +800,7 @@ impl ChangeDestinationSource for RgbLibWalletWrapper {
 impl WalletSource for RgbLibWalletWrapper {
     fn list_confirmed_utxos<'a>(&'a self) -> AsyncResult<'a, Vec<Utxo>, ()> {
         Box::pin(async move {
-            let network =
-                Network::from_str(&self.bitcoin_network().to_string().to_lowercase()).unwrap();
+            let network: Network = self.bitcoin_network().into();
             let mut wallet = self.wallet.lock().unwrap();
             Ok(wallet.list_unspents_vanilla(self.online, 1, false).unwrap().iter().filter_map(|u| {
             let script = u.txout.script_pubkey.clone().into_boxed_script();
