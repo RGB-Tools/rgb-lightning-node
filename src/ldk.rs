@@ -110,8 +110,7 @@ use crate::routes::{HTLCStatus, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
-    hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4,
+    hex_str, AppState, StaticState, UnlockedAppState,
 };
 use crate::FATAL_ERROR;
 
@@ -1982,28 +1981,12 @@ pub(crate) async fn start_ldk(
     }
 
     // RGB setup
-    let indexer_url = if let Some(indexer_url) = &unlock_request.indexer_url {
-        let indexer_protocol = check_indexer_url(indexer_url, bitcoin_network)?;
-        tracing::info!(
-            "Connected to an indexer with the {} protocol",
-            indexer_protocol
-        );
-        indexer_url
-    } else {
-        tracing::info!("Using the default indexer");
-        match bitcoin_network {
-            BitcoinNetwork::Regtest => ELECTRUM_URL_REGTEST,
-            BitcoinNetwork::Signet => ELECTRUM_URL_SIGNET,
-            BitcoinNetwork::Testnet => ELECTRUM_URL_TESTNET,
-            BitcoinNetwork::Testnet4 => ELECTRUM_URL_TESTNET4,
-            BitcoinNetwork::Mainnet => ELECTRUM_URL_MAINNET,
-            BitcoinNetwork::SignetCustom => {
-                return Err(APIError::InvalidIndexer(s!(
-                    "with custom signet indexer must be provided"
-                )))
-            }
-        }
-    };
+    let indexer_url = &unlock_request.indexer_url;
+    let indexer_protocol = check_indexer_url(indexer_url, bitcoin_network)?;
+    tracing::info!(
+        "Connected to an indexer with the {} protocol",
+        indexer_protocol
+    );
     let storage_dir_path = app_state.static_state.storage_dir_path.clone();
     fs::write(storage_dir_path.join(INDEXER_URL_FNAME), indexer_url).expect("able to write");
 

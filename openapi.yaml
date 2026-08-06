@@ -3440,6 +3440,7 @@ components:
         - bitcoind_rpc_password
         - bitcoind_rpc_host
         - bitcoind_rpc_port
+        - indexer_url
         - announce_addresses
       properties:
         password:
@@ -3458,9 +3459,7 @@ components:
           type: integer
           example: 18443
         indexer_url:
-          type:
-            - string
-            - 'null'
+          type: string
           example: 127.0.0.1:50001
         announce_addresses:
           type: array

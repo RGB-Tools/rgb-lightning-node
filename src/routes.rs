@@ -1468,7 +1468,7 @@ pub(crate) struct UnlockRequest {
     pub(crate) bitcoind_rpc_password: String,
     pub(crate) bitcoind_rpc_host: String,
     pub(crate) bitcoind_rpc_port: u16,
-    pub(crate) indexer_url: Option<String>,
+    pub(crate) indexer_url: String,
     pub(crate) announce_addresses: Vec<String>,
     pub(crate) announce_alias: Option<String>,
 }

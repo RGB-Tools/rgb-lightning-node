@@ -1981,7 +1981,7 @@ fn unlock_req(password: &str) -> UnlockRequest {
         bitcoind_rpc_password: s!("password"),
         bitcoind_rpc_host: s!("localhost"),
         bitcoind_rpc_port: 18443,
-        indexer_url: Some(ELECTRUM_URL_REGTEST.to_string()),
+        indexer_url: ELECTRUM_URL_REGTEST.to_string(),
         announce_addresses: vec![],
         announce_alias: Some(s!("RLN_alias")),
     }
