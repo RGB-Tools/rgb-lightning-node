@@ -24,7 +24,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant},
+};
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -57,7 +61,12 @@ use crate::routes::{
     send_btc, send_onion_message, send_payment, send_rgb, shutdown, sign_message, sync, taker,
     unlock,
 };
-use crate::utils::{start_daemon, AppState, FATAL_ERROR, LOGS_DIR};
+use crate::utils::{start_daemon, AppState, LOGS_DIR};
+
+pub(crate) static FATAL_ERROR: OnceLock<String> = OnceLock::new();
+
+// how long a fatal shutdown waits for an in-progress state change (unlock or lock)
+const STATE_CHANGE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -105,6 +114,9 @@ async fn main() -> Result<()> {
 
     if let Some(fatal_error) = FATAL_ERROR.get() {
         tracing::error!("Shutting down due to fatal error: {fatal_error}");
+        // `process::exit` runs no destructors, so the file logger has to be flushed by hand:
+        // dropping the guard waits for the appender to write out what is still buffered
+        drop(_guard);
         std::process::exit(70); // sysexits EX_SOFTWARE
     }
 
@@ -259,11 +271,23 @@ async fn shutdown_signal(app_state: Arc<AppState>) {
     tracing::info!("Received a shutdown signal");
 
     let app_state_copy = app_state.clone();
+    // only a fatal shutdown gives up on an in-progress state change: nobody is waiting for the
+    // node and the exit code still has to be reported, so it cannot wait forever
+    let deadline = FATAL_ERROR
+        .get()
+        .map(|_| Instant::now() + STATE_CHANGE_SHUTDOWN_TIMEOUT);
     loop {
         {
             if app_state_copy.wait_state_change() {
                 break;
             }
+        }
+        if deadline.is_some_and(|deadline| Instant::now() > deadline) {
+            tracing::warn!(
+                "State change did not complete within {}s, shutting down anyway",
+                STATE_CHANGE_SHUTDOWN_TIMEOUT.as_secs()
+            );
+            break;
         }
         tracing::info!("Will shutdown after change state is complete");
         tokio::time::sleep(Duration::from_millis(300)).await;

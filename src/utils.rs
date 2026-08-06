@@ -23,7 +23,7 @@ use std::{
     path::Path,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard, OnceLock},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, SystemTime},
 };
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
@@ -56,8 +56,6 @@ pub(crate) const ELECTRUM_URL_MAINNET: &str = "ssl://electrum.iriswallet.com:500
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
 const PASSWORD_MIN_LENGTH: u8 = 8;
 
-pub(crate) static FATAL_ERROR: OnceLock<String> = OnceLock::new();
-
 pub(crate) struct AppState {
     pub(crate) static_state: Arc<StaticState>,
     pub(crate) cancel_token: CancellationToken,
@@ -70,13 +68,17 @@ pub(crate) struct AppState {
 
 impl AppState {
     pub(crate) fn get_changing_state(&self) -> MutexGuard<'_, bool> {
-        self.changing_state.lock().unwrap()
+        self.changing_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) // propagate the poison
     }
 
     pub(crate) fn get_ldk_background_services(
         &self,
     ) -> MutexGuard<'_, Option<LdkBackgroundServices>> {
-        self.ldk_background_services.lock().unwrap()
+        self.ldk_background_services
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) // propagate the poison
     }
 
     pub(crate) async fn get_unlocked_app_state(
@@ -310,7 +312,10 @@ where
         let result = fut.await;
         let _ = tx.send(result);
     });
-    rx.await.unwrap()
+    // the sender is only dropped without sending if the spawned task panicked, in which case the
+    // panic hook has already logged the cause and started the shutdown
+    rx.await
+        .expect("request task panicked, see the preceding panic for the cause")
 }
 
 pub(crate) fn parse_peer_info(

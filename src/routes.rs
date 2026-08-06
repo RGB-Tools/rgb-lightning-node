@@ -1552,6 +1552,26 @@ impl AppState {
     }
 }
 
+/// Marks the node as changing state for as long as it is alive.
+///
+/// The flag has to be cleared on every exit path, including an unwind: shutdown waits for the
+/// state change to complete, so a flag left set by a panic would hang the shutdown instead of
+/// letting the node exit.
+struct ChangingStateGuard(Arc<AppState>);
+
+impl ChangingStateGuard {
+    fn new(app_state: Arc<AppState>) -> Self {
+        app_state.update_changing_state(true);
+        Self(app_state)
+    }
+}
+
+impl Drop for ChangingStateGuard {
+    fn drop(&mut self) {
+        self.0.update_changing_state(false);
+    }
+}
+
 pub(crate) async fn address(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<AddressResponse>, APIError> {
@@ -2961,16 +2981,16 @@ pub(crate) async fn lock(
 ) -> Result<Json<EmptyResponse>, APIError> {
     tracing::info!("Lock started");
     no_cancel(async move {
-        match state.check_unlocked().await {
+        let _changing_state = match state.check_unlocked().await {
             Ok(unlocked_state) => {
-                state.update_changing_state(true);
+                let guard = ChangingStateGuard::new(state.clone());
                 drop(unlocked_state);
+                guard
             }
             Err(e) => {
-                state.update_changing_state(false);
                 return Err(e);
             }
-        }
+        };
 
         tracing::debug!("Stopping LDK...");
         stop_ldk(state.clone()).await;
@@ -2979,8 +2999,6 @@ pub(crate) async fn lock(
         state.update_unlocked_app_state(None).await;
 
         state.update_ldk_background_services(None);
-
-        state.update_changing_state(false);
 
         tracing::info!("Lock completed");
         Ok(Json(EmptyResponse {}))
@@ -4239,10 +4257,11 @@ pub(crate) async fn unlock(
 ) -> Result<Json<EmptyResponse>, APIError> {
     tracing::info!("Unlock started");
     no_cancel(async move {
-        match state.check_locked().await {
+        let _changing_state = match state.check_locked().await {
             Ok(unlocked_state) => {
-                state.update_changing_state(true);
+                let guard = ChangingStateGuard::new(state.clone());
                 drop(unlocked_state);
+                guard
             }
             Err(e) => {
                 return Err(match e {
@@ -4250,28 +4269,14 @@ pub(crate) async fn unlock(
                     _ => e,
                 });
             }
-        }
-
-        let mnemonic = match check_password_validity(
-            &payload.password,
-            &state.static_state.storage_dir_path,
-        ) {
-            Ok(mnemonic) => mnemonic,
-            Err(e) => {
-                state.update_changing_state(false);
-                return Err(e);
-            }
         };
+
+        let mnemonic =
+            check_password_validity(&payload.password, &state.static_state.storage_dir_path)?;
 
         tracing::debug!("Starting LDK...");
         let (new_ldk_background_services, new_unlocked_app_state) =
-            match start_ldk(state.clone(), mnemonic, payload).await {
-                Ok((nlbs, nuap)) => (nlbs, nuap),
-                Err(e) => {
-                    state.update_changing_state(false);
-                    return Err(e);
-                }
-            };
+            start_ldk(state.clone(), mnemonic, payload).await?;
         tracing::debug!("LDK started");
 
         state
@@ -4279,8 +4284,6 @@ pub(crate) async fn unlock(
             .await;
 
         state.update_ldk_background_services(Some(new_ldk_background_services));
-
-        state.update_changing_state(false);
 
         tracing::info!("Unlock completed");
         Ok(Json(EmptyResponse {}))

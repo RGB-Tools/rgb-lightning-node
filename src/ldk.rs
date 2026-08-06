@@ -111,8 +111,9 @@ use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
     hex_str, AppState, StaticState, UnlockedAppState, ELECTRUM_URL_MAINNET, ELECTRUM_URL_REGTEST,
-    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4, FATAL_ERROR,
+    ELECTRUM_URL_SIGNET, ELECTRUM_URL_TESTNET, ELECTRUM_URL_TESTNET4,
 };
+use crate::FATAL_ERROR;
 
 pub(crate) const FEE_RATE: u64 = 7;
 pub(crate) const UTXO_SIZE_SAT: u32 = 32000;
@@ -2720,9 +2721,11 @@ impl AppState {
             .store(true, Ordering::Release);
         ldk_background_services.peer_manager.disconnect_all_peers();
 
-        // Stop the background processor.
+        // Stop the background processor. Its `bp_exit` receiver lives inside the
+        // `process_events_async` future, so nothing to signal if the background processor is
+        // already gone. Also, send can find no receiver during a panic (racy).
         if !ldk_background_services.bp_exit.is_closed() {
-            ldk_background_services.bp_exit.send(()).unwrap();
+            let _ = ldk_background_services.bp_exit.send(());
             ldk_background_services.background_processor.take()
         } else {
             None
@@ -2734,7 +2737,13 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     tracing::info!("Stopping LDK");
 
     if let Some(join_handle) = app_state.stop_ldk() {
-        join_handle.await.unwrap().unwrap();
+        // this runs while shutting down, possibly because the background processor itself died,
+        // so its outcome is reported instead of unwrapped
+        match join_handle.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::error!("Background processor returned an error: {e}"),
+            Err(e) => tracing::error!("Background processor task did not complete: {e}"),
+        }
     }
 
     // connect to the peer port so it can be released
@@ -2749,7 +2758,8 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
             break;
         }
         if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("LDK peer port not being released")
+            tracing::error!("LDK peer port {peer_port} was not released within 10s");
+            break;
         }
     }
 
