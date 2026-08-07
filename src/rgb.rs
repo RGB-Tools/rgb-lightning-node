@@ -789,7 +789,10 @@ impl RgbLibWalletWrapper {
 impl ChangeDestinationSource for RgbLibWalletWrapper {
     fn get_change_destination_script<'a>(&'a self) -> AsyncResult<'a, ScriptBuf, ()> {
         Box::pin(async move {
-            Ok(Address::from_str(&self.get_address().unwrap())
+            let address = self.get_address().map_err(|e| {
+                tracing::error!("cannot get a change address to sweep outputs, will retry: {e}");
+            })?;
+            Ok(Address::from_str(&address)
                 .unwrap()
                 .assume_checked()
                 .script_pubkey())
@@ -802,7 +805,14 @@ impl WalletSource for RgbLibWalletWrapper {
         Box::pin(async move {
             let network: Network = self.bitcoin_network().into();
             let mut wallet = self.wallet.lock().unwrap();
-            Ok(wallet.list_unspents_vanilla(self.online, 1, false).unwrap().iter().filter_map(|u| {
+            let unspents = wallet
+                .list_unspents_vanilla(self.online, 1, false)
+                .map_err(|e| {
+                    tracing::error!(
+                        "cannot list the wallet UTXOs to bump a transaction fee, will retry: {e}"
+                    );
+                })?;
+            Ok(unspents.iter().filter_map(|u| {
             let script = u.txout.script_pubkey.clone().into_boxed_script();
             let address = Address::from_script(&script, network).unwrap();
             let outpoint = OutPoint::from_str(&u.outpoint.to_string()).unwrap();
@@ -837,12 +847,15 @@ impl WalletSource for RgbLibWalletWrapper {
 
     fn get_change_script<'a>(&'a self) -> AsyncResult<'a, ScriptBuf, ()> {
         Box::pin(async move {
-            Ok(
-                Address::from_str(&self.wallet.lock().unwrap().get_address().unwrap())
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-            )
+            let address = self.wallet.lock().unwrap().get_address().map_err(|e| {
+                tracing::error!(
+                    "cannot get a change address to bump a transaction fee, will retry: {e}"
+                );
+            })?;
+            Ok(Address::from_str(&address)
+                .unwrap()
+                .assume_checked()
+                .script_pubkey())
         })
     }
 
