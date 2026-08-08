@@ -1,15 +1,27 @@
 use amplify::s;
 use biscuit_auth::{builder::date, macros::*, KeyPair};
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use bitcoin::block::Header;
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use bitcoin::consensus::encode;
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::{Amount, Denomination};
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use bitcoin::{BlockHash, ScriptBuf, Transaction as BitcoinTransaction, Txid};
 use chrono::{DateTime, Local, Utc};
 use electrum_client::ElectrumApi;
 use http::response::Builder;
 use lazy_static::lazy_static;
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use lightning::chain::transaction::TransactionData;
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use lightning::chain::{Confirm, Filter};
 use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
 use lightning_invoice::Bolt11Invoice;
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use lightning_transaction_sync::ElectrumSyncClient;
 use once_cell::sync::Lazy;
 use reqwest::Response;
 use rgb_lib::BitcoinNetwork;
@@ -26,6 +38,8 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tracing_test::traced_test;
 
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+use crate::disk::FilesystemLogger;
 use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
 use crate::ldk::{
@@ -182,6 +196,27 @@ fn bitcoin_cli() -> [String; 7] {
     ]
 }
 
+// runs a bitcoin-cli command against the regtest bitcoind, returning its trimmed stdout. wallet
+// commands need an explicit `-rpcwallet=<name>` as their first argument
+fn bitcoind(args: &[&str]) -> String {
+    let output = Command::new("docker")
+        .stdin(Stdio::null())
+        .arg("compose")
+        .args(bitcoin_cli())
+        .args(args)
+        .output()
+        .expect("failed to call bitcoin-cli");
+    assert!(
+        output.status.success(),
+        "bitcoin-cli {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("bitcoin-cli output is not valid UTF-8")
+        .trim()
+        .to_string()
+}
+
 fn check_preimage_matches_hash(payment: &Payment, expected_payment_hash: &str) {
     let payment_preimage = payment.preimage.as_ref().unwrap();
     let payment_preimage_hash =
@@ -212,36 +247,11 @@ async fn check_response_is_nok(
 fn fund_wallet(address: String, sats: u64) {
     let amt = Amount::from_sat(sats);
     let btc_str = amt.to_string_in(Denomination::Bitcoin);
-    let status = Command::new("docker")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .arg("compose")
-        .args(bitcoin_cli())
-        .arg("-rpcwallet=miner")
-        .arg("sendtoaddress")
-        .arg(address)
-        .arg(btc_str)
-        .status()
-        .expect("failed to fund wallet");
-    assert!(status.success());
+    bitcoind(&["-rpcwallet=miner", "sendtoaddress", &address, &btc_str]);
 }
 
 fn get_txout(txid: &str) -> String {
-    String::from_utf8(
-        Command::new("docker")
-            .stdin(Stdio::null())
-            .arg("compose")
-            .args(bitcoin_cli())
-            .arg("-rpcwallet=miner")
-            .arg("gettxout")
-            .arg(txid)
-            .arg("0")
-            .output()
-            .expect("failed get txout")
-            .stdout,
-    )
-    .unwrap()
+    bitcoind(&["-rpcwallet=miner", "gettxout", txid, "0"])
 }
 
 async fn start_daemon(
@@ -2027,17 +2037,8 @@ async fn unlock_res_with(
 
 // Output values (in sats) of an on-chain transaction
 fn tx_output_sats(txid: &str) -> Vec<u64> {
-    let output = Command::new("docker")
-        .stdin(Stdio::null())
-        .arg("compose")
-        .args(bitcoin_cli())
-        .arg("getrawtransaction")
-        .arg(txid)
-        .arg("true")
-        .output()
-        .expect("able to call getrawtransaction");
-    assert!(output.status.success());
-    let tx: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid tx JSON");
+    let raw_tx = bitcoind(&["getrawtransaction", txid, "true"]);
+    let tx: serde_json::Value = serde_json::from_str(&raw_tx).expect("valid tx JSON");
     tx["vout"]
         .as_array()
         .expect("vout array")
@@ -2180,18 +2181,7 @@ impl Miner {
         if self.no_mine_count > 0 {
             return false;
         }
-        let status = Command::new("docker")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .arg("compose")
-            .args(bitcoin_cli())
-            .arg("-rpcwallet=miner")
-            .arg("-generate")
-            .arg(num_blocks.to_string())
-            .status()
-            .expect("failed to mine");
-        assert!(status.success());
+        bitcoind(&["-rpcwallet=miner", "-generate", &num_blocks.to_string()]);
         true
     }
 
@@ -2328,6 +2318,8 @@ mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
 mod drop_funding_signed;
+#[cfg(all(feature = "transaction-sync", feature = "electrum"))]
+mod electrum_opret_confirm;
 mod fail_transfers;
 mod getchannelid;
 mod htlc_amount_checks;
