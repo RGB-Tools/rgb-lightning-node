@@ -60,12 +60,17 @@ async fn success() {
     let status = invoice_status(node2_addr, &invoice).await;
     assert!(matches!(status, InvoiceStatus::Succeeded));
 
-    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
+    let payment = get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
     check_preimage_matches_hash(&payment, &decoded.payment_hash);
-    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -96,12 +101,17 @@ async fn success() {
     .await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
+    let payment = get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
     check_preimage_matches_hash(&payment, &decoded.payment_hash);
-    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -112,12 +122,17 @@ async fn success() {
     let _ = send_payment(node1_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
+    let payment = get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
     check_preimage_matches_hash(&payment, &decoded.payment_hash);
-    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -128,12 +143,17 @@ async fn success() {
     let _ = send_payment(node2_addr, invoice.clone()).await;
 
     let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-    let payment = get_payment(node1_addr, &decoded.payment_hash).await;
+    let payment = get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
     check_preimage_matches_hash(&payment, &decoded.payment_hash);
-    let payment = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, asset_amount);
     assert_eq!(payment.status, HTLCStatus::Succeeded);
@@ -314,7 +334,7 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     let pending_before: Vec<_> = payments_before
         .iter()
         .filter(|p| {
-            p.inbound
+            p.payment_type == PaymentType::InboundAutoClaim
                 && matches!(p.status, HTLCStatus::Pending)
                 && [
                     decoded1.payment_hash.as_str(),
@@ -334,7 +354,12 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     tokio::time::sleep(std::time::Duration::from_secs(SHORT_EXPIRY_SEC as u64 + 1)).await;
 
     // getting a payment should trigger expiration-based status transition
-    let payment = get_payment(node2_addr, &decoded1.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded1.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(
         payment.status,
         HTLCStatus::Failed,
@@ -366,7 +391,7 @@ async fn same_invoice_twice_and_expired_inbound_payments() {
     let still_pending: Vec<_> = payments_after
         .iter()
         .filter(|p| {
-            p.inbound
+            p.payment_type == PaymentType::InboundAutoClaim
                 && matches!(p.status, HTLCStatus::Pending)
                 && [
                     decoded1.payment_hash.as_str(),

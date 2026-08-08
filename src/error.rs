@@ -53,6 +53,9 @@ pub enum APIError {
     #[error("Cannot call other APIs while node is changing state")]
     ChangingState,
 
+    #[error("HTLC claim deadline exceeded")]
+    ClaimDeadlineExceeded,
+
     #[error("Consignment file is empty")]
     ConsignmentFileEmpty,
 
@@ -188,6 +191,9 @@ pub enum APIError {
     #[error("Invalid payment hash: {0}")]
     InvalidPaymentHash(String),
 
+    #[error("Invalid payment preimage")]
+    InvalidPaymentPreimage,
+
     #[error("Invalid payment secret")]
     InvalidPaymentSecret,
 
@@ -239,6 +245,24 @@ pub enum APIError {
     #[error("Invalid transport endpoints: {0}")]
     InvalidTransportEndpoints(String),
 
+    #[error("Invoice is already claimed")]
+    InvoiceAlreadyClaimed,
+
+    #[error("Invoice is expired")]
+    InvoiceExpired,
+
+    #[error("Invoice cannot be cancelled")]
+    InvoiceNotCancellable,
+
+    #[error("No claimable HTLC found for this invoice")]
+    InvoiceNotClaimable,
+
+    #[error("Invoice is not marked as HODL")]
+    InvoiceNotHodl,
+
+    #[error("Invoice settlement is in progress")]
+    InvoiceSettlingInProgress,
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
 
@@ -280,6 +304,9 @@ pub enum APIError {
 
     #[error("Output below the dust limit")]
     OutputBelowDustLimit,
+
+    #[error("Payment hash already used")]
+    PaymentHashAlreadyUsed,
 
     #[error("Payment not found: {0}")]
     PaymentNotFound(String),
@@ -463,6 +490,7 @@ impl APIError {
             APIError::AnchorsRequired
             | APIError::CannotProvideOutOfBandAck(_)
             | APIError::CannotProvideOutOfBandConsignment(_)
+            | APIError::ClaimDeadlineExceeded
             | APIError::ConsignmentFileEmpty
             | APIError::ConsignmentFileNotProvided
             | APIError::ConsignmentNotFound
@@ -491,6 +519,7 @@ impl APIError {
             | APIError::InvalidOnionData(_)
             | APIError::InvalidPassword(_)
             | APIError::InvalidPaymentHash(_)
+            | APIError::InvalidPaymentPreimage
             | APIError::InvalidPaymentSecret
             | APIError::InvalidPeerInfo(_)
             | APIError::InvalidPrecision(_)
@@ -506,10 +535,12 @@ impl APIError {
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoint(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::InvoiceExpired
             | APIError::MediaFileEmpty
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage
             | APIError::OutputBelowDustLimit
+            | APIError::PaymentHashAlreadyUsed
             | APIError::UnsupportedBackupVersion { .. } => StatusCode::BAD_REQUEST,
             APIError::WrongPassword => StatusCode::UNAUTHORIZED,
             APIError::AllocationsAlreadyAvailable
@@ -531,6 +562,9 @@ impl APIError {
             | APIError::InsufficientFunds(_)
             | APIError::InvalidIndexer(_)
             | APIError::InvalidProxyProtocol(_)
+            | APIError::InvoiceNotCancellable
+            | APIError::InvoiceNotHodl
+            | APIError::InvoiceSettlingInProgress
             | APIError::LockedNode
             | APIError::MaxFeeExceeded(_)
             | APIError::MinFeeNotMet(_)
@@ -550,6 +584,8 @@ impl APIError {
             | APIError::UnsupportedInflation(_)
             | APIError::UnsupportedLayer1(_)
             | APIError::UnsupportedTransportType => StatusCode::FORBIDDEN,
+            APIError::InvoiceAlreadyClaimed => StatusCode::CONFLICT,
+            APIError::InvoiceNotClaimable => StatusCode::NOT_FOUND,
             APIError::Network(_) | APIError::NoValidTransportEndpoint => {
                 StatusCode::SERVICE_UNAVAILABLE
             }

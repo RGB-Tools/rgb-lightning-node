@@ -9,12 +9,14 @@ use electrum_client::ElectrumApi;
 use http::response::Builder;
 use lazy_static::lazy_static;
 use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
+use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
 use lightning_invoice::Bolt11Invoice;
 use once_cell::sync::Lazy;
-use reqwest::Response;
+use rand::RngCore;
+use reqwest::{Response, StatusCode};
 use rgb_lib::BitcoinNetwork;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -26,39 +28,43 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tracing_test::traced_test;
 
-use crate::disk::LDK_LOGS_FILE;
-use crate::error::APIErrorResponse;
+use crate::disk::{read_inbound_payment_info, INBOUND_PAYMENTS_FNAME, LDK_LOGS_FILE};
+use crate::error::{APIError, APIErrorResponse};
 use crate::ldk::{
-    DEFER_PAYMENT_CLAIMABLE_ON_NODE, FEE_RATE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
-    HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE,
-    PAYMENT_CLAIMABLE_DEFERRED,
+    DEFER_PAYMENT_CLAIMABLE_ON_NODE, FAIL_HODL_CLAIM_ON_NODE, FEE_RATE,
+    FORCE_PUSH_ASSET_AMOUNT_ON_NODE, HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE,
+    IGNORE_INBOUND_CHANNELS_ON_NODE, PAYMENT_CLAIMABLE_DEFERRED,
 };
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
     AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
-    ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
-    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
-    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
-    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    GetConsignmentRequest, GetConsignmentResponse, GetPaymentRequest, GetPaymentResponse,
-    GetSwapRequest, GetSwapResponse, HTLCStatus, InflateRequest, InflateResponse, InitRequest,
-    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
-    IssueAssetCFAResponse, IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest,
-    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
-    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse,
-    ListChannelsResponse, ListPaymentsResponse, ListPeersResponse, ListSwapsResponse,
-    ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse,
-    ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest,
-    MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
-    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, ProvideOutOfBandAckRequest,
+    CancelHodlInvoiceRequest, ChangePasswordRequest, Channel, ClaimHodlInvoiceRequest,
+    CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
+    DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
+    DecodeSwapstringRequest, DecodeSwapstringResponse, DisconnectPeerRequest, EmptyResponse,
+    FailTransfersRequest, FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse,
+    GetChannelIdRequest, GetChannelIdResponse, GetConsignmentRequest, GetConsignmentResponse,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, HTLCStatus,
+    InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
+    IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
+    IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
+    LNInvoiceResponse, ListAssetsRequest, ListAssetsResponse, ListChannelsResponse,
+    ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
+    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
+    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
+    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment,
+    PaymentType, Peer, PostAssetMediaResponse, ProvideOutOfBandAckRequest,
     ProvideOutOfBandAckResponse, ProvideOutOfBandConsignmentResponse, Recipient, RefreshRequest,
     RefreshResponse, RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse,
     SendBtcRequest, SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest,
     SendRgbResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus,
-    UnlockRequest, Unspent, WitnessData,
+    UnlockRequest, Unspent, WitnessData, HTLC_MIN_MSAT,
 };
-use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
+use crate::utils::{
+    hex_str, hex_str_to_vec, validate_and_parse_payment_hash, ELECTRUM_URL_REGTEST, LDK_DIR,
+    PROXY_ENDPOINT_LOCAL,
+};
 
 use super::*;
 
@@ -416,6 +422,18 @@ async fn btc_balance(node_address: SocketAddr) -> BtcBalanceResponse {
         .unwrap()
 }
 
+async fn cancel_hodl_invoice(node_address: SocketAddr, payment_hash: String) {
+    println!("cancelling HODL invoice {payment_hash} on node {node_address}");
+    let payload = CancelHodlInvoiceRequest { payment_hash };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/cancelhodlinvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res).await;
+}
+
 async fn change_password(node_address: SocketAddr, old_password: &str, new_password: &str) {
     println!("changing password for node {node_address}");
     let payload = ChangePasswordRequest {
@@ -449,6 +467,29 @@ async fn check_payment_status(
         println!("payment found but with status: {:?}", payment.status);
     }
     None
+}
+
+async fn claim_hodl_invoice(
+    node_address: SocketAddr,
+    payment_hash: String,
+    payment_preimage: String,
+) -> EmptyResponse {
+    println!("claiming HODL invoice {payment_hash} on node {node_address}");
+    let payload = ClaimHodlInvoiceRequest {
+        payment_hash,
+        payment_preimage,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/claimhodlinvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap()
 }
 
 async fn close_channel(node_address: SocketAddr, channel_id: &str, peer_pubkey: &str, force: bool) {
@@ -1050,10 +1091,16 @@ async fn list_payments(node_address: SocketAddr) -> Vec<Payment> {
         .unwrap()
         .payments
 }
-async fn get_payment(node_address: SocketAddr, payment_hash: &str) -> Payment {
-    println!("getting payment for node {node_address}");
+
+async fn get_payment(
+    node_address: SocketAddr,
+    payment_hash: &str,
+    payment_type: PaymentType,
+) -> Payment {
+    println!("getting {payment_type:?} payment for node {node_address}");
     let payload = GetPaymentRequest {
         payment_hash: payment_hash.to_string(),
+        payment_type,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/getpayment"))
@@ -1177,14 +1224,59 @@ async fn ln_invoice(
     asset_amount: Option<u64>,
     expiry_sec: u32,
 ) -> LNInvoiceResponse {
-    println!(
-        "generating invoice for {asset_amount:?} of asset {asset_id:?} for node {node_address}"
-    );
+    ln_invoice_with_optional_payment_hash(
+        node_address,
+        amt_msat,
+        asset_id,
+        asset_amount,
+        expiry_sec,
+        None,
+    )
+    .await
+}
+
+async fn ln_invoice_hodl(
+    node_address: SocketAddr,
+    amt_msat: Option<u64>,
+    asset_id: Option<&str>,
+    asset_amount: Option<u64>,
+    expiry_sec: u32,
+    payment_hash: String,
+) -> LNInvoiceResponse {
+    ln_invoice_with_optional_payment_hash(
+        node_address,
+        amt_msat,
+        asset_id,
+        asset_amount,
+        expiry_sec,
+        Some(payment_hash),
+    )
+    .await
+}
+
+async fn ln_invoice_with_optional_payment_hash(
+    node_address: SocketAddr,
+    amt_msat: Option<u64>,
+    asset_id: Option<&str>,
+    asset_amount: Option<u64>,
+    expiry_sec: u32,
+    payment_hash: Option<String>,
+) -> LNInvoiceResponse {
+    if let Some(payment_hash) = payment_hash.as_ref() {
+        println!(
+            "generating HODL invoice for {asset_amount:?} of asset {asset_id:?} for node {node_address}, payment hash: {payment_hash:?}"
+        );
+    } else {
+        println!(
+            "generating invoice for {asset_amount:?} of asset {asset_id:?} for node {node_address}"
+        );
+    }
     let payload = LNInvoiceRequest {
         amt_msat: Some(amt_msat.unwrap_or(3000000)),
         expiry_sec,
         asset_id: asset_id.map(|a| a.to_string()),
         asset_amount,
+        payment_hash,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/lninvoice"))
@@ -1651,6 +1743,14 @@ async fn provide_out_of_band_consignment(
         .unwrap()
 }
 
+fn random_preimage_and_hash() -> (String, String) {
+    let mut preimage = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut preimage);
+    let preimage_hex = hex_str(&preimage);
+    let payment_hash = hex_str(&Sha256::hash(&preimage).to_byte_array());
+    (preimage_hex, payment_hash)
+}
+
 async fn refresh_transfers_raw(node_address: SocketAddr) -> Result<Response, reqwest::Error> {
     println!("refreshing transfers for node {node_address}");
     let payload = RefreshRequest {
@@ -2110,6 +2210,33 @@ async fn wait_for_ln_payment(
     }
 }
 
+async fn wait_for_inbound_payment_status(
+    node_test_dir: &str,
+    payment_hash: &str,
+    expected_status: HTLCStatus,
+) -> Result<(), APIError> {
+    let hash = validate_and_parse_payment_hash(payment_hash)?;
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let inbound_payments_path = Path::new(node_test_dir)
+            .join(LDK_DIR)
+            .join(INBOUND_PAYMENTS_FNAME);
+        let storage = read_inbound_payment_info(&inbound_payments_path);
+        if matches!(
+            storage.payments.get(&hash).map(|p| p.status),
+            Some(status) if status == expected_status
+        ) {
+            return Ok(());
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
+            return Err(APIError::Unexpected(format!(
+                "inbound entry for {payment_hash} did not reach state {expected_status:?}"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
 async fn wait_for_swap_status(
     node_address: SocketAddr,
     payment_hash: &str,
@@ -2299,6 +2426,7 @@ mod concurrent_openchannel;
 mod drop_funding_signed;
 mod fail_transfers;
 mod getchannelid;
+mod hodl_invoice;
 mod htlc_amount_checks;
 mod inflate;
 mod init;
