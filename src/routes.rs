@@ -796,7 +796,7 @@ pub(crate) enum LdkChainSync {
         bitcoind_rpc_port: u16,
     },
     #[cfg(feature = "transaction-sync")]
-    TransactionSync { indexer_url: Option<String> },
+    TransactionSync { indexer_url: String },
 }
 
 #[derive(Deserialize, Serialize)]

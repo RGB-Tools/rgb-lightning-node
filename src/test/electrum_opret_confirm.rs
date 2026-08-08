@@ -74,7 +74,7 @@ fn send_opret_tx() -> (Txid, ScriptBuf) {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-async fn electrum_opret_confirm() {
+async fn opret_first_output_still_confirms() {
     initialize();
 
     let (txid, first_script) = send_opret_tx();

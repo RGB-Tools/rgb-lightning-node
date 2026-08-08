@@ -93,7 +93,7 @@ fn fee_from_bucket(
         .get(&confirmation_target)
         .unwrap()
         .load(Ordering::Acquire);
-    #[cfg(all(test, feature = "electrum", feature = "block-sync"))]
+    #[cfg(all(test, feature = "electrum"))]
     let fee = crate::test::mock_fee(fee);
     fee
 }

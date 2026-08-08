@@ -20,9 +20,9 @@ mod routes;
 mod swap;
 mod utils;
 
-// the test suite drives a local electrs instance over the electrum protocol and unlocks its nodes
-// against a local bitcoind
-#[cfg(all(test, feature = "electrum", feature = "block-sync"))]
+// the test suite calls into `electrum_client` to wait for electrs to catch up with bitcoind, and
+// that crate is only pulled in by the `electrum` feature
+#[cfg(all(test, feature = "electrum"))]
 mod test;
 
 use anyhow::Result;

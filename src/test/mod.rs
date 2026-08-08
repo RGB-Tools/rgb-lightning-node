@@ -32,6 +32,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+use std::sync::atomic::AtomicBool;
 use std::sync::{atomic::Ordering, Mutex, Once, RwLock};
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
@@ -76,7 +78,9 @@ use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY
 
 use super::*;
 
-const ELECTRUM_URL: &str = "127.0.0.1:50001";
+// only the transaction-sync tests point a node at esplora
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+const ESPLORA_URL_REGTEST: &str = "http://127.0.0.1:3002";
 const NODE1_PEER_PORT: u16 = 9801;
 const NODE2_PEER_PORT: u16 = 9802;
 const NODE3_PEER_PORT: u16 = 9803;
@@ -139,6 +143,30 @@ impl Drop for ElectrsRestartGuard {
             .expect("failed to start electrs");
         assert!(status.success(), "failed to start electrs");
         wait_electrs_sync();
+    }
+}
+
+// Makes `mine` also wait for esplora to catch up with bitcoind, for the duration of a test that
+// syncs a node through it. Scoped to a guard so the rest of the suite, which only queries electrs,
+// doesn't pay for an indexer it never reads, and so a panicking test cannot leak the setting.
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+static WAIT_ESPLORA_SYNC: AtomicBool = AtomicBool::new(false);
+
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+struct EsploraSyncGuard;
+
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+impl EsploraSyncGuard {
+    fn set() -> Self {
+        WAIT_ESPLORA_SYNC.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+impl Drop for EsploraSyncGuard {
+    fn drop(&mut self) {
+        WAIT_ESPLORA_SYNC.store(false, Ordering::SeqCst);
     }
 }
 
@@ -333,7 +361,13 @@ async fn start_node(
     node_peer_port: u16,
     keep_node_dir: bool,
 ) -> (SocketAddr, String) {
-    start_node_with(node_test_dir, node_peer_port, keep_node_dir, block_sync()).await
+    start_node_with(
+        node_test_dir,
+        node_peer_port,
+        keep_node_dir,
+        default_ldk_chain_sync(),
+    )
+    .await
 }
 
 async fn start_node_with(
@@ -1993,17 +2027,24 @@ async fn taker(node_address: SocketAddr, swapstring: String) -> EmptyResponse {
         .unwrap()
 }
 
-fn block_sync() -> LdkChainSync {
-    LdkChainSync::BlockSync {
+// the sync mode the suite unlocks its nodes with: block-sync against the local bitcoind when that
+// backend is available, falling back to transaction-sync against the local electrs otherwise
+fn default_ldk_chain_sync() -> LdkChainSync {
+    #[cfg(feature = "block-sync")]
+    return LdkChainSync::BlockSync {
         bitcoind_rpc_username: s!("user"),
         bitcoind_rpc_password: s!("password"),
         bitcoind_rpc_host: s!("localhost"),
         bitcoind_rpc_port: 18443,
-    }
+    };
+    #[cfg(not(feature = "block-sync"))]
+    return LdkChainSync::TransactionSync {
+        indexer_url: ELECTRUM_URL_REGTEST.to_string(),
+    };
 }
 
 fn unlock_req(password: &str) -> UnlockRequest {
-    unlock_req_with(password, block_sync())
+    unlock_req_with(password, default_ldk_chain_sync())
 }
 
 fn unlock_req_with(password: &str, ldk_chain_sync: LdkChainSync) -> UnlockRequest {
@@ -2017,7 +2058,7 @@ fn unlock_req_with(password: &str, ldk_chain_sync: LdkChainSync) -> UnlockReques
 }
 
 async fn unlock_res(node_address: SocketAddr, password: &str) -> Response {
-    unlock_res_with(node_address, password, block_sync()).await
+    unlock_res_with(node_address, password, default_ldk_chain_sync()).await
 }
 
 async fn unlock_res_with(
@@ -2052,7 +2093,7 @@ fn tx_output_sats(txid: &str) -> Vec<u64> {
 }
 
 async fn unlock(node_address: SocketAddr, password: &str) {
-    unlock_with(node_address, password, block_sync()).await
+    unlock_with(node_address, password, default_ldk_chain_sync()).await
 }
 
 async fn unlock_with(node_address: SocketAddr, password: &str, ldk_chain_sync: LdkChainSync) {
@@ -2222,6 +2263,10 @@ fn mine_n_blocks(resume: bool, num_blocks: u16) {
         }
     }
     wait_electrs_sync();
+    #[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+    if WAIT_ESPLORA_SYNC.load(Ordering::SeqCst) {
+        wait_esplora_sync();
+    }
 }
 
 fn stop_mining() {
@@ -2239,21 +2284,27 @@ fn resume_mining() {
 }
 
 fn get_block_count() -> u32 {
-    let output = Command::new("docker")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .arg("compose")
-        .args(bitcoin_cli())
-        .arg("getblockcount")
-        .output()
-        .expect("failed to call getblockcount");
-    assert!(output.status.success());
-    let blockcount_str =
-        std::str::from_utf8(&output.stdout).expect("could not parse blockcount output");
-    blockcount_str
-        .trim()
+    bitcoind(&["getblockcount"])
         .parse::<u32>()
         .expect("could not parse blockcount")
+}
+
+// the esplora indexer catches up with bitcoind independently of electrs, so a node syncing
+// through it needs its own wait after mining
+#[cfg(all(feature = "esplora", feature = "transaction-sync"))]
+fn wait_esplora_sync() {
+    let t_0 = OffsetDateTime::now_utc();
+    let blockcount = get_block_count();
+    let client = esplora_client::Builder::new(ESPLORA_URL_REGTEST).build_blocking();
+    loop {
+        if client.get_height().is_ok_and(|height| height >= blockcount) {
+            break;
+        };
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("esplora not syncing with bitcoind");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 fn wait_electrs_sync() {
@@ -2261,7 +2312,7 @@ fn wait_electrs_sync() {
     let blockcount = get_block_count();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let synced = electrum_client::Client::new(ELECTRUM_URL)
+        let synced = electrum_client::Client::new(ELECTRUM_URL_REGTEST)
             .is_ok_and(|electrum| electrum.block_header(blockcount as usize).is_ok());
         if synced {
             break;
@@ -2360,7 +2411,6 @@ mod swap_roundtrip_multihop_asset_asset;
 mod swap_roundtrip_multihop_buy;
 mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
-#[cfg(feature = "transaction-sync")]
 #[cfg(feature = "transaction-sync")]
 mod transaction_sync;
 mod upload_asset_media;

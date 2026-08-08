@@ -2277,11 +2277,11 @@ components:
           enum: [TransactionSync]
         config:
           type: object
+          required:
+            - indexer_url
           properties:
             indexer_url:
-              type:
-                - string
-                - 'null'
+              type: string
               example: 127.0.0.1:50001
     ListAssetsRequest:
       type: object

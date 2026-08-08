@@ -2036,14 +2036,17 @@ pub(crate) async fn start_ldk(
         LdkChainSync::TransactionSync {
             indexer_url: ln_indexer_url,
         } => {
-            // default to the wallet's indexer, but allow a dedicated one so the RGB wallet and
-            // LDK can use different sources
-            let ln_indexer_url = ln_indexer_url.as_deref().unwrap_or(indexer_url);
-            let indexer_protocol = check_indexer_url(ln_indexer_url, bitcoin_network)?;
+            // LDK can sync against a different indexer than the RGB wallet, but when the two
+            // match the URL has already been checked above
+            let ln_indexer_protocol = if ln_indexer_url == indexer_url {
+                indexer_protocol.clone()
+            } else {
+                check_indexer_url(ln_indexer_url, bitcoin_network)?
+            };
             let indexer_client = Arc::new(
                 IndexerClient::new(
                     ln_indexer_url.to_string(),
-                    indexer_protocol.clone(),
+                    ln_indexer_protocol.clone(),
                     handle.clone(),
                     Arc::clone(&logger),
                 )
@@ -2052,7 +2055,7 @@ pub(crate) async fn start_ldk(
             let tx_sync = Arc::new(
                 IndexerSyncClient::new(
                     ln_indexer_url.to_string(),
-                    indexer_protocol,
+                    ln_indexer_protocol,
                     Arc::clone(&logger),
                 )
                 .map_err(|e| APIError::InvalidIndexer(e.to_string()))?,

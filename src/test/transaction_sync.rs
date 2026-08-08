@@ -1,10 +1,9 @@
 use super::*;
 
-const TEST_DIR_BASE: &str = "tmp/transaction_sync/";
+#[cfg(feature = "electrum")]
+const TEST_DIR_BASE_ELECTRUM: &str = "tmp/transaction_sync_electrum/";
 #[cfg(feature = "esplora")]
 const TEST_DIR_BASE_ESPLORA: &str = "tmp/transaction_sync_esplora/";
-#[cfg(feature = "esplora")]
-const ESPLORA_URL_REGTEST: &str = "http://127.0.0.1:3002";
 
 // send `invoice` from `node_address`, retrying while the payer has not yet found a route: the only
 // route to the payee is multihop and is discovered through gossip, whose channel-announcement UTXO
@@ -36,9 +35,9 @@ async fn pay_retrying_route(node_address: SocketAddr, invoice: String) -> String
     }
 }
 
-// `ln_indexer_url` selects the indexer LDK syncs against: `None` reuses the wallet's `indexer_url`
-// (electrum), while `Some(..)` points LDK at a dedicated indexer
-async fn transaction_sync_roundtrip(test_dir_base: &str, ln_indexer_url: Option<String>) {
+// `ln_indexer_url` selects the indexer LDK syncs against, which can differ from the one the RGB
+// wallet uses
+async fn transaction_sync_roundtrip(test_dir_base: &str, ln_indexer_url: String) {
     initialize();
 
     let test_dir_node1 = format!("{test_dir_base}node1");
@@ -137,11 +136,12 @@ async fn transaction_sync_roundtrip(test_dir_base: &str, ln_indexer_url: Option<
     wait_for_balance(node2_addr, &asset_id, 150).await;
 }
 
+#[cfg(feature = "electrum")]
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
 async fn transaction_sync_electrum() {
-    transaction_sync_roundtrip(TEST_DIR_BASE, None).await;
+    transaction_sync_roundtrip(TEST_DIR_BASE_ELECTRUM, ELECTRUM_URL_REGTEST.to_string()).await;
 }
 
 // point LDK at a dedicated esplora source while the RGB wallet keeps using electrum
@@ -150,5 +150,6 @@ async fn transaction_sync_electrum() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
 async fn transaction_sync_esplora() {
-    transaction_sync_roundtrip(TEST_DIR_BASE_ESPLORA, Some(ESPLORA_URL_REGTEST.to_string())).await;
+    let _esplora_sync = EsploraSyncGuard::set();
+    transaction_sync_roundtrip(TEST_DIR_BASE_ESPLORA, ESPLORA_URL_REGTEST.to_string()).await;
 }

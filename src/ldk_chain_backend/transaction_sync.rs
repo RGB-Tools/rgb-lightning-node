@@ -1,6 +1,6 @@
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::constants::ChainHash;
-use bitcoin::{Script, Txid};
+use bitcoin::{Script, TxOut, Txid};
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::chain::{BestBlock, Confirm, Filter, WatchedOutput};
 use lightning::log_warn;
@@ -15,14 +15,10 @@ use std::time::Duration;
 
 #[cfg(feature = "electrum")]
 use {
-    bitcoin::block::Header,
     bitcoin::consensus::encode,
-    bitcoin::{BlockHash, ScriptBuf},
-    electrum_client::utils::validate_merkle_proof,
     electrum_client::{Client as ElectrumClient, ElectrumApi, Param},
     lightning_transaction_sync::ElectrumSyncClient,
     std::str::FromStr,
-    std::sync::Mutex,
 };
 
 #[cfg(feature = "esplora")]
@@ -61,27 +57,9 @@ pub(crate) struct IndexerGossipVerifier {
 
 pub(crate) enum IndexerSyncClient {
     #[cfg(feature = "electrum")]
-    Electrum {
-        client: ElectrumSyncClient<Arc<FilesystemLogger>>,
-        registered_txs: Mutex<HashMap<Txid, RegisteredTx>>,
-    },
+    Electrum(ElectrumSyncClient<Arc<FilesystemLogger>>),
     #[cfg(feature = "esplora")]
     Esplora(EsploraSyncClient<Arc<FilesystemLogger>>),
-}
-
-#[cfg(feature = "electrum")]
-#[derive(Clone)]
-pub(crate) struct RegisteredTx {
-    script_pubkey: ScriptBuf,
-    confirmed: Option<(u32, BlockHash)>,
-}
-
-#[cfg(feature = "electrum")]
-struct ConfirmedRegisteredTx {
-    tx: Transaction,
-    header: Header,
-    height: u32,
-    pos: usize,
 }
 
 // `check_indexer_url` only ever returns a protocol whose feature is enabled, so this is just a
@@ -169,18 +147,35 @@ impl IndexerClient {
     }
 
     fn tip_height(&self) -> io::Result<u32> {
+        Ok(self.get_best_block()?.height)
+    }
+
+    // whether `txid`'s output at `vout` has not been spent yet. electrum has no way to query an
+    // outpoint directly, so its unspent set is queried by script and filtered down to the outpoint
+    fn is_output_unspent(&self, txid: &Txid, vout: usize, txout: &TxOut) -> io::Result<bool> {
         match &self.backend {
             #[cfg(feature = "electrum")]
             IndexerBackend::Electrum(client) => {
-                let tip = client.block_headers_subscribe().map_err(|e| {
-                    io::Error::other(format!("failed to fetch electrum tip header: {e}"))
-                })?;
-                Ok(tip.height as u32)
+                let unspents = client
+                    .script_list_unspent(&txout.script_pubkey)
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to fetch electrum unspents: {e}"))
+                    })?;
+                Ok(unspents
+                    .iter()
+                    .any(|unspent| unspent.tx_hash == *txid && unspent.tx_pos == vout))
             }
             #[cfg(feature = "esplora")]
-            IndexerBackend::Esplora(client) => client
-                .get_height()
-                .map_err(|e| io::Error::other(format!("failed to fetch esplora tip height: {e}"))),
+            IndexerBackend::Esplora(client) => {
+                // esplora queries the outpoint directly, so the output itself is not needed
+                let _ = txout;
+                let status = client.get_output_status(txid, vout as u64).map_err(|e| {
+                    io::Error::other(format!("failed to fetch esplora output status: {e}"))
+                })?;
+                // an unknown output is treated as spent, so an announcement is never resolved
+                // against an output the indexer cannot vouch for
+                Ok(status.is_some_and(|status| !status.spent))
+            }
         }
     }
 }
@@ -221,13 +216,15 @@ impl UtxoLookup for IndexerGossipVerifier {
                     return Err(UtxoLookupError::UnknownTx);
                 }
 
-                let txout = match &client.backend {
+                let funding = match &client.backend {
                     #[cfg(feature = "electrum")]
                     IndexerBackend::Electrum(c) => {
                         match electrum_txid_from_pos(c, height as usize, tx_index)
-                            .and_then(|txid| c.transaction_get(&txid))
+                            .and_then(|txid| Ok((txid, c.transaction_get(&txid)?)))
                         {
-                            Ok(tx) => tx.output.get(vout).cloned(),
+                            Ok((txid, tx)) => {
+                                tx.output.get(vout).cloned().map(|txout| (txid, txout))
+                            }
                             Err(_) => None,
                         }
                     }
@@ -236,15 +233,28 @@ impl UtxoLookup for IndexerGossipVerifier {
                         .get_block_hash(height)
                         .and_then(|block_hash| c.get_txid_at_block_index(&block_hash, tx_index))
                         .and_then(|txid| match txid {
-                            Some(txid) => c.get_tx_no_opt(&txid).map(Some),
+                            Some(txid) => c.get_tx_no_opt(&txid).map(|tx| Some((txid, tx))),
                             None => Ok(None),
                         })
                         .ok()
                         .flatten()
-                        .and_then(|tx| tx.output.get(vout).cloned()),
+                        .and_then(|(txid, tx)| {
+                            tx.output.get(vout).cloned().map(|txout| (txid, txout))
+                        }),
                 };
 
-                txout.ok_or(UtxoLookupError::UnknownTx)
+                let (txid, txout) = funding.ok_or(UtxoLookupError::UnknownTx)?;
+
+                // like the block-sync gossip verifier, only resolve the announcement if the
+                // funding output is still unspent, so closed channels don't enter the graph
+                if !client
+                    .is_output_unspent(&txid, vout, &txout)
+                    .map_err(|_| UtxoLookupError::UnknownTx)?
+                {
+                    return Err(UtxoLookupError::UnknownTx);
+                }
+
+                Ok(txout)
             })
             .await
             .unwrap_or(Err(UtxoLookupError::UnknownTx));
@@ -292,10 +302,7 @@ impl IndexerSyncClient {
                 let client = ElectrumSyncClient::new(server_url, logger).map_err(|e| {
                     io::Error::other(format!("failed to initialize electrum sync client: {e}"))
                 })?;
-                Ok(Self::Electrum {
-                    client,
-                    registered_txs: Mutex::new(HashMap::new()),
-                })
+                Ok(Self::Electrum(client))
             }
             #[cfg(feature = "esplora")]
             RgbLibIndexerProtocol::Esplora => {
@@ -312,20 +319,9 @@ impl IndexerSyncClient {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self {
             #[cfg(feature = "electrum")]
-            Self::Electrum {
-                client,
-                registered_txs,
-            } => {
-                client
-                    .sync(confirmables.clone())
-                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
-                // supplementary confirmation pass for transactions registered via
-                // `Filter::register_tx`: empirically `ElectrumSyncClient::sync` alone does not
-                // confirm these (the channel funding transaction never reaches `channel_ready`,
-                // hanging the `transaction_sync_electrum` test at funding lock-in), whereas the
-                // esplora client does
-                sync_electrum_registered_txs(client.client(), registered_txs, &confirmables)
-            }
+            Self::Electrum(client) => client
+                .sync(confirmables)
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) }),
             #[cfg(feature = "esplora")]
             Self::Esplora(client) => client
                 .sync(confirmables)
@@ -338,19 +334,7 @@ impl Filter for IndexerSyncClient {
     fn register_tx(&self, txid: &Txid, script_pubkey: &Script) {
         match self {
             #[cfg(feature = "electrum")]
-            Self::Electrum {
-                client,
-                registered_txs,
-            } => {
-                registered_txs.lock().unwrap().insert(
-                    *txid,
-                    RegisteredTx {
-                        script_pubkey: script_pubkey.to_owned(),
-                        confirmed: None,
-                    },
-                );
-                client.register_tx(txid, script_pubkey);
-            }
+            Self::Electrum(client) => client.register_tx(txid, script_pubkey),
             #[cfg(feature = "esplora")]
             Self::Esplora(client) => client.register_tx(txid, script_pubkey),
         }
@@ -359,97 +343,11 @@ impl Filter for IndexerSyncClient {
     fn register_output(&self, output: WatchedOutput) {
         match self {
             #[cfg(feature = "electrum")]
-            Self::Electrum { client, .. } => client.register_output(output),
+            Self::Electrum(client) => client.register_output(output),
             #[cfg(feature = "esplora")]
             Self::Esplora(client) => client.register_output(output),
         }
     }
-}
-
-// the electrum calls are made without holding the `registered_txs` lock, so registrations from LDK
-// are never blocked on network round-trips
-#[cfg(feature = "electrum")]
-fn sync_electrum_registered_txs(
-    client: Arc<ElectrumClient>,
-    registered_txs: &Mutex<HashMap<Txid, RegisteredTx>>,
-    confirmables: &[Confirmable],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let snapshot: Vec<(Txid, RegisteredTx)> = {
-        let registered_txs = registered_txs.lock().unwrap();
-        registered_txs
-            .iter()
-            .map(|(txid, tx)| (*txid, tx.clone()))
-            .collect()
-    };
-
-    let mut confirmed = Vec::new();
-    let mut unconfirmed = Vec::new();
-
-    for (txid, registered_tx) in snapshot {
-        let history = client.script_get_history(&registered_tx.script_pubkey)?;
-        let confirmed_history = history
-            .iter()
-            .find(|history| history.tx_hash == txid && history.height > 0);
-
-        let Some(confirmed_history) = confirmed_history else {
-            if registered_tx.confirmed.is_some() {
-                unconfirmed.push(txid);
-            }
-            continue;
-        };
-
-        let height = confirmed_history.height as u32;
-        let tx = client.transaction_get(&txid)?;
-        let merkle_res = client.transaction_get_merkle(&txid, height as usize)?;
-        let header = client.block_header(height as usize)?;
-        if !validate_merkle_proof(&txid, &header.merkle_root, &merkle_res) {
-            return Err(Box::new(io::Error::other(format!(
-                "invalid merkle proof for transaction {txid}"
-            ))));
-        }
-
-        let block_hash = header.block_hash();
-        if registered_tx.confirmed == Some((height, block_hash)) {
-            continue;
-        }
-        confirmed.push(ConfirmedRegisteredTx {
-            tx,
-            header,
-            height,
-            pos: merkle_res.pos,
-        });
-    }
-
-    // re-acquire the lock only to apply the observed state, leaving entries registered
-    // concurrently for the next pass
-    {
-        let mut registered_txs = registered_txs.lock().unwrap();
-        for txid in &unconfirmed {
-            if let Some(entry) = registered_txs.get_mut(txid) {
-                entry.confirmed = None;
-            }
-        }
-        for confirmed_tx in &confirmed {
-            registered_txs.remove(&confirmed_tx.tx.compute_txid());
-        }
-    }
-
-    for txid in unconfirmed {
-        for confirmable in confirmables {
-            confirmable.transaction_unconfirmed(&txid);
-        }
-    }
-    for confirmed_tx in confirmed {
-        for confirmable in confirmables {
-            confirmable.transactions_confirmed(
-                &confirmed_tx.header,
-                &[(confirmed_tx.pos, &confirmed_tx.tx)],
-                confirmed_tx.height,
-            );
-        }
-    }
-
-    Ok(())
 }
 
 impl FeeEstimator for IndexerClient {
@@ -564,13 +462,10 @@ fn poll_electrum_fee_estimates(
 
             match res {
                 Ok(Ok((background, normal, high_prio, very_high_prio))) => {
-                    let background_estimate =
-                        fee_rate_from_btc_per_kb(background, MIN_FEERATE).unwrap_or(MIN_FEERATE);
-                    let normal_estimate = fee_rate_from_btc_per_kb(normal, 2000).unwrap_or(2000);
-                    let high_prio_estimate =
-                        fee_rate_from_btc_per_kb(high_prio, 5000).unwrap_or(5000);
-                    let very_high_prio_estimate =
-                        fee_rate_from_btc_per_kb(very_high_prio, 50000).unwrap_or(50000);
+                    let background_estimate = fee_rate_from_btc_per_kb(background, MIN_FEERATE);
+                    let normal_estimate = fee_rate_from_btc_per_kb(normal, 2000);
+                    let high_prio_estimate = fee_rate_from_btc_per_kb(high_prio, 5000);
+                    let very_high_prio_estimate = fee_rate_from_btc_per_kb(very_high_prio, 50000);
 
                     store_fee_estimates(
                         &fees,
@@ -611,6 +506,8 @@ fn poll_esplora_fee_estimates(
 
             match res {
                 Ok(Ok(estimate_map)) => {
+                    let estimate_map =
+                        BTreeMap::from_iter(estimate_map.iter().map(|(k, v)| (*k, *v)));
                     let background_estimate =
                         estimate_fee_rate_sat_per_kw(&estimate_map, 144, MIN_FEERATE);
                     let normal_estimate = estimate_fee_rate_sat_per_kw(&estimate_map, 18, 2000);
@@ -640,23 +537,22 @@ fn poll_esplora_fee_estimates(
 
 #[cfg(feature = "esplora")]
 fn estimate_fee_rate_sat_per_kw(
-    fee_estimates: &HashMap<u16, f64>,
+    estimate_map: &BTreeMap<u16, f64>,
     blocks: u16,
     default: u32,
 ) -> u32 {
-    let Some(sat_per_vb) = interpolate_fee_rate(fee_estimates, blocks) else {
+    let Some(sat_per_vb) = interpolate_fee_rate(estimate_map, blocks) else {
         return default;
     };
     std::cmp::max((sat_per_vb * 250.0).round() as u32, MIN_FEERATE)
 }
 
 #[cfg(feature = "esplora")]
-fn interpolate_fee_rate(fee_estimates: &HashMap<u16, f64>, blocks: u16) -> Option<f64> {
-    if blocks == 0 || fee_estimates.is_empty() {
+fn interpolate_fee_rate(estimate_map: &BTreeMap<u16, f64>, blocks: u16) -> Option<f64> {
+    if blocks == 0 || estimate_map.is_empty() {
         return None;
     }
 
-    let estimate_map = BTreeMap::from_iter(fee_estimates.iter().map(|(k, v)| (*k, *v)));
     if let Some(estimate) = estimate_map.get(&blocks) {
         return Some(*estimate);
     }
@@ -676,12 +572,13 @@ fn interpolate_fee_rate(fee_estimates: &HashMap<u16, f64>, blocks: u16) -> Optio
 }
 
 #[cfg(feature = "electrum")]
-fn fee_rate_from_btc_per_kb(feerate_btc_per_kb: f64, default: u32) -> Option<u32> {
+// electrum reports a negative feerate when it has no estimate available
+fn fee_rate_from_btc_per_kb(feerate_btc_per_kb: f64, default: u32) -> u32 {
     if !feerate_btc_per_kb.is_finite() || feerate_btc_per_kb.is_sign_negative() {
-        return Some(default);
+        return default;
     }
-    Some(std::cmp::max(
+    std::cmp::max(
         (feerate_btc_per_kb * 100_000_000.0 / 4.0).round() as u32,
         MIN_FEERATE,
-    ))
+    )
 }

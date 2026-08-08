@@ -160,9 +160,7 @@ For more info about regtest utility commands, run:
 ./regtest.sh -h
 ```
 
-See [Sync modes](#sync-modes) for how the `/unlock` payload selects the chain
-backend. When unlocking regtest nodes with `BlockSync` use the following local
-services:
+When unlocking regtest nodes use the following local services:
 - bitcoind_rpc_username: user
 - bitcoind_rpc_password: password
 - bitcoind_rpc_host: localhost
@@ -175,9 +173,6 @@ To unlock a regtest nodes running in docker use the following local services:
 - bitcoind_rpc_host: bitcoind
 - bitcoind_rpc_port: 18443
 - indexer_url: electrs:50001
-
-To sync through the indexer instead, select the `TransactionSync` mode and omit
-the `bitcoind_rpc_*` parameters.
 
 ### Testnet
 
@@ -433,8 +428,8 @@ time via the `ldk_chain_sync` field of the `/unlock` payload (see the
   is the more trust-minimized option, since the node does not rely on an indexer
   to tell it which transactions are relevant.
 - `TransactionSync`: sync through an electrum/esplora indexer, so no `bitcoind`
-  is needed. By default this reuses the wallet's `indexer_url`; a dedicated
-  indexer for LDK can be set under this mode's `config` via `indexer_url`.
+  is needed. The indexer LDK syncs against is given under this mode's `config`
+  via `indexer_url` and can differ from the one the RGB wallet uses.
 
 Both modes are available in a stock build. See
 [Chain sync support](#chain-sync-support) to build with only one of them.

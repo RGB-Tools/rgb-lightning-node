@@ -47,11 +47,10 @@ use crate::{
 
 pub(crate) const LDK_DIR: &str = ".ldk";
 pub(crate) const LOGS_DIR: &str = "logs";
-// the test suite drives a local electrs instance over the electrum protocol and unlocks its nodes
-// against a local bitcoind
-#[cfg(all(test, feature = "electrum", feature = "block-sync"))]
+// the test suite drives a local electrs instance over the electrum protocol
+#[cfg(all(test, feature = "electrum"))]
 pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
-#[cfg(all(test, feature = "electrum", feature = "block-sync"))]
+#[cfg(all(test, feature = "electrum"))]
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
 const PASSWORD_MIN_LENGTH: u8 = 8;
 
