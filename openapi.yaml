@@ -1174,6 +1174,48 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Media'
             - type: 'null'
+    AssetFilter:
+      oneOf:
+        - $ref: '#/components/schemas/AssetFilterAnyOrNone'
+        - $ref: '#/components/schemas/AssetFilterNone'
+        - $ref: '#/components/schemas/AssetFilterId'
+      discriminator:
+        propertyName: type
+        mapping:
+          AnyOrNone: '#/components/schemas/AssetFilterAnyOrNone'
+          None: '#/components/schemas/AssetFilterNone'
+          Id: '#/components/schemas/AssetFilterId'
+    AssetFilterAnyOrNone:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [AnyOrNone]
+    AssetFilterId:
+      type: object
+      required:
+        - type
+        - value
+      properties:
+        type:
+          type: string
+          enum: [Id]
+        value:
+          type: string
+          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+      example:
+        type: Id
+        value: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+    AssetFilterNone:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [None]
     AssetIFA:
       type: object
       required:
@@ -2386,11 +2428,15 @@ components:
     ListTransfersRequest:
       type: object
       required:
-        - asset_id
+        - asset_filter
       properties:
-        asset_id:
-          type: string
-          example: rgb:CJkb4YZw-jRiz2sk-~PARPio-wtVYI1c-XAEYCqO-wTfvRZ8
+        asset_filter:
+          $ref: '#/components/schemas/AssetFilter'
+        txid:
+          type:
+            - string
+            - 'null'
+          example: 47ee0f5b7bd5b0dd7f10ce54a94fee1b5cd54e5241b0f70f9f373d10e7a3c3e2
     ListTransfersResponse:
       type: object
       required:

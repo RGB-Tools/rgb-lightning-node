@@ -50,12 +50,12 @@ use rgb_lib::{
             check_indexer_url as rgb_lib_check_indexer_url,
             IndexerProtocol as RgbLibIndexerProtocol,
         },
-        AssetCFA as RgbLibAssetCFA, AssetIFA as RgbLibAssetIFA, AssetNIA as RgbLibAssetNIA,
-        AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance, EmbeddedMedia as RgbLibEmbeddedMedia,
-        Invoice as RgbLibInvoice, Media as RgbLibMedia, OperationResult as RgbLibOperationResult,
-        ProofOfReserves as RgbLibProofOfReserves, Recipient as RgbLibRecipient, RecipientInfo,
-        RecipientType as RgbLibRecipientType, RefreshFilter as RgbLibRefreshFilter,
-        RefreshTransferStatus as RgbLibRefreshTransferStatus,
+        AssetCFA as RgbLibAssetCFA, AssetFilter as RgbLibAssetFilter, AssetIFA as RgbLibAssetIFA,
+        AssetNIA as RgbLibAssetNIA, AssetUDA as RgbLibAssetUDA, Balance as RgbLibBalance,
+        EmbeddedMedia as RgbLibEmbeddedMedia, Invoice as RgbLibInvoice, Media as RgbLibMedia,
+        OperationResult as RgbLibOperationResult, ProofOfReserves as RgbLibProofOfReserves,
+        Recipient as RgbLibRecipient, RecipientInfo, RecipientType as RgbLibRecipientType,
+        RefreshFilter as RgbLibRefreshFilter, RefreshTransferStatus as RgbLibRefreshTransferStatus,
         RefreshedTransfer as RgbLibRefreshedTransfer, SyncKeychain as RgbLibSyncKeychain,
         SyncOptions as RgbLibSyncOptions, SyncStrategy as RgbLibSyncStrategy, Token as RgbLibToken,
         TokenLight as RgbLibTokenLight, WitnessData as RgbLibWitnessData,
@@ -176,6 +176,24 @@ impl From<RgbLibAssetCFA> for AssetCFA {
             added_at: value.added_at,
             balance: value.balance.into(),
             media: value.media.map(|m| m.into()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub(crate) enum AssetFilter {
+    AnyOrNone,
+    None,
+    Id(String),
+}
+
+impl From<AssetFilter> for RgbLibAssetFilter {
+    fn from(x: AssetFilter) -> Self {
+        match x {
+            AssetFilter::AnyOrNone => Self::AnyOrNone,
+            AssetFilter::None => Self::None,
+            AssetFilter::Id(asset_id) => Self::Id(asset_id),
         }
     }
 }
@@ -845,7 +863,8 @@ pub(crate) struct ListTransactionsResponse {
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersRequest {
-    pub(crate) asset_id: String,
+    pub(crate) asset_filter: AssetFilter,
+    pub(crate) txid: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2859,7 +2878,7 @@ pub(crate) async fn list_transfers(
     let unlocked_state = guard.as_ref().unwrap();
 
     let mut transfers = vec![];
-    for transfer in unlocked_state.rgb_list_transfers(payload.asset_id)? {
+    for transfer in unlocked_state.rgb_list_transfers(payload.asset_filter.into(), payload.txid)? {
         transfers.push(Transfer {
             idx: transfer.idx,
             created_at: transfer.created_at,

@@ -50,8 +50,8 @@ use crate::ldk::{
     PAYMENT_CLAIMABLE_DEFERRED,
 };
 use crate::routes::{
-    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetIFA, AssetNIA,
-    AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
+    AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetFilter, AssetIFA,
+    AssetNIA, AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
     ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
     DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
     DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
@@ -1187,7 +1187,8 @@ async fn list_transactions(node_address: SocketAddr) -> Vec<Transaction> {
 async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfer> {
     println!("listing transfers for asset {asset_id} on node {node_address}");
     let payload = ListTransfersRequest {
-        asset_id: asset_id.to_string(),
+        asset_filter: AssetFilter::Id(asset_id.to_string()),
+        txid: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listtransfers"))
