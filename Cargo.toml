@@ -2,7 +2,7 @@
 name = "rgb-lightning-node"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.94.0"
 
 [[bin]]
 name = "rgb-lightning-node"
@@ -97,6 +97,7 @@ serial_test = "3.1.1"
 tracing-test = "0.2.5"
 
 [patch.crates-io]
+rgb-lib = { git = "https://github.com/RGB-Tools/rgb-lib.git", branch = "master" }
 lightning = { path = "./rust-lightning/lightning" }
 lightning-background-processor = { path = "./rust-lightning/lightning-background-processor"}
 
