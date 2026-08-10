@@ -40,7 +40,7 @@ use lightning::{
     util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig},
     util::{errors::APIError as LDKAPIError, IS_SWAP_SCID},
 };
-use lightning_invoice::{Bolt11Invoice, PaymentSecret};
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, Description, PaymentSecret};
 use regex::Regex;
 use rgb_lib::{
     bdk_wallet::keys::bip39::Mnemonic,
@@ -84,8 +84,9 @@ use crate::ldk::{node_override_matches, FORCE_PUSH_ASSET_AMOUNT_ON_NODE};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
     check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
-    encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
-    hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
+    description_fields, encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path,
+    get_route, hex_str, hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState,
+    UserOnionMessageContents,
 };
 use crate::{
     backup::{do_backup, restore_backup},
@@ -506,6 +507,8 @@ pub(crate) struct DecodeLNInvoiceResponse {
     pub(crate) timestamp: u64,
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_amount: Option<u64>,
+    pub(crate) description: Option<String>,
+    pub(crate) description_hash: Option<String>,
     pub(crate) payment_hash: String,
     pub(crate) payment_secret: String,
     pub(crate) payee_pubkey: Option<String>,
@@ -870,6 +873,8 @@ pub(crate) struct LNInvoiceRequest {
     pub(crate) expiry_sec: u32,
     pub(crate) asset_id: Option<String>,
     pub(crate) asset_amount: Option<u64>,
+    pub(crate) description: Option<String>,
+    pub(crate) description_hash: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -998,6 +1003,8 @@ pub(crate) struct Payment {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: String,
     pub(crate) preimage: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) description_hash: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -1886,12 +1893,16 @@ pub(crate) async fn decode_ln_invoice(
         Ok(v) => v,
     };
 
+    let (description, description_hash) = description_fields(&invoice);
+
     Ok(Json(DecodeLNInvoiceResponse {
         amt_msat: invoice.amount_milli_satoshis(),
         expiry_sec: invoice.expiry_time().as_secs(),
         timestamp: invoice.duration_since_epoch().as_secs(),
         asset_id: invoice.rgb_contract_id().map(|c| c.to_string()),
         asset_amount: invoice.rgb_amount(),
+        description,
+        description_hash: description_hash.map(|h| hex_str(&h)),
         payment_hash: hex_str(&invoice.payment_hash().to_byte_array()),
         payment_secret: hex_str(&invoice.payment_secret().0),
         payee_pubkey: invoice.payee_pub_key().map(|p| p.to_string()),
@@ -2123,6 +2134,8 @@ pub(crate) async fn get_payment(
                     updated_at: payment_info.updated_at,
                     payee_pubkey: payment_info.payee_pubkey.to_string(),
                     preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+                    description: payment_info.description.clone(),
+                    description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                 },
             }));
         }
@@ -2153,6 +2166,8 @@ pub(crate) async fn get_payment(
                     updated_at: payment_info.updated_at,
                     payee_pubkey: payment_info.payee_pubkey.to_string(),
                     preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+                    description: payment_info.description.clone(),
+                    description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                 },
             }));
         }
@@ -2473,6 +2488,8 @@ pub(crate) async fn keysend(
                 updated_at: created_at,
                 payee_pubkey: dest_pubkey,
                 expires_at: None,
+                description: None,
+                description_hash: None,
             },
         )?;
         if let Some((contract_id, rgb_amount)) = rgb_payment {
@@ -2720,6 +2737,8 @@ pub(crate) async fn list_payments(
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+            description: payment_info.description.clone(),
+            description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }
 
@@ -2747,6 +2766,8 @@ pub(crate) async fn list_payments(
             updated_at: payment_info.updated_at,
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
+            description: payment_info.description.clone(),
+            description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }
 
@@ -2948,8 +2969,31 @@ pub(crate) async fn ln_invoice(
             )));
         }
 
+        let description =
+            match (
+                payload.description.as_deref().filter(|d| !d.is_empty()),
+                payload.description_hash.as_deref(),
+            ) {
+                (Some(_), Some(_)) => {
+                    return Err(APIError::InvalidRequest(s!(
+                        "cannot provide both description and description_hash"
+                    )))
+                }
+                (Some(description), None) => Bolt11InvoiceDescription::Direct(
+                    Description::new(description.to_string())
+                        .map_err(|e| APIError::InvalidDescription(e.to_string()))?,
+                ),
+                (None, Some(description_hash)) => Bolt11InvoiceDescription::Hash(
+                    lightning_invoice::Sha256(Sha256::from_str(description_hash).map_err(
+                        |_| APIError::InvalidDescriptionHash(description_hash.to_string()),
+                    )?),
+                ),
+                (None, None) => Bolt11InvoiceDescription::Direct(Description::empty()),
+            };
+
         let invoice_params = Bolt11InvoiceParameters {
             amount_msats: payload.amt_msat,
+            description,
             invoice_expiry_delta_secs: Some(payload.expiry_sec),
             contract_id,
             asset_amount: payload.asset_amount,
@@ -2966,6 +3010,7 @@ pub(crate) async fn ln_invoice(
 
         let payment_hash = PaymentHash((*invoice.payment_hash()).to_byte_array());
         let created_at = get_current_timestamp();
+        let (description, description_hash) = description_fields(&invoice);
         unlocked_state.add_inbound_payment(
             payment_hash,
             PaymentInfo {
@@ -2977,6 +3022,8 @@ pub(crate) async fn ln_invoice(
                 updated_at: created_at,
                 payee_pubkey: unlocked_state.channel_manager.get_our_node_id(),
                 expires_at: Some(created_at + payload.expiry_sec as u64),
+                description,
+                description_hash,
             },
         );
 
@@ -4007,6 +4054,8 @@ pub(crate) async fn send_payment(
                     updated_at: created_at,
                     payee_pubkey: offer.issuer_signing_pubkey().ok_or(APIError::InvalidInvoice(s!("missing signing pubkey")))?,
                     expires_at: None,
+                    description: None,
+                    description_hash: None,
                 },
             )?;
 
@@ -4088,6 +4137,7 @@ pub(crate) async fn send_payment(
             };
 
             let secret = payment_secret;
+            let (description, description_hash) = description_fields(&invoice);
             unlocked_state.add_outbound_payment(
                 payment_id,
                 PaymentInfo {
@@ -4099,6 +4149,8 @@ pub(crate) async fn send_payment(
                     updated_at: created_at,
                     payee_pubkey: invoice.get_payee_pub_key(),
                     expires_at: None,
+                    description,
+                    description_hash,
                 },
             )?;
             let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());

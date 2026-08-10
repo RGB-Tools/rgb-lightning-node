@@ -1,4 +1,5 @@
 use amplify::s;
+use bitcoin::hashes::Hash;
 use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
 use futures::Future;
@@ -13,6 +14,7 @@ use lightning::{
     sign::KeysManager,
     util::ser::{Writeable, Writer},
 };
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef};
 use lightning_persister::fs_store::FilesystemStore;
 use rgb_lib::{bdk_wallet::keys::bip39::Mnemonic, BitcoinNetwork, ContractId};
 use std::{
@@ -259,6 +261,16 @@ pub(crate) async fn do_connect_peer(
             }
         }
         None => Err(APIError::FailedPeerConnection),
+    }
+}
+
+pub(crate) fn description_fields(invoice: &Bolt11Invoice) -> (Option<String>, Option<[u8; 32]>) {
+    match invoice.description() {
+        Bolt11InvoiceDescriptionRef::Direct(description) => {
+            let description = description.to_string();
+            ((!description.is_empty()).then_some(description), None)
+        }
+        Bolt11InvoiceDescriptionRef::Hash(hash) => (None, Some(hash.0.to_byte_array())),
     }
 }
 

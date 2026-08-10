@@ -21,6 +21,8 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
+        description: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -36,6 +38,8 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(1),
+        description: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -51,6 +55,8 @@ async fn invoice() {
         expiry_sec: 900,
         asset_id: None,
         asset_amount: None,
+        description: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -61,6 +67,151 @@ async fn invoice() {
         .json::<LNInvoiceResponse>()
         .await;
     assert!(res.is_ok());
+
+    // an invoice with a description should carry it as the BOLT11 d tag
+    let description = "1 cup of coffee";
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        description: Some(description.to_string()),
+        description_hash: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap();
+    let invoice = Bolt11Invoice::from_str(&res.invoice).unwrap();
+    assert!(matches!(
+        invoice.description(),
+        lightning_invoice::Bolt11InvoiceDescriptionRef::Direct(d) if d.to_string() == description
+    ));
+    let decoded = decode_ln_invoice(node1_addr, &res.invoice).await;
+    assert_eq!(decoded.description.as_deref(), Some(description));
+    assert_eq!(decoded.description_hash, None);
+    let payment = list_payments(node1_addr)
+        .await
+        .into_iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.description.as_deref(), Some(description));
+    assert_eq!(payment.description_hash, None);
+
+    // an invoice with a description_hash should carry it as the BOLT11 h tag
+    let description_hash = lightning_invoice::Sha256(Sha256::hash(b"out-of-band description"));
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        description: None,
+        description_hash: Some(description_hash.0.to_string()),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap()
+        .json::<LNInvoiceResponse>()
+        .await
+        .unwrap();
+    let invoice = Bolt11Invoice::from_str(&res.invoice).unwrap();
+    assert!(matches!(
+        invoice.description(),
+        lightning_invoice::Bolt11InvoiceDescriptionRef::Hash(hash) if *hash == description_hash
+    ));
+    let decoded = decode_ln_invoice(node1_addr, &res.invoice).await;
+    assert_eq!(decoded.description, None);
+    assert_eq!(
+        decoded.description_hash.as_deref(),
+        Some(description_hash.0.to_string().as_str())
+    );
+    let payment = list_payments(node1_addr)
+        .await
+        .into_iter()
+        .find(|p| p.payment_hash == decoded.payment_hash)
+        .unwrap();
+    assert_eq!(payment.description, None);
+    assert_eq!(
+        payment.description_hash.as_deref(),
+        Some(description_hash.0.to_string().as_str())
+    );
+
+    // an invoice with both description and description_hash should fail
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        description: Some(description.to_string()),
+        description_hash: Some(description_hash.0.to_string()),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "cannot provide both description and description_hash",
+        "InvalidRequest",
+    )
+    .await;
+
+    // an invoice with an invalid description_hash should fail
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        description: None,
+        description_hash: Some(s!("not-a-valid-description-hash")),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid description hash",
+        "InvalidDescriptionHash",
+    )
+    .await;
+
+    // an invoice with a description longer than 639 bytes should fail
+    let payload = LNInvoiceRequest {
+        amt_msat: None,
+        expiry_sec: 900,
+        asset_id: None,
+        asset_amount: None,
+        description: Some("a".repeat(640)),
+        description_hash: None,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node1_addr}/lninvoice"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_nok(
+        res,
+        reqwest::StatusCode::BAD_REQUEST,
+        "Invalid description",
+        "InvalidDescription",
+    )
+    .await;
 }
 
 #[serial_test::serial]
@@ -99,6 +250,8 @@ async fn zero_amount_invoice() {
         expiry_sec: 900,
         asset_id: None,
         asset_amount: None,
+        description: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -179,6 +332,8 @@ async fn zero_amount_invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: None,
+        description: None,
+        description_hash: None,
     };
     let invoice_without_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -201,6 +356,8 @@ async fn zero_amount_invoice() {
         expiry_sec: 900,
         asset_id: Some(asset_id.clone()),
         asset_amount: Some(50),
+        description: None,
+        description_hash: None,
     };
     let invoice_with_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))

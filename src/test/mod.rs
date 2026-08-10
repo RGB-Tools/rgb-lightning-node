@@ -1238,6 +1238,8 @@ async fn ln_invoice(
         expiry_sec,
         asset_id: asset_id.map(|a| a.to_string()),
         asset_amount,
+        description: None,
+        description_hash: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/lninvoice"))
