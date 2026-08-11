@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [ stable, 1.88.0, beta ]
+        toolchain: [ stable, 1.94.0, beta ]
         name: [ linux, windows, macos ]
         exclude:
           - name: windows
