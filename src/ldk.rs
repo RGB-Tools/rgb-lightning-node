@@ -195,6 +195,8 @@ pub(crate) struct PaymentInfo {
     pub(crate) updated_at: u64,
     pub(crate) payee_pubkey: PublicKey,
     pub(crate) expires_at: Option<u64>,
+    pub(crate) description: Option<String>,
+    pub(crate) description_hash: Option<[u8; 32]>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -206,6 +208,8 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (10, updated_at, required),
     (12, payee_pubkey, required),
     (14, expires_at, option),
+    (16, description, option),
+    (18, description_hash, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -428,6 +432,8 @@ impl UnlockedAppState {
                     updated_at: created_at,
                     payee_pubkey,
                     expires_at: None,
+                    description: None,
+                    description_hash: None,
                 });
             }
         }

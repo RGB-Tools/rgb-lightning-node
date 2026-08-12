@@ -713,7 +713,9 @@ paths:
       tags:
         - Invoices
       summary: Get a LN invoice
-      description: Get a LN invoice to receive a payment
+      description: >-
+        Get a LN invoice to receive a payment. The description and
+        description_hash fields are mutually exclusive.
       requestBody:
         content:
           application/json:
@@ -1751,6 +1753,16 @@ components:
             - integer
             - 'null'
           example: 42
+        description:
+          type:
+            - string
+            - 'null'
+          example: 1 cup of coffee
+        description_hash:
+          type:
+            - string
+            - 'null'
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
         payment_hash:
           type: string
           example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
@@ -2490,6 +2502,16 @@ components:
             - integer
             - 'null'
           example: 42
+        description:
+          type:
+            - string
+            - 'null'
+          example: 1 cup of coffee
+        description_hash:
+          type:
+            - string
+            - 'null'
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
     LNInvoiceResponse:
       type: object
       required:
@@ -2781,6 +2803,16 @@ components:
         preimage:
           type: string
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
+        description:
+          type:
+            - string
+            - 'null'
+          example: 1 cup of coffee
+        description_hash:
+          type:
+            - string
+            - 'null'
+          example: 5ca5d81b482b4015e7b14df7a27fe0a38c226273604ffd3b008b752571811938
     Peer:
       type: object
       required:

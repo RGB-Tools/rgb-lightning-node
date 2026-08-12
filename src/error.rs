@@ -155,6 +155,12 @@ pub enum APIError {
     #[error("Invalid consignment")]
     InvalidConsignment,
 
+    #[error("Invalid description: {0}")]
+    InvalidDescription(String),
+
+    #[error("Invalid description hash: {0}")]
+    InvalidDescriptionHash(String),
+
     #[error("Invalid details: {0}")]
     InvalidDetails(String),
 
@@ -483,6 +489,8 @@ impl APIError {
             | APIError::InvalidBiscuitToken
             | APIError::InvalidChannelID
             | APIError::InvalidConsignment
+            | APIError::InvalidDescription(_)
+            | APIError::InvalidDescriptionHash(_)
             | APIError::InvalidDetails(_)
             | APIError::InvalidEstimationBlocks
             | APIError::InvalidExpiration
