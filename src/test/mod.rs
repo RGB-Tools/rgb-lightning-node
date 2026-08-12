@@ -2379,6 +2379,7 @@ mod getchannelid;
 mod htlc_amount_checks;
 mod inflate;
 mod init;
+mod interoperability;
 mod invoice;
 mod issue;
 mod lock_unlock_changepassword;
