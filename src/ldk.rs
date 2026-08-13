@@ -116,7 +116,7 @@ use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::{
     PeerChannelGate, RgbFileTransferHandler, REASSEMBLY_SWEEP_INTERVAL,
 };
-use crate::routes::{HTLCStatus, LdkChainSync, SwapStatus, UnlockRequest, DUST_LIMIT_MSAT};
+use crate::routes::{HTLCStatus, LdkChainSync, SwapStatus, UnlockRequest};
 use crate::swap::SwapData;
 use crate::utils::{
     check_port_is_available, connect_peer_if_necessary, do_connect_peer, get_current_timestamp,
@@ -823,12 +823,14 @@ async fn handle_ldk_events(
                 }]};
 
                 let unlocked_state_copy = unlocked_state.clone();
+                let fee_rate_sat_vb = static_state.config.rgb.fee_rate_sat_vb;
+                let min_channel_confirmations = static_state.config.rgb.min_channel_confirmations;
                 let res = tokio::task::spawn_blocking(move || {
                     let res = unlocked_state_copy.rgb_send_begin(
                         recipient_map,
                         true,
-                        FEE_RATE,
-                        MIN_CHANNEL_CONFIRMATIONS,
+                        fee_rate_sat_vb,
+                        min_channel_confirmations,
                         get_current_timestamp() + RGB_TRANSFER_CHAN_EXPIRATION_SECS,
                         false,
                     )?;
@@ -864,11 +866,12 @@ async fn handle_ldk_events(
             } else {
                 let unlocked_state_copy = unlocked_state.clone();
                 let btc_address = addr.to_address();
+                let fee_rate_sat_vb = static_state.config.rgb.fee_rate_sat_vb;
                 let res = tokio::task::spawn_blocking(move || {
                     unlocked_state_copy.rgb_send_btc_begin(
                         btc_address,
                         channel_value_satoshis,
-                        FEE_RATE,
+                        fee_rate_sat_vb,
                         false,
                     )
                 })
@@ -1810,7 +1813,9 @@ impl RgbOutputSpender {
                     .unwrap()
                     .unwrap();
                 txouts.push(TxOut {
-                    value: Amount::from_sat(DUST_LIMIT_MSAT / 1000),
+                    value: Amount::from_sat(
+                        self.static_state.config.channels.dust_limit_msat / 1000,
+                    ),
                     script_pubkey,
                 });
                 receive_data.recipient_id
@@ -1842,7 +1847,8 @@ impl RgbOutputSpender {
                 .map_err(|()| s!("cannot spend vanilla spendable outputs"));
         }
 
-        let feerate_sat_per_1000_weight = FEE_RATE as u32 * 250; // 1 sat/vB = 250 sat/kw
+        // 1 sat/vB = 250 sat/kw
+        let feerate_sat_per_1000_weight = self.static_state.config.rgb.fee_rate_sat_vb as u32 * 250;
         let (psbt, _expected_max_weight) =
             SpendableOutputDescriptor::create_spendable_outputs_psbt(
                 secp_ctx,
@@ -1998,6 +2004,7 @@ pub(crate) async fn start_ldk(
                 bitcoind_rpc_password.clone(),
                 handle.clone(),
                 Arc::clone(&logger),
+                static_state.config.chain.fee_refresh_interval_secs,
             )
             .await
             {
@@ -2055,6 +2062,7 @@ pub(crate) async fn start_ldk(
                     ln_indexer_protocol.clone(),
                     handle.clone(),
                     Arc::clone(&logger),
+                    static_state.config.chain.fee_refresh_interval_secs,
                 )
                 .map_err(|e| APIError::InvalidIndexer(e.to_string()))?,
             );
@@ -2167,13 +2175,25 @@ pub(crate) async fn start_ldk(
     ));
 
     // Initialize the ChannelManager
+    let channels_config = &static_state.config.channels;
     let mut user_config = UserConfig::default();
     user_config
         .channel_handshake_limits
         .force_announced_channel_preference = false;
+    user_config.channel_handshake_limits.their_to_self_delay = channels_config.their_to_self_delay;
+    user_config.channel_handshake_limits.max_minimum_depth = channels_config.max_minimum_depth;
     user_config
         .channel_handshake_config
         .negotiate_anchors_zero_fee_htlc_tx = true;
+    user_config.channel_handshake_config.our_to_self_delay = channels_config.our_to_self_delay;
+    user_config
+        .channel_handshake_config
+        .max_inbound_htlc_value_in_flight_percent_of_channel =
+        channels_config.max_inbound_htlc_value_in_flight_percent;
+    user_config.channel_handshake_config.our_max_accepted_htlcs =
+        channels_config.our_max_accepted_htlcs;
+    user_config.channel_config = channels_config.channel_config();
+    user_config.accept_forwards_to_priv_channels = channels_config.accept_forwards_to_priv_channels;
     user_config.manually_accept_inbound_channels = true;
     let manager_file = fs::File::open(ldk_data_dir.join("manager"));
     // `restarting_node` and `channel_manager_blockhash` are only consumed by the block-sync
@@ -2724,8 +2744,9 @@ pub(crate) async fn start_ldk(
     let connect_pm = Arc::clone(&peer_manager);
     let peer_data_path = ldk_data_dir.join(CHANNEL_PEER_DATA);
     let stop_connect = Arc::clone(&stop_processing);
+    let peer_reconnect_interval_secs = static_state.config.node.peer_reconnect_interval_secs;
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut interval = tokio::time::interval(Duration::from_secs(peer_reconnect_interval_secs));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
@@ -2803,12 +2824,15 @@ pub(crate) async fn start_ldk(
 
     let peer_man = Arc::clone(&peer_manager);
     let chan_man = Arc::clone(&channel_manager);
+    let announce_initial_delay_secs = static_state.config.node.announce_initial_delay_secs;
+    let announce_refresh_interval_secs = static_state.config.node.announce_refresh_interval_secs;
     tokio::spawn(async move {
         // First wait a minute until we have some peers and maybe have opened a channel.
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(announce_initial_delay_secs)).await;
         // Then, update our announcement once an hour to keep it fresh but avoid unnecessary churn
         // in the global gossip network.
-        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(announce_refresh_interval_secs));
         loop {
             interval.tick().await;
             // Don't bother trying to announce if we don't have any public channls, though our

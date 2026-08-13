@@ -88,6 +88,15 @@ specifying:
 - LN peer listening port (`--ldk-peer-listening-port`, default: 9735)
 - network (`--network`, default: testnet)
 
+### Configuration file
+
+The node can be configured via a TOML file, loaded from
+`<storage_directory_path>/config.toml` if it exists, or from the path given
+with `--config <path>`. All settings are optional and documented, along with
+their defaults, in [sample-config.toml](sample-config.toml). Values are
+resolved in order: built-in defaults, then the config file, then explicit CLI
+options. Invalid values and unknown keys abort startup with an error.
+
 ### Regtest
 
 To easily start the required services on a regtest network, run:
