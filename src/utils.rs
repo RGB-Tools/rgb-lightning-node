@@ -35,7 +35,6 @@ use crate::crypto::{decrypt_mnemonic, encrypt_mnemonic};
 use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::RgbFileTransferHandler;
-use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
 use crate::{
     args::UserArgs,
     disk::FilesystemLogger,
@@ -54,7 +53,6 @@ pub(crate) const LOGS_DIR: &str = "logs";
 pub(crate) const ELECTRUM_URL_REGTEST: &str = "127.0.0.1:50001";
 #[cfg(all(test, feature = "electrum"))]
 pub(crate) const PROXY_ENDPOINT_LOCAL: &str = "rpc://127.0.0.1:3000/json-rpc";
-const PASSWORD_MIN_LENGTH: u8 = 8;
 
 pub(crate) struct AppState {
     pub(crate) static_state: Arc<StaticState>,
@@ -98,6 +96,7 @@ pub(crate) struct StaticState {
     pub(crate) max_aggregated_media_size_per_channel_mb: u16,
     pub(crate) max_pending_consignments: usize,
     pub(crate) max_media_files_per_channel: usize,
+    pub(crate) config: Arc<crate::config::Config>,
 }
 
 pub(crate) struct UnlockedAppState {
@@ -170,10 +169,10 @@ pub(crate) fn check_already_initialized(mnemonic_path: &Path) -> Result<(), APIE
     Ok(())
 }
 
-pub(crate) fn check_password_strength(password: String) -> Result<(), APIError> {
-    if password.len() < PASSWORD_MIN_LENGTH as usize {
+pub(crate) fn check_password_strength(password: String, min_length: u8) -> Result<(), APIError> {
+    if password.len() < min_length as usize {
         return Err(APIError::InvalidPassword(format!(
-            "must have at least {PASSWORD_MIN_LENGTH} chars"
+            "must have at least {min_length} chars"
         )));
     }
     Ok(())
@@ -373,6 +372,7 @@ pub(crate) async fn start_daemon(args: &UserArgs) -> Result<Arc<AppState>, AppEr
         max_aggregated_media_size_per_channel_mb: args.max_aggregated_media_size_per_channel_mb,
         max_pending_consignments: args.max_pending_consignments,
         max_media_files_per_channel: args.max_media_files_per_channel,
+        config: Arc::new(args.config.clone()),
     });
 
     let app_state = Arc::new(AppState {
@@ -422,6 +422,7 @@ pub(crate) fn get_max_local_rgb_amount<'r>(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn get_route(
+    config: &crate::config::Config,
     channel_manager: &crate::ldk::ChannelManager,
     router: &crate::ldk::Router,
     ldk_data_dir_path: &Path,
@@ -454,7 +455,7 @@ pub(crate) fn get_route(
             node_id: dest,
             route_hints: hints,
             features: None,
-            final_cltv_expiry_delta: DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
+            final_cltv_expiry_delta: config.payments.final_cltv_expiry_delta,
         },
         expiry_time: None,
         max_total_cltv_expiry_delta: DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
@@ -468,7 +469,7 @@ pub(crate) fn get_route(
         &start,
         &RouteParameters {
             payment_params,
-            final_value_msat: final_value_msat.unwrap_or(HTLC_MIN_MSAT),
+            final_value_msat: final_value_msat.unwrap_or(config.channels.htlc_min_msat),
             max_total_routing_fee_msat: None,
             rgb_payment,
         },
