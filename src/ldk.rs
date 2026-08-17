@@ -638,6 +638,25 @@ fn find_and_update_rgb_chan_amt(ldk_data_dir: &Path, payment_hash: &PaymentHash,
     }
 }
 
+// Funding checkpoint reached after the RGB stock is promoted (fascia consumed, allocations
+// swept into the batch transfer) but before the funding tx is handed to LDK.
+#[cfg(debug_assertions)]
+pub(crate) const FUNDING_CHECKPOINT_AFTER_COLOR: &str = "after-color-before-handoff";
+
+// Test-only crash injection: parks the process at a named funding checkpoint when
+// `RLN_FUNDING_KILL_AT` matches, so a test harness can SIGKILL it there. Debug builds only.
+#[cfg(debug_assertions)]
+fn funding_kill_checkpoint(name: &str) {
+    if std::env::var("RLN_FUNDING_KILL_AT").as_deref() == Ok(name) {
+        if let Ok(path) = std::env::var("RLN_FUNDING_KILL_READY_PATH") {
+            let _ = fs::write(path, name);
+        }
+        loop {
+            std::thread::park();
+        }
+    }
+}
+
 // Handle an rgb-lib error that happened while preparing a channel funding transaction in
 // FundingGenerationReady. Returns the value to propagate from the event handler: `Err(ReplayEvent)`
 // to retry the event (for transient network errors), or `Ok(())` after force-closing the channel
@@ -886,6 +905,8 @@ async fn handle_ldk_events(
                     Ok(unsigned_psbt) => (unsigned_psbt, None),
                 }
             };
+            #[cfg(debug_assertions)]
+            funding_kill_checkpoint(FUNDING_CHECKPOINT_AFTER_COLOR);
 
             let signed_psbt = unlocked_state.rgb_sign_psbt(unsigned_psbt).unwrap();
             let psbt = Psbt::from_str(&signed_psbt).unwrap();

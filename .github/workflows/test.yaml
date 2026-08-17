@@ -9,31 +9,27 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Draft scope: only the funding-crash demonstration test runs, and it is
+# expected to fail (it reproduces the bug). The full suite returns before this
+# PR leaves draft.
 jobs:
-  test_and_coverage:
+  funding-crash-demo:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: llvm-tools-preview
           toolchain: stable
           rustflags: ""
-      - name: Install llvm-cov
-        env:
-          LLVM_COV_RELEASES: https://github.com/taiki-e/cargo-llvm-cov/releases
-        run: |
-          host=$(rustc -Vv | grep host | sed 's/host: //')
-          curl -fsSL $LLVM_COV_RELEASES/latest/download/cargo-llvm-cov-$host.tar.gz | tar xzf - -C "$HOME/.cargo/bin"
-      - name: Tests and coverage report
-        run: ./coverage.sh --ci
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v6
-        with:
-          fail_ci_if_error: true
-          file: coverage.lcov
-          flags: rust
-          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Build daemon binary (spawned as a subprocess by the test)
+        run: cargo build
+      - name: Start regtest services
+        run: ./regtest.sh start
+      - name: Run funding-crash demonstration test
+        run: SKIP_INIT=1 cargo test --bin rgb-lightning-node funding_crash -- --test-threads=1 --nocapture
+      - name: Stop regtest services
+        if: always()
+        run: ./regtest.sh stop
