@@ -1189,6 +1189,11 @@ async fn list_transfers(node_address: SocketAddr, asset_id: &str) -> Vec<Transfe
     let payload = ListTransfersRequest {
         asset_filter: AssetFilter::Id(asset_id.to_string()),
         txid: None,
+        index_offset: None,
+        max_transfers: None,
+        status: None,
+        created_after: None,
+        created_before: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node_address}/listtransfers"))
