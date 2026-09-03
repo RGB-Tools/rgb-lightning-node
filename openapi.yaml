@@ -2612,6 +2612,8 @@ components:
         - num_channels
         - num_usable_channels
         - local_balance_sat
+        - outbound_balance_msat
+        - inbound_balance_msat
         - eventual_close_fees_sat
         - pending_outbound_payments_sat
         - num_peers
@@ -2639,6 +2641,14 @@ components:
         local_balance_sat:
           type: integer
           example: 28616
+        outbound_balance_msat:
+          type: integer
+          description: Total outbound balance across opened channels, in millisatoshis
+          example: 85000000
+        inbound_balance_msat:
+          type: integer
+          description: Total inbound balance across opened channels, in millisatoshis
+          example: 15000000
         eventual_close_fees_sat:
           type: integer
           example: 892

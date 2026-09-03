@@ -1,4 +1,4 @@
-use self::routes::HTLC_MIN_MSAT;
+use self::routes::{ChannelStatus, HTLC_MIN_MSAT};
 
 use super::*;
 
@@ -34,14 +34,20 @@ async fn multi_hop() {
     assert_eq!(node1_info.num_channels, 0);
     assert_eq!(node1_info.num_usable_channels, 0);
     assert_eq!(node1_info.local_balance_sat, 0);
+    assert_eq!(node1_info.outbound_balance_msat, 0);
+    assert_eq!(node1_info.inbound_balance_msat, 0);
     assert_eq!(node1_info.num_peers, 0);
     assert_eq!(node2_info.num_channels, 0);
     assert_eq!(node2_info.num_usable_channels, 0);
     assert_eq!(node2_info.local_balance_sat, 0);
+    assert_eq!(node2_info.outbound_balance_msat, 0);
+    assert_eq!(node2_info.inbound_balance_msat, 0);
     assert_eq!(node2_info.num_peers, 0);
     assert_eq!(node3_info.num_channels, 0);
     assert_eq!(node3_info.num_usable_channels, 0);
     assert_eq!(node3_info.local_balance_sat, 0);
+    assert_eq!(node3_info.outbound_balance_msat, 0);
+    assert_eq!(node3_info.inbound_balance_msat, 0);
     assert_eq!(node3_info.num_peers, 0);
 
     let recipient_id = rgb_invoice(node2_addr, None, false).await.recipient_id;
@@ -146,6 +152,25 @@ async fn multi_hop() {
     assert_eq!(node3_info.num_usable_channels, 1);
     assert_eq!(node3_info.local_balance_sat, push_sat); // push
     assert_eq!(node3_info.num_peers, 1);
+
+    for (node_info, channels) in [
+        (&node1_info, &channels_1_before),
+        (&node2_info, &channels_2_before),
+        (&node3_info, &channels_3_before),
+    ] {
+        let expected_outbound_msat = channels
+            .iter()
+            .filter(|channel| matches!(&channel.status, ChannelStatus::Opened))
+            .map(|channel| channel.outbound_balance_msat)
+            .sum::<u64>();
+        let expected_inbound_msat = channels
+            .iter()
+            .filter(|channel| matches!(&channel.status, ChannelStatus::Opened))
+            .map(|channel| channel.inbound_balance_msat)
+            .sum::<u64>();
+        assert_eq!(node_info.outbound_balance_msat, expected_outbound_msat);
+        assert_eq!(node_info.inbound_balance_msat, expected_inbound_msat);
+    }
 
     let LNInvoiceResponse { invoice } =
         ln_invoice(node3_addr, None, Some(&asset_id), Some(50), 900).await;
