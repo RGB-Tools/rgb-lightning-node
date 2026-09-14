@@ -2393,6 +2393,7 @@ mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
 mod out_of_band;
 mod payment;
+mod penalty_transaction;
 mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
 mod restart;
