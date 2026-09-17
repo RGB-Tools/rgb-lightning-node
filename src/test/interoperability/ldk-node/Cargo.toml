@@ -1,0 +1,7 @@
+[package]
+name = "stock-ldk-node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ldk-node = { git = "https://github.com/lightningdevkit/ldk-node", rev = "16eaa6f46308965f501904506be3ceecd293f358" }

@@ -1,0 +1,31 @@
+name: Run interoperability tests
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  interoperability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          rustflags: ""
+      # the fixture pulls in a full stock LDK dependency tree, so it's cached on its own lockfile
+      - name: Cache the stock ldk-node fixture
+        uses: actions/cache@v4
+        with:
+          path: target/interoperability
+          key: ldk-node-fixture-${{ hashFiles('src/test/interoperability/ldk-node/Cargo.lock') }}
+      - name: Interoperability tests
+        run: cargo test interoperability -- --ignored --test-threads=1

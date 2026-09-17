@@ -1,5 +1,5 @@
 [submodule "rust-lightning"]
 	path = rust-lightning
-	url = https://github.com/RGB-Tools/rust-lightning.git
-	branch = rgb
+	url = https://github.com/bitwalt/rust-lightning.git
+	branch = rgb-stock-ldk-interop
 	shallow = true
