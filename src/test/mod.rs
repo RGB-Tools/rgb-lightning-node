@@ -2375,7 +2375,9 @@ mod drop_funding_signed;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;
 mod fail_transfers;
+mod getassetmedia_path_traversal;
 mod getchannelid;
+mod getconsignment_path_traversal;
 mod htlc_amount_checks;
 mod inflate;
 mod init;
