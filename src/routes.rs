@@ -957,6 +957,8 @@ pub(crate) struct NodeInfoResponse {
     pub(crate) num_channels: usize,
     pub(crate) num_usable_channels: usize,
     pub(crate) local_balance_sat: u64,
+    pub(crate) outbound_balance_msat: u64,
+    pub(crate) inbound_balance_msat: u64,
     pub(crate) eventual_close_fees_sat: u64,
     pub(crate) pending_outbound_payments_sat: u64,
     pub(crate) num_peers: usize,
@@ -3388,6 +3390,20 @@ pub(crate) async fn network_info(
     }))
 }
 
+fn aggregate_open_channel_balances(
+    channels: impl IntoIterator<Item = (bool, bool, u64, u64)>,
+) -> (u64, u64) {
+    channels
+        .into_iter()
+        .filter(|(is_ready, is_not_shutting_down, _, _)| *is_ready && *is_not_shutting_down)
+        .fold(
+            (0, 0),
+            |(outbound, inbound), (_, _, outbound_msat, inbound_msat)| {
+                (outbound + outbound_msat, inbound + inbound_msat)
+            },
+        )
+}
+
 pub(crate) async fn node_info(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<NodeInfoResponse>, APIError> {
@@ -3395,6 +3411,18 @@ pub(crate) async fn node_info(
     let unlocked_state = guard.as_ref().unwrap();
 
     let chans = unlocked_state.channel_manager.list_channels();
+    let (outbound_balance_msat, inbound_balance_msat) =
+        aggregate_open_channel_balances(chans.iter().map(|channel| {
+            (
+                channel.is_channel_ready,
+                matches!(
+                    channel.channel_shutdown_state,
+                    Some(ChannelShutdownState::NotShuttingDown)
+                ),
+                channel.outbound_capacity_msat,
+                channel.inbound_capacity_msat,
+            )
+        }));
 
     let balances = unlocked_state.chain_monitor.get_claimable_balances(&[]);
     let local_balance_sat = balances
@@ -3431,6 +3459,8 @@ pub(crate) async fn node_info(
         num_channels: chans.len(),
         num_usable_channels: chans.iter().filter(|c| c.is_usable).count(),
         local_balance_sat,
+        outbound_balance_msat,
+        inbound_balance_msat,
         eventual_close_fees_sat,
         pending_outbound_payments_sat,
         num_peers: unlocked_state.peer_manager.list_peers().len(),
@@ -4371,4 +4401,21 @@ pub(crate) async fn unlock(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+#[cfg(test)]
+mod node_info_tests {
+    use super::aggregate_open_channel_balances;
+
+    #[test]
+    fn aggregate_balances_excludes_channels_that_are_not_opened() {
+        let channels = [
+            (true, true, 3_000, 7_000),
+            (false, true, 11_000, 13_000),
+            (true, false, 23_000, 29_000),
+            (true, true, 17_000, 19_000),
+        ];
+
+        assert_eq!(aggregate_open_channel_balances(channels), (20_000, 26_000));
+    }
 }
