@@ -2164,6 +2164,20 @@ async fn wait_for_usable_channels(node_address: SocketAddr, expected_num_usable_
     }
 }
 
+async fn wait_for_no_channels(node_address: SocketAddr) {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let num_channels = list_channels(node_address).await.len();
+        if num_channels == 0 {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("channels are not becoming empty ({num_channels} remaining)");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
 async fn wait_for_ln_payment(
     node_address: SocketAddr,
     payment_hash: &str,
@@ -2375,6 +2389,7 @@ mod drop_funding_signed;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;
 mod fail_transfers;
+mod funding_persist_before_validate;
 mod getchannelid;
 mod htlc_amount_checks;
 mod inflate;
