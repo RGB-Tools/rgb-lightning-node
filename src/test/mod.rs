@@ -2358,6 +2358,7 @@ pub fn mock_fee(fee: u32) -> u32 {
     }
 }
 
+mod accept_before_validate;
 mod authentication;
 mod backup_and_restore;
 mod close_coop_nobtc_acceptor;
@@ -2393,8 +2394,10 @@ mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
 mod out_of_band;
 mod payment;
+mod push_asset_amount;
 mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
+mod repro_util;
 mod restart;
 mod send_receive;
 mod swap_assets_liquidity_both_ways;
