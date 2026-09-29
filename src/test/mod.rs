@@ -1556,18 +1556,7 @@ async fn open_channel_raw(
               to {dest_peer_pubkey}"
     );
 
-    let blockcount = get_block_count();
-    let t_0 = OffsetDateTime::now_utc();
-    loop {
-        let net_info = network_info(node_address).await;
-        if net_info.height == blockcount {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
-            panic!("height is not syncing");
-        }
-    }
+    wait_for_height(node_address, get_block_count()).await;
 
     let peer_pubkey_and_opt_addr = if let Some(p) = dest_peer_port {
         format!("{dest_peer_pubkey}@127.0.0.1:{p}")
@@ -2125,6 +2114,21 @@ async fn wait_for_balance(node_address: SocketAddr, asset_id: &str, expected_bal
             panic!("balance ({balance}) is not becoming the expected one ({expected_balance})");
         }
         refresh_transfers(node_address).await;
+    }
+}
+
+async fn wait_for_height(node_address: SocketAddr, expected_height: u32) {
+    println!("waiting for height to become {expected_height} on node {node_address}");
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let height = network_info(node_address).await.height;
+        if height == expected_height {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 10.0 {
+            panic!("height ({height}) is not becoming the expected one ({expected_height})");
+        }
     }
 }
 

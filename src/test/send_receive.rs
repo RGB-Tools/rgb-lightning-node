@@ -186,6 +186,6 @@ async fn send_receive() {
 
     // check network info reports the increased height
     // 6x from funding (2 each for 3 nodes) + 4x from transfers (1st transfer, 2nd asset transfer, batch transfer, 3rd transfer)
-    let net_info = network_info(node1_addr).await;
-    assert_eq!(net_info.height, height_1 + 10);
+    // (the node syncs the chain in background, so wait for it to catch up)
+    wait_for_height(node1_addr, height_1 + 10).await;
 }
