@@ -33,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::crypto::{decrypt_mnemonic, encrypt_mnemonic};
 use crate::ldk::{ChannelIdsMap, Router};
+use crate::ldk_chain_backend::DynFeeEstimator;
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::RgbFileTransferHandler;
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
@@ -102,6 +103,7 @@ pub(crate) struct StaticState {
 
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
+    pub(crate) fee_estimator: Arc<DynFeeEstimator>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,

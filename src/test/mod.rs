@@ -74,6 +74,7 @@ use crate::routes::{
     SendRgbResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus,
     UnlockRequest, Unspent, WitnessData,
 };
+use crate::routes::{EstimateFeeRequest, EstimateFeeResponse};
 use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
 
 use super::*;
@@ -1145,6 +1146,22 @@ async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
         .await
         .unwrap();
     check_response_is_ok(res).await.json().await.unwrap()
+}
+
+async fn estimate_fee(node_address: SocketAddr, blocks: u16) -> EstimateFeeResponse {
+    println!("estimating fee for {blocks} blocks on node {node_address}");
+    let payload = EstimateFeeRequest { blocks };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/estimatefee"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<EstimateFeeResponse>()
+        .await
+        .unwrap()
 }
 
 async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> Swap {

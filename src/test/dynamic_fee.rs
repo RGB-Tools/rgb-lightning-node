@@ -3,8 +3,31 @@ use crate::ldk_chain_backend::{MAX_FEERATE, MIN_FEERATE};
 
 const TEST_DIR_BASE: &str = "tmp/dynamic_fee/";
 
+// 1 sat/vB == 250 sat/kWu; both units describe the same rate.
+const SAT_PER_KWU_PER_SAT_VB: f64 = 250.0;
+
 // A funding tx priced at or below 7 sat/vB can only come from the reintroduced hardcode.
 const REMOVED_FEE_RATE_SAT_VB: f64 = 7.0;
+
+// rgb-lib overpays slightly: its size model overestimates witness sizes, so measured rates
+// deviate only by small percentages unless rates are resolved wrongly.
+const FEERATE_REL_TOLERANCE: f64 = 0.015;
+const FEERATE_MIN_TOLERANCE_SAT_VB: f64 = 0.10;
+
+// Asserts measured sits in [expected - 0.5*tol, expected + tol]; tol = 1.5% or the 0.1 floor.
+fn assert_feerate(measured: f64, expected: f64, context: &str) {
+    let tol = (expected * FEERATE_REL_TOLERANCE).max(FEERATE_MIN_TOLERANCE_SAT_VB);
+    let lo = expected - 0.5 * tol;
+    let hi = expected + tol;
+    let dev = (measured - expected) / expected * 100.0;
+    println!(
+        "{context}: measured {measured:.3} sat/vB vs expected {expected:.3} (dev {dev:+.3}%, band {lo:.3}..{hi:.3})"
+    );
+    assert!(
+        lo <= measured && measured <= hi,
+        "{context}: feerate {measured:.3} sat/vB must be within [{lo:.3}, {hi:.3}] (expected {expected:.3})"
+    );
+}
 
 // Effective feerate of a confirmed tx in sats per vsize, derived from its inputs' prevouts.
 fn tx_feerate(txid: &str) -> f64 {
@@ -77,12 +100,18 @@ async fn dynamic_fee() {
     );
 
     // Sanity band: the poll loops never store values outside [MIN_FEERATE, MAX_FEERATE].
-    let min_sat_vb = MIN_FEERATE as f64 / 250.0;
-    let max_sat_vb = MAX_FEERATE as f64 / 250.0;
+    let min_sat_vb = MIN_FEERATE as f64 / SAT_PER_KWU_PER_SAT_VB;
+    let max_sat_vb = MAX_FEERATE as f64 / SAT_PER_KWU_PER_SAT_VB;
     assert!(
         min_sat_vb <= measured && measured <= max_sat_vb,
         "funding feerate {measured} sat/vB must stay within the sane band [{min_sat_vb}, {max_sat_vb}] sat/vB"
     );
+
+    // /estimatefee serves its background tier from the same cache that priced the funding tx:
+    // the measured on-chain rate must agree with it.
+    let estimated = estimate_fee(node1_addr, 1).await;
+    let expected = estimated.fee_rates.background as f64 / SAT_PER_KWU_PER_SAT_VB;
+    assert_feerate(measured, expected, "funding vs /estimatefee background");
 
     let channels_1 = list_channels(node1_addr).await;
     let channels_2 = list_channels(node2_addr).await;

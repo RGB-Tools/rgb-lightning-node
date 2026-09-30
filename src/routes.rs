@@ -10,6 +10,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use hex::DisplayHex;
+use lightning::chain::chaininterface::ConfirmationTarget;
 use lightning::ln::{channelmanager::OptionalOfferPaymentParams, types::ChannelId};
 use lightning::offers::offer::{self, Offer};
 use lightning::onion_message::messenger::Destination;
@@ -597,6 +598,16 @@ pub(crate) struct EstimateFeeRequest {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct EstimateFeeResponse {
     pub(crate) fee_rate: f64,
+    pub(crate) fee_rates: FeeRates,
+}
+
+// sat/kWu, as held in the `FeeEstimator` by the chain backend poll loops
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct FeeRates {
+    pub(crate) background: u32,
+    pub(crate) normal: u32,
+    pub(crate) high_prio: u32,
+    pub(crate) very_high_prio: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2019,14 +2030,22 @@ pub(crate) async fn estimate_fee(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<EstimateFeeRequest>, APIError>,
 ) -> Result<Json<EstimateFeeResponse>, APIError> {
-    let fee_rate = state
-        .check_unlocked()
-        .await?
-        .clone()
-        .unwrap()
-        .rgb_get_fee_estimation(payload.blocks)?;
+    let unlocked = state.check_unlocked().await?.clone().unwrap();
+    let fee_rate = unlocked.rgb_get_fee_estimation(payload.blocks)?;
 
-    Ok(Json(EstimateFeeResponse { fee_rate }))
+    // mirror the targets the chain backend poll loops write into
+    let est = |target| unlocked.fee_estimator.get_est_sat_per_1000_weight(target);
+    let fee_rates = FeeRates {
+        background: est(ConfirmationTarget::OutputSpendingFee),
+        normal: est(ConfirmationTarget::NonAnchorChannelFee),
+        high_prio: est(ConfirmationTarget::UrgentOnChainSweep),
+        very_high_prio: est(ConfirmationTarget::MaximumFeeEstimate),
+    };
+
+    Ok(Json(EstimateFeeResponse {
+        fee_rate,
+        fee_rates,
+    }))
 }
 
 pub(crate) async fn fail_transfers(
