@@ -1,4 +1,5 @@
 use super::*;
+use crate::ldk_chain_backend::{MAX_FEERATE, MIN_FEERATE};
 
 const TEST_DIR_BASE: &str = "tmp/dynamic_fee/";
 
@@ -73,6 +74,14 @@ async fn dynamic_fee() {
     assert!(
         measured > REMOVED_FEE_RATE_SAT_VB,
         "funding feerate {measured} sat/vB is at or below the removed hardcoded {REMOVED_FEE_RATE_SAT_VB} sat/vB"
+    );
+
+    // Sanity band: the poll loops never store values outside [MIN_FEERATE, MAX_FEERATE].
+    let min_sat_vb = MIN_FEERATE as f64 / 250.0;
+    let max_sat_vb = MAX_FEERATE as f64 / 250.0;
+    assert!(
+        min_sat_vb <= measured && measured <= max_sat_vb,
+        "funding feerate {measured} sat/vB must stay within the sane band [{min_sat_vb}, {max_sat_vb}] sat/vB"
     );
 
     let channels_1 = list_channels(node1_addr).await;
