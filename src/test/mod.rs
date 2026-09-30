@@ -2372,6 +2372,7 @@ mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
 mod drop_funding_signed;
+mod dynamic_fee;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;
 mod fail_transfers;
