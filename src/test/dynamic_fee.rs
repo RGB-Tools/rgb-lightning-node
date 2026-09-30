@@ -1,6 +1,8 @@
 use super::*;
 use crate::ldk_chain_backend::{MAX_FEERATE, MIN_FEERATE};
 
+use std::collections::HashSet;
+
 const TEST_DIR_BASE: &str = "tmp/dynamic_fee/";
 
 // 1 sat/vB == 250 sat/kWu; both units describe the same rate.
@@ -50,6 +52,63 @@ fn tx_feerate(txid: &str) -> f64 {
     let vsize = tx["vsize"].as_f64().expect("tx vsize");
 
     (inputs_sat.saturating_sub(outputs_sat)) as f64 / vsize
+}
+
+// Txids currently in the regtest mempool.
+fn mempool_txids() -> HashSet<String> {
+    let raw = bitcoind(&["getrawmempool"]);
+    serde_json::from_str::<Vec<String>>(&raw)
+        .expect("valid mempool txid array")
+        .into_iter()
+        .collect()
+}
+
+// Effective feerate of `txid` in sats per vsize; `fees.base` is a BTC float.
+fn mempool_feerate(txid: &str) -> f64 {
+    let raw = bitcoind(&["getmempoolentry", txid]);
+    let entry: serde_json::Value = serde_json::from_str(&raw).expect("valid mempool entry");
+    let sats = (entry["fees"]["base"].as_f64().expect("fees.base") * 1e8).round() as u64;
+    sats as f64 / entry["vsize"].as_u64().expect("vsize") as f64
+}
+
+// Waits for exactly one new tx; broadcasting is async so it appears after the API returns.
+async fn wait_for_new_mempool_tx(before: &HashSet<String>) -> String {
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let now = mempool_txids();
+        let new: Vec<&String> = now.difference(before).collect();
+        match new.len() {
+            1 => return new[0].clone(),
+            n if n > 1 => panic!("expected one new mempool tx, got {n}"),
+            _ => {}
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 90.0 {
+            panic!("no new tx appeared in the mempool within 90 seconds");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+// createutxos with an explicit fee_rate, or None to exercise the estimator fallback.
+async fn create_utxos_with_fee(node_address: SocketAddr, fee_rate: Option<u64>) {
+    let payload = CreateUtxosRequest {
+        up_to: false,
+        num: Some(1),
+        size: Some(32_000),
+        fee_rate,
+        skip_sync: false,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/createutxos"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
 }
 
 #[serial_test::serial]
@@ -117,4 +176,26 @@ async fn dynamic_fee() {
     let channels_2 = list_channels(node2_addr).await;
     assert_eq!(channels_1.len(), 1);
     assert_eq!(channels_2.len(), 1);
+
+    // ---- fee_rate is now optional; absent/0 falls back to the estimator's output-spending tier. ----
+
+    fund_and_create_utxos(node1_addr, None).await;
+
+    stop_mining();
+    let before = mempool_txids();
+    create_utxos_with_fee(node1_addr, Some(120)).await;
+    let txid = wait_for_new_mempool_tx(&before).await;
+    assert_feerate(mempool_feerate(&txid), 120.0, "create_utxos explicit fee");
+
+    let expected_fallback =
+        estimate_fee(node1_addr, 1).await.fee_rates.background as f64 / SAT_PER_KWU_PER_SAT_VB;
+    let before = mempool_txids();
+    create_utxos_with_fee(node1_addr, None).await;
+    let txid = wait_for_new_mempool_tx(&before).await;
+    assert_feerate(
+        mempool_feerate(&txid),
+        expected_fallback,
+        "create_utxos omitted-fee fallback",
+    );
+    resume_mining();
 }

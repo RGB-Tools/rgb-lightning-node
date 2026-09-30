@@ -607,7 +607,7 @@ async fn create_utxos(node_address: SocketAddr, up_to: bool, num: Option<u8>, si
         up_to,
         num,
         size,
-        fee_rate: FEE_RATE,
+        fee_rate: Some(FEE_RATE),
         skip_sync: false,
     };
     let res = reqwest::Client::new()
@@ -796,7 +796,7 @@ async fn inflate(node_address: SocketAddr, asset_id: &str, inflation_amount: u64
     let payload = InflateRequest {
         asset_id: asset_id.to_string(),
         inflation_amounts: vec![inflation_amount],
-        fee_rate: FEE_RATE,
+        fee_rate: Some(FEE_RATE),
         min_confirmations: 1,
     };
     let res = reqwest::Client::new()
@@ -1886,7 +1886,7 @@ async fn send_assets(
     );
     let payload = SendRgbRequest {
         donation,
-        fee_rate: FEE_RATE,
+        fee_rate: Some(FEE_RATE),
         min_confirmations: 1,
         expiration_timestamp: OffsetDateTime::now_utc().unix_timestamp() as u64 + DURATION_SECONDS,
         recipient_map,
@@ -1910,7 +1910,7 @@ async fn send_btc(node_address: SocketAddr, amount: u64, address: &str) -> Strin
     let payload = SendBtcRequest {
         amount,
         address: address.to_string(),
-        fee_rate: FEE_RATE,
+        fee_rate: Some(FEE_RATE),
         skip_sync: false,
     };
     let res = reqwest::Client::new()
