@@ -165,6 +165,11 @@ pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0
 #[cfg(test)]
 pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
+// Test-only: the node with this pubkey sends a junk consignment when funding a vanilla channel
+#[cfg(test)]
+pub(crate) static INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE: Mutex<Option<PublicKey>> =
+    Mutex::new(None);
+
 // Test-only: whether the given override targets the node we are running as
 #[cfg(test)]
 pub(crate) fn node_override_matches(
@@ -1003,6 +1008,25 @@ async fn handle_ldk_events(
                     }
                 }
 
+                unlocked_state.peer_manager.process_events();
+            }
+
+            // Test-only: send a junk consignment for this vanilla channel
+            #[cfg(test)]
+            if !is_colored
+                && node_override_matches(
+                    &INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE,
+                    unlocked_state.channel_manager.get_our_node_id(),
+                )
+            {
+                unlocked_state
+                    .rgb_file_transfer_handler
+                    .queue_consignment(
+                        counterparty_node_id,
+                        funding_txid_str.clone(),
+                        b"this is not an RGB consignment, it is attacker-controlled junk".to_vec(),
+                    )
+                    .expect("queue junk consignment");
                 unlocked_state.peer_manager.process_events();
             }
 
