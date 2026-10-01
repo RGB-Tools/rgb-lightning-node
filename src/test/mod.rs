@@ -47,7 +47,7 @@ use crate::error::APIErrorResponse;
 use crate::ldk::{
     DEFER_PAYMENT_CLAIMABLE_ON_NODE, FEE_RATE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
     HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE,
-    PAYMENT_CLAIMABLE_DEFERRED,
+    INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE, PAYMENT_CLAIMABLE_DEFERRED,
 };
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetFilter, AssetIFA,
@@ -2381,6 +2381,7 @@ mod inflate;
 mod init;
 mod invoice;
 mod issue;
+mod junk_consignment_vanilla_bypass;
 mod lock_unlock_changepassword;
 mod missing_acceptor;
 mod multi_hop;
