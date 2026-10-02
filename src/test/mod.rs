@@ -109,6 +109,7 @@ impl Default for UserArgs {
             max_pending_consignments: 10,
             max_media_files_per_channel: 42,
             root_public_key: None,
+            config: Default::default(),
         }
     }
 }

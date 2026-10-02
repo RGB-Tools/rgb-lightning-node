@@ -1,0 +1,94 @@
+# Sample configuration file for rgb-lightning-node.
+#
+# The node loads <storage_directory_path>/config.toml if it exists, or the
+# file given via --config. Values here override the built-in defaults and are
+# overridden by explicit CLI options. All keys are optional; unknown keys are
+# rejected. The values below document the defaults.
+
+[auth]
+# Disable biscuit token authentication
+#disable_authentication = false
+# Minimum accepted wallet password length
+#password_min_length = 8
+# Root public key for biscuit token authentication (hex-encoded)
+#root_public_key = ""
+
+[chain]
+# Interval between fee estimate refreshes (seconds)
+#fee_refresh_interval_secs = 60
+
+[channels]
+# Forward HTLCs to private (unannounced) channels
+#accept_forwards_to_priv_channels = false
+# CLTV expiry delta advertised for forwarded HTLCs (min 48)
+#cltv_expiry_delta = 72
+# Minimum inbound payment amount (msat)
+#dust_limit_msat = 546000
+# Default forwarding base fee for new channels (msat)
+#forwarding_fee_base_msat = 1000
+# Default forwarding proportional fee for new channels (parts per million)
+#forwarding_fee_proportional_millionths = 0
+# Minimum HTLC amount on RGB channels (msat, must clear HTLC dust so asset payments can settle)
+#htlc_min_msat = 3000000
+# Max dust HTLC exposure as a fixed msat limit (mutually exclusive with the multiplier variant)
+#max_dust_htlc_exposure_fixed_msat = 5000000
+# Max dust HTLC exposure as a multiplier on the max fee estimate (mutually exclusive with the fixed variant)
+#max_dust_htlc_exposure_multiplier = 10000
+# Max inbound HTLC value in flight, percent of channel capacity (1-100)
+#max_inbound_htlc_value_in_flight_percent = 10
+# Max confirmations a peer may require before a channel is usable
+#max_minimum_depth = 144
+# Maximum channel capacity (sat, protocol limit 16777215)
+#open_max_sat = 16777215
+# Minimum RGB asset amount in a channel
+#open_min_rgb_amount = 1
+# Minimum capacity for a vanilla channel (sat)
+#open_min_sat = 5506
+# Max concurrent HTLCs we accept per channel (1-483)
+#our_max_accepted_htlcs = 50
+# to_self_delay we require from the counterparty (144-2016)
+#our_to_self_delay = 144
+# Maximum to_self_delay accepted from the counterparty (max 2016)
+#their_to_self_delay = 2016
+
+[media]
+# Max aggregate size of RGB media accepted over p2p per channel-open (MB)
+#max_aggregated_media_size_per_channel_mb = 24
+# Max number of RGB media files accepted over p2p per channel-open
+#max_media_files_per_channel = 42
+# Max allowed media size for upload (MB)
+#max_media_upload_size_mb = 5
+# Max number of pending channel-open consignments buffered over p2p at once
+#max_pending_consignments = 10
+
+[node]
+# Delay before the first node announcement broadcast (seconds)
+#announce_initial_delay_secs = 60
+# Interval between node announcement refreshes (seconds)
+#announce_refresh_interval_secs = 3600
+# Listening port of the daemon
+#daemon_listening_port = 3001
+# Listening port for LN peers
+#ldk_peer_listening_port = 9735
+# Bitcoin network (Mainnet, Testnet, Testnet4, Signet, Regtest)
+#network = "Testnet"
+# Interval between channel peer reconnection attempts (seconds)
+#peer_reconnect_interval_secs = 1
+
+[payments]
+# Final CLTV expiry delta used for payments
+#final_cltv_expiry_delta = 14
+# Maximum acceptable total swap fee (msat)
+#max_swap_fee_msat = 3000000
+# Payment retry timeout in seconds
+#retry_timeout_secs = 10
+
+[rgb]
+# Default fee rate in sat/vB for coloring, witness and channel funding txs
+#fee_rate_sat_vb = 7
+# Confirmations required for channel funding transactions
+#min_channel_confirmations = 6
+# Default number of UTXOs created by /createutxos
+#utxo_num = 4
+# Default size in sats for colorable UTXOs created by /createutxos
+#utxo_size_sat = 32000

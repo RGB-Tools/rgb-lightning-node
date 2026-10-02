@@ -75,6 +75,7 @@ impl IndexerClient {
         protocol: RgbLibIndexerProtocol,
         handle: tokio::runtime::Handle,
         logger: Arc<FilesystemLogger>,
+        fee_refresh_interval_secs: u64,
     ) -> io::Result<Self> {
         let fees = Arc::new(default_fee_buckets());
         let backend = match protocol {
@@ -91,6 +92,7 @@ impl IndexerClient {
                     client.clone(),
                     logger.clone(),
                     handle.clone(),
+                    fee_refresh_interval_secs,
                 );
                 IndexerBackend::Electrum(client)
             }
@@ -105,6 +107,7 @@ impl IndexerClient {
                     client.clone(),
                     logger.clone(),
                     handle.clone(),
+                    fee_refresh_interval_secs,
                 );
                 IndexerBackend::Esplora(client)
             }
@@ -444,6 +447,7 @@ fn poll_electrum_fee_estimates(
     client: Arc<ElectrumClient>,
     logger: Arc<FilesystemLogger>,
     handle: tokio::runtime::Handle,
+    fee_refresh_interval_secs: u64,
 ) {
     handle.spawn(async move {
         loop {
@@ -484,7 +488,7 @@ fn poll_electrum_fee_estimates(
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(fee_refresh_interval_secs)).await;
         }
     });
 }
@@ -495,6 +499,7 @@ fn poll_esplora_fee_estimates(
     client: Arc<EsploraBlockingClient>,
     logger: Arc<FilesystemLogger>,
     handle: tokio::runtime::Handle,
+    fee_refresh_interval_secs: u64,
 ) {
     handle.spawn(async move {
         loop {
@@ -530,7 +535,7 @@ fn poll_esplora_fee_estimates(
                 Err(e) => log_warn!(logger, "Error polling esplora fee estimates: {}", e),
             }
 
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_secs(fee_refresh_interval_secs)).await;
         }
     });
 }

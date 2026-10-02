@@ -123,6 +123,7 @@ impl BitcoindClient {
         rpc_password: String,
         handle: tokio::runtime::Handle,
         logger: Arc<FilesystemLogger>,
+        fee_refresh_interval_secs: u64,
     ) -> std::io::Result<Self> {
         let http_endpoint = HttpEndpoint::for_host(host.clone()).with_port(port);
         let rpc_credentials = general_purpose::STANDARD.encode(format!(
@@ -149,6 +150,7 @@ impl BitcoindClient {
             client.bitcoind_rpc_client.clone(),
             client.logger.clone(),
             handle,
+            fee_refresh_interval_secs,
         );
         Ok(client)
     }
@@ -158,6 +160,7 @@ impl BitcoindClient {
         rpc_client: Arc<RpcClient>,
         logger: Arc<FilesystemLogger>,
         handle: tokio::runtime::Handle,
+        fee_refresh_interval_secs: u64,
     ) {
         handle.spawn(async move {
             async fn get_estimate(
@@ -246,7 +249,7 @@ impl BitcoindClient {
                     mempoolmin_estimate,
                 );
 
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(Duration::from_secs(fee_refresh_interval_secs)).await;
             }
         });
     }
