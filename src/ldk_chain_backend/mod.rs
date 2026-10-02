@@ -11,6 +11,10 @@ use lightning::chain::chaininterface::ConfirmationTarget;
 #[cfg(feature = "transaction-sync")]
 use lightning::chain::Confirm;
 use lightning::chain::{BestBlock, Filter};
+use lightning::log_warn;
+use lightning::util::logger::Logger;
+
+use crate::disk::FilesystemLogger;
 
 // the chain backends are used as trait objects so a single set of LDK type aliases works
 // regardless of the selected sync mode
@@ -19,6 +23,8 @@ pub(crate) type DynBroadcaster =
     dyn lightning::chain::chaininterface::BroadcasterInterface + Send + Sync;
 
 pub(crate) const MIN_FEERATE: u32 = 253;
+// poll-loop sanity ceiling, 2500 sat/vB
+pub(crate) const MAX_FEERATE: u32 = 625_000;
 
 pub(crate) enum ChainBackend {
     #[cfg(feature = "block-sync")]
@@ -102,12 +108,31 @@ fn fee_from_bucket(
 // they differ only in the value used for `MinAllowedAnchorChannelRemoteFee`
 fn store_fee_estimates(
     fees: &HashMap<ConfirmationTarget, AtomicU32>,
+    logger: &FilesystemLogger,
     background: u32,
     normal: u32,
     high_prio: u32,
     very_high_prio: u32,
     min_allowed_anchor: u32,
 ) {
+    // reject out-of-range estimates and keep the last known good values
+    if ![
+        min_allowed_anchor,
+        background,
+        normal,
+        high_prio,
+        very_high_prio,
+    ]
+    .iter()
+    .all(|fee| (MIN_FEERATE..=MAX_FEERATE).contains(fee))
+    {
+        log_warn!(
+            logger,
+            "Fee estimates out of sane range, keeping last known"
+        );
+        return;
+    }
+
     let set = |target: ConfirmationTarget, value: u32| {
         fees.get(&target).unwrap().store(value, Ordering::Release);
     };

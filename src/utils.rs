@@ -10,6 +10,7 @@ use lightning::routing::router::{
     DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA, MAX_PATH_LENGTH_ESTIMATE,
 };
 use lightning::{
+    chain::chaininterface::ConfirmationTarget,
     onion_message::packet::OnionMessageContents,
     sign::KeysManager,
     util::ser::{Writeable, Writer},
@@ -33,6 +34,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::crypto::{decrypt_mnemonic, encrypt_mnemonic};
 use crate::ldk::{ChannelIdsMap, Router};
+use crate::ldk_chain_backend::DynFeeEstimator;
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::RgbFileTransferHandler;
 use crate::routes::{DEFAULT_FINAL_CLTV_EXPIRY_DELTA, HTLC_MIN_MSAT};
@@ -102,6 +104,7 @@ pub(crate) struct StaticState {
 
 pub(crate) struct UnlockedAppState {
     pub(crate) channel_manager: Arc<ChannelManager>,
+    pub(crate) fee_estimator: Arc<DynFeeEstimator>,
     pub(crate) inbound_payments: Arc<Mutex<InboundPaymentInfoStorage>>,
     pub(crate) keys_manager: Arc<KeysManager>,
     pub(crate) network_graph: Arc<NetworkGraph>,
@@ -121,6 +124,21 @@ pub(crate) struct UnlockedAppState {
 }
 
 impl UnlockedAppState {
+    // Resolves the per-vByte fee a spend API should use: the caller's explicit rate wins,
+    // and an absent or 0 value falls back to the output-spending tier (1 sat/vB = 250 sat/kWu),
+    // the same tier that prices channel funding.
+    pub(crate) fn resolve_fee_sat_per_vb(&self, requested: Option<u64>) -> u64 {
+        match requested {
+            Some(fee_rate) if fee_rate > 0 => fee_rate,
+            _ => {
+                self.fee_estimator
+                    .get_est_sat_per_1000_weight(ConfirmationTarget::OutputSpendingFee)
+                    as u64
+                    / 250
+            }
+        }
+    }
+
     pub(crate) fn get_inbound_payments(&self) -> MutexGuard<'_, InboundPaymentInfoStorage> {
         self.inbound_payments.lock().unwrap()
     }
