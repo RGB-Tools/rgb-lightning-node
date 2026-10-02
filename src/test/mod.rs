@@ -2371,6 +2371,7 @@ mod close_force_pending_htlc;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
+mod delete_channel_id;
 mod drop_funding_signed;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;
@@ -2395,6 +2396,7 @@ mod out_of_band;
 mod payment;
 mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
+mod repro_util;
 mod restart;
 mod send_receive;
 mod swap_assets_liquidity_both_ways;
@@ -2414,6 +2416,7 @@ mod swap_roundtrip_multihop_asset_asset;
 mod swap_roundtrip_multihop_buy;
 mod swap_roundtrip_multihop_sell;
 mod swap_roundtrip_sell;
+mod temp_channel_id_collision;
 #[cfg(feature = "transaction-sync")]
 mod transaction_sync;
 mod upload_asset_media;
