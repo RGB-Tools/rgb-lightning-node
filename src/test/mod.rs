@@ -2380,6 +2380,7 @@ mod htlc_amount_checks;
 mod inflate;
 mod init;
 mod invoice;
+mod invoice_rgb_underpay;
 mod issue;
 mod lock_unlock_changepassword;
 mod missing_acceptor;
