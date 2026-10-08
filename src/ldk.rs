@@ -28,9 +28,9 @@ use lightning::onion_message::messenger::{
     DefaultMessageRouter, OnionMessenger as LdkOnionMessenger,
 };
 use lightning::rgb_utils::{
-    get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, write_rgb_channel_info, INDEXER_URL_FNAME, STATIC_BLINDING,
-    WALLET_MASTER_FINGERPRINT_FNAME,
+    get_rgb_channel_info_pending, get_rgb_payment_info_path, is_channel_rgb,
+    parse_rgb_payment_info, read_rgb_transfer_info, update_rgb_channel_amount,
+    write_rgb_channel_info, INDEXER_URL_FNAME, STATIC_BLINDING, WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -197,6 +197,9 @@ pub(crate) struct PaymentInfo {
     pub(crate) expires_at: Option<u64>,
     pub(crate) description: Option<String>,
     pub(crate) description_hash: Option<[u8; 32]>,
+    // RGB asset and amount an invoice asked for, checked against what the payer sends
+    pub(crate) rgb_contract_id: Option<String>,
+    pub(crate) rgb_amount: Option<u64>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -210,6 +213,9 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (14, expires_at, option),
     (16, description, option),
     (18, description_hash, option),
+    // odd types so older binaries skip the fields instead of failing the whole read
+    (21, rgb_contract_id, option),
+    (23, rgb_amount, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -434,6 +440,8 @@ impl UnlockedAppState {
                     expires_at: None,
                     description: None,
                     description_hash: None,
+                    rgb_contract_id: None,
+                    rgb_amount: None,
                 });
             }
         }
@@ -609,6 +617,22 @@ pub(crate) type OutputSweeper = ldk_sweep::OutputSweeper<
     Arc<FilesystemLogger>,
     Arc<RgbOutputSpender>,
 >;
+
+// Whether the RGB (asset, amount) received for an invoice covers what the invoice asked for. An
+// invoice without an RGB asset accepts only plain bitcoin payments
+fn rgb_receipt_satisfies_invoice(
+    expected_contract_id: Option<&str>,
+    expected_amount: Option<u64>,
+    received: Option<(&str, u64)>,
+) -> bool {
+    match (expected_contract_id, received) {
+        (None, None) => true,
+        (Some(expected_contract_id), Some((contract_id, amount))) => {
+            contract_id == expected_contract_id && amount >= expected_amount.unwrap_or(0)
+        }
+        _ => false,
+    }
+}
 
 fn find_and_update_rgb_chan_amt(ldk_data_dir: &Path, payment_hash: &PaymentHash, receiver: bool) {
     let payment_hash_str = hex_str(&payment_hash.0);
@@ -1067,6 +1091,48 @@ async fn handle_ldk_events(
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     tracing::info!("TEST: resuming PaymentClaimable for {}", payment_hash);
+                }
+            }
+            // The HTLC's RGB is set by the payer, so compare it with what the invoice asked for
+            // before revealing the preimage
+            let inbound_invoice = unlocked_state
+                .get_inbound_payments()
+                .payments
+                .get(&payment_hash)
+                .cloned();
+            if let Some(invoice) = inbound_invoice {
+                let rgb_payment_info_path_inbound =
+                    get_rgb_payment_info_path(&payment_hash, &static_state.ldk_data_dir, true);
+                let received_rgb = if rgb_payment_info_path_inbound.exists() {
+                    let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
+                    Some((info.contract_id.to_string(), info.amount))
+                } else {
+                    None
+                };
+                if !rgb_receipt_satisfies_invoice(
+                    invoice.rgb_contract_id.as_deref(),
+                    invoice.rgb_amount,
+                    received_rgb.as_ref().map(|(c, a)| (c.as_str(), *a)),
+                ) {
+                    tracing::warn!(
+                        "Failing payment {} as the received RGB {:?} doesn't match the invoice (asset {:?}, amount at least {:?})",
+                        payment_hash,
+                        received_rgb,
+                        invoice.rgb_contract_id,
+                        invoice.rgb_amount,
+                    );
+                    unlocked_state
+                        .channel_manager
+                        .fail_htlc_backwards(&payment_hash);
+                    unlocked_state.upsert_inbound_payment(
+                        payment_hash,
+                        HTLCStatus::Failed,
+                        None,
+                        None,
+                        Some(amount_msat),
+                        unlocked_state.channel_manager.get_our_node_id(),
+                    );
+                    return Ok(());
                 }
             }
             let payment_preimage = match purpose {
@@ -2904,4 +2970,49 @@ pub(crate) async fn stop_ldk(app_state: Arc<AppState>) {
     }
 
     tracing::info!("Stopped LDK");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_receipt_satisfies_invoice_checks_asset_and_amount() {
+        let cid = "rgb:EIkAVQvq-WbAb5JG-CYxbUER-oqDNwne-ZNxBDID-p0cpf9U";
+        let other = "rgb:other";
+        // plain bitcoin invoice
+        assert!(rgb_receipt_satisfies_invoice(None, None, None));
+        // an RGB payment to a plain bitcoin invoice is not what was asked for
+        assert!(!rgb_receipt_satisfies_invoice(None, None, Some((cid, 1))));
+        // RGB invoice paid without RGB
+        assert!(!rgb_receipt_satisfies_invoice(Some(cid), Some(50), None));
+        // underpayment, exact payment, overpayment
+        assert!(!rgb_receipt_satisfies_invoice(
+            Some(cid),
+            Some(50),
+            Some((cid, 49))
+        ));
+        assert!(rgb_receipt_satisfies_invoice(
+            Some(cid),
+            Some(50),
+            Some((cid, 50))
+        ));
+        assert!(rgb_receipt_satisfies_invoice(
+            Some(cid),
+            Some(50),
+            Some((cid, 51))
+        ));
+        // wrong asset with enough units
+        assert!(!rgb_receipt_satisfies_invoice(
+            Some(cid),
+            Some(50),
+            Some((other, 50))
+        ));
+        // invoice without an amount accepts any amount of its asset
+        assert!(rgb_receipt_satisfies_invoice(
+            Some(cid),
+            None,
+            Some((cid, 1))
+        ));
+    }
 }
