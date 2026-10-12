@@ -2422,6 +2422,7 @@ mod payment;
 mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
 mod restart;
+mod rgb_htlc_balance_checks;
 mod send_receive;
 mod swap_assets_liquidity_both_ways;
 mod swap_reverse_same_channel;
