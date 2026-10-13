@@ -1620,6 +1620,7 @@ async fn handle_ldk_events(
                 if inbound_rgb_amount != Some(whitelist_swap.swap_info.qty_to)
                     || inbound_rgb_info.map(|x| x.0) != whitelist_swap.swap_info.to_asset
                     || net_msat_diff != Some(whitelist_swap.swap_info.qty_from)
+                    || expected_outbound_rgb_payment.is_some()
                 {
                     fail = true;
                 }
@@ -1631,6 +1632,7 @@ async fn handle_ldk_events(
                     != Some(whitelist_swap.swap_info.qty_from)
                     || outbound_rgb_info.map(|x| x.0) != whitelist_swap.swap_info.from_asset
                     || net_msat_diff != whitelist_swap.swap_info.qty_to
+                    || inbound_rgb_amount.is_some()
                 {
                     fail = true;
                 }
