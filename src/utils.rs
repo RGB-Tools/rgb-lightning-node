@@ -252,7 +252,18 @@ pub(crate) async fn do_connect_peer(
             let mut connection_closed_future = Box::pin(connection_closed_future);
             loop {
                 tokio::select! {
-                    _ = &mut connection_closed_future => return Err(APIError::FailedPeerConnection),
+                    _ = &mut connection_closed_future => {
+                        // The persisted-peer auto-reconnect can race this connect and get the
+                    // duplicate dropped; wait briefly for the peer to appear before failing.
+                        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                        while tokio::time::Instant::now() < deadline {
+                            if peer_manager.peer_by_node_id(&pubkey).is_some() {
+                                return Ok(());
+                            }
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                        return Err(APIError::FailedPeerConnection);
+                    },
                     _ = tokio::time::sleep(Duration::from_millis(10)) => {},
                 };
                 if peer_manager.peer_by_node_id(&pubkey).is_some() {

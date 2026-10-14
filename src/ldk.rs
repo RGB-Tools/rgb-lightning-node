@@ -2119,6 +2119,7 @@ pub(crate) async fn start_ldk(
         Arc::clone(&keys_manager),
         Arc::clone(&broadcaster),
         Arc::clone(&fee_estimator),
+        Some(ldk_data_dir.to_string_lossy().to_string()),
     ));
 
     // Initialize the ChainMonitor
