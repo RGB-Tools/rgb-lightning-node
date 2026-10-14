@@ -3,6 +3,10 @@ use super::*;
 const TEST_DIR_BASE: &str = "tmp/penalty_transaction/";
 const CHANNEL_CAPACITY_SAT: u64 = 100_000;
 const RGB_ON_NODE_A: u64 = 600;
+// B RGB units held at the backed-up state: 0 (A's to_local carries the full balance) and
+// 100 (the revoked commitment carries RGB on both sides, so the justice sweep only
+// colors A's to_local and B separately claims its to_remote).
+const B_HELD_RGB_ITERATIONS: [u64; 2] = [0, 100];
 
 // Recursive copy of an entire directory tree.
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
@@ -83,7 +87,7 @@ fn mempool_funding_spender_exists(prev_txid: &str) -> bool {
 }
 
 // Polls the mempool until some tx spending `(prev_txid, prev_vout)` appears,
-// i.e. the counterparty's justice (penalty) sweep has been broadcast.
+// i.e. the counterparty's justice or balance sweep has been broadcast.
 async fn wait_for_mempool_spender(prev_txid: &str, prev_vout: u64) {
     let t_0 = OffsetDateTime::now_utc();
     loop {
@@ -113,7 +117,7 @@ async fn wait_for_mempool_funding_spender(prev_txid: &str) {
 }
 
 // Returns the largest output of `tx` (the to_local side's balance); the
-// counterparty's to_remote output is dust-sized, so the max is unambiguous.
+// counterparty's to_remote output is much smaller, so the max is unambiguous.
 fn to_local_output(tx: &serde_json::Value) -> (usize, u64) {
     tx["vout"]
         .as_array()
@@ -137,6 +141,37 @@ fn to_local_output(tx: &serde_json::Value) -> (usize, u64) {
             (i, sat)
         })
         .expect("revoked commitment has a to_local output")
+}
+
+// Returns the (index, value) of B's to_remote balance output on the broadcast
+// commitment. All commitment outputs are witness_v0_scripthash, so the output
+// is identified by value: it is the only one above the anchor amount (330 sats)
+// after excluding the to_local output (the others are the two anchor outputs and
+// the zero-value RGB OP_RETURN).
+fn to_remote_output(tx: &serde_json::Value, to_local_index: usize) -> (usize, u64) {
+    let candidates: Vec<(usize, u64)> = tx["vout"]
+        .as_array()
+        .expect("vout array")
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != to_local_index)
+        .map(|(i, v)| {
+            (
+                i,
+                Amount::from_btc(v["value"].as_f64().expect("output value"))
+                    .expect("valid amount")
+                    .to_sat(),
+            )
+        })
+        .filter(|(_, sat)| *sat > 330)
+        .collect();
+    assert_eq!(
+        candidates.len(),
+        1,
+        "expected exactly one to_remote output, got {}: {candidates:?}",
+        candidates.len()
+    );
+    candidates[0]
 }
 
 // Waits until the node's spendable BTC balance is exactly `expected_sat`.
@@ -169,22 +204,17 @@ async fn wait_for_asset_balance_exact(node_address: SocketAddr, asset_id: &str, 
     }
 }
 
-// BOLT #3 / BOLT #5: after Node A broadcasts a revoked commitment transaction,
-// Node B must detect the breach and sweep the channel funds with a justice tx.
-#[serial_test::serial]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[traced_test]
-async fn penalty_transaction() {
-    initialize();
-
-    let test_dir_base = format!("{TEST_DIR_BASE}revoked_commitment/");
-    let test_dir_node1 = format!("{test_dir_base}node1");
-    let test_dir_node2 = format!("{test_dir_base}node2");
-    let backup_dir = format!("{test_dir_base}node1_backup");
+// Full penalty scenario against one B-held-RGB fixture. `b_held_rgb` is B's balance
+// at the state A is cheated back to: with 0 the revoked commitment colors only A's
+// to_local; with 100 it also colors B's to_remote, which B must claim separately.
+async fn run_penalty_scenario(iter_dir_base: &str, b_held_rgb: u64) {
+    let test_dir_node1 = format!("{iter_dir_base}node1");
+    let test_dir_node2 = format!("{iter_dir_base}node2");
+    let backup_dir = format!("{iter_dir_base}node1_backup");
 
     // Start and fund both nodes.
-    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
-    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
+    let (mut node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, false).await;
+    let (mut node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, false).await;
     fund_and_create_utxos(node1_addr, None).await;
     fund_and_create_utxos(node2_addr, None).await;
 
@@ -201,7 +231,7 @@ async fn penalty_transaction() {
     )
     .await;
 
-    // State 1: open a channel with 600 RGB units on A's side.
+    // State 0: open a channel with 600 RGB units on A's side.
     let channel = open_channel(
         node1_addr,
         &node2_pubkey,
@@ -213,6 +243,22 @@ async fn penalty_transaction() {
     )
     .await;
 
+    // State 1: when B must already hold RGB before the cheat, settle a payment first
+    // so the state A is cheated back to carries RGB on both the to_local and to_remote.
+    if b_held_rgb > 0 {
+        keysend_with_ln_balance(
+            node1_addr,
+            node2_addr,
+            &node2_pubkey,
+            Some(6_000_000),
+            Some(&asset_id),
+            Some(b_held_rgb),
+            Some(RGB_ON_NODE_A),
+            Some(0),
+        )
+        .await;
+    }
+
     // Snapshot A's State 1 balance (A's wallet is untouched by the channel);
     // back up its directory as the "honest" state to rewind the cheat from.
     let node1_btc_after_open = btc_balance(node1_addr).await.vanilla.spendable;
@@ -223,7 +269,7 @@ async fn penalty_transaction() {
     copy_dir_all(&test_dir_node1, &backup_dir).unwrap();
 
     // Restart A from its State 1 state.
-    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
     connect_peer(
         node1_addr,
         &node2_pubkey,
@@ -231,7 +277,7 @@ async fn penalty_transaction() {
     )
     .await;
 
-    // State 2: a payment revokes State 1 on both sides.
+    // State 2: a payment revokes State 1 on both sides, leaving 100 RGB to B.
     keysend_with_ln_balance(
         node1_addr,
         node2_addr,
@@ -239,8 +285,8 @@ async fn penalty_transaction() {
         Some(6_000_000),
         Some(&asset_id),
         Some(100),
-        Some(RGB_ON_NODE_A),
-        Some(0),
+        Some(RGB_ON_NODE_A - b_held_rgb),
+        Some(b_held_rgb),
     )
     .await;
 
@@ -250,7 +296,7 @@ async fn penalty_transaction() {
     copy_dir_all(&backup_dir, &test_dir_node1).unwrap();
 
     // Restart A with the stale State 1 state.
-    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
 
     // Force-close from A, which broadcasts the revoked State 1 commitment.
     let close = CloseChannelRequest {
@@ -267,7 +313,8 @@ async fn penalty_transaction() {
     check_response_is_ok(res).await;
 
     // Wait for the revoked commitment to hit the mempool (the close is async),
-    // then read its to_local output: the fund B must sweep with a justice tx.
+    // then locate the outputs B must sweep: A's to_local (the justice target) and
+    // B's own to_remote when it carried RGB at the revoked state.
     let funding_txid = channel
         .funding_txid
         .as_ref()
@@ -279,38 +326,60 @@ async fn penalty_transaction() {
         .expect("revoked commitment tx spending the funding output");
     let revoked = tx_json(&revoked_txid);
     let (to_local_index, to_local_value) = to_local_output(&revoked);
+    let (to_remote_index, to_remote_value) = if b_held_rgb > 0 {
+        to_remote_output(&revoked, to_local_index)
+    } else {
+        (0, 0)
+    };
     mine(false);
 
     // Restart B so it syncs and detects the breach.
     shutdown(&[node1_addr]).await;
-    let (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
-    let node2_dir = format!("{test_dir_base}node2");
+    (node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT, true).await;
     wait_for_ldk_log(
-        &node2_dir,
+        &test_dir_node2,
         "Got broadcast of revoked counterparty commitment transaction",
     )
     .await;
 
     // Wait for B's justice tx, mine it, then confirm it to ANTI_REORG_DELAY depth
-    // so the OutputSweeper emits a SpendableOutputs consolidating sweep.
+    // so the OutputSweeper emits the SpendableOutputs consolidating sweeps.
     wait_for_mempool_spender(&revoked_txid, to_local_index as u64).await;
     let justice_txid = mempool_txids()
         .into_iter()
         .find(|t| tx_spends_output(t, &revoked_txid, to_local_index as u64))
         .expect("justice tx spending the revoked to_local output");
     mine(false);
-    // ANTI_REORG_DELAY confirmations are required before LDK arms the sweep.
     mine_n_blocks(true, 10);
 
-    // Wait for and mine the OutputSweeper consolidating sweep.
+    // Wait for and mine the OutputSweeper sweeps: at minimum the one spending the
+    // justice output; when B held RGB on its to_remote, also B's claim of that output.
     wait_for_mempool_funding_spender(&justice_txid).await;
     let sweep_txid = mempool_txids()
         .into_iter()
         .find(|t| tx_spends_output_any(t, &justice_txid))
         .expect("sweep tx spending the justice output");
+    let to_remote_claim_txid = if b_held_rgb > 0 {
+        wait_for_mempool_spender(&revoked_txid, to_remote_index as u64).await;
+        Some(
+            mempool_txids()
+                .into_iter()
+                .find(|t| tx_spends_output(t, &revoked_txid, to_remote_index as u64))
+                .expect("to_remote claim tx spending the revoked to_remote output"),
+        )
+    } else {
+        None
+    };
     mine(false);
 
-    // Assert justice tx structure: one input (the revoked to_local), one output.
+    // Confirm and settle the sweeps: the sweeper self-provided the swept RGB to B's
+    // own wallet, so B must refresh to sync the confirmed sweeps and accept the
+    // self-provided consignments before the balance is spendable.
+    refresh_transfers(node2_addr).await;
+    refresh_transfers(node2_addr).await;
+
+    // Assert justice tx structure: one input (the revoked to_local), two outputs
+    // (vout 0 = the BTC destination, vout 1 = the RGB OP_RETURN).
     let justice_tx = tx_json(&justice_txid);
     let justice_inputs = justice_tx["vin"].as_array().expect("justice vin");
     assert_eq!(justice_inputs.len(), 1, "justice tx has one input");
@@ -325,39 +394,76 @@ async fn penalty_transaction() {
         "justice input spends the to_local outpoint"
     );
     let justice_outputs = justice_tx["vout"].as_array().expect("justice vout");
-    assert_eq!(justice_outputs.len(), 1, "justice tx has one output");
-
-    // Assert sweep tx structure: one input (justice:0), one output.
-    let sweep_tx = tx_json(&sweep_txid);
-    let sweep_inputs = sweep_tx["vin"].as_array().expect("sweep vin");
-    assert_eq!(sweep_inputs.len(), 1, "sweep tx has one input");
+    assert_eq!(justice_outputs.len(), 2, "justice tx has two outputs");
     assert_eq!(
-        sweep_inputs[0]["txid"].as_str(),
-        Some(justice_txid.as_str()),
-        "sweep input spends the justice output"
+        justice_outputs[1]["scriptPubKey"]["type"].as_str(),
+        Some("nulldata"),
+        "justice second output is the RGB OP_RETURN"
     );
     assert_eq!(
-        sweep_inputs[0]["vout"].as_u64(),
-        Some(0),
-        "sweep input spends justice:0"
+        justice_outputs[1]["value"].as_f64(),
+        Some(0.0),
+        "justice RGB OP_RETURN output has zero value"
     );
-    let sweep_outputs = sweep_tx["vout"].as_array().expect("sweep vout");
-    assert_eq!(sweep_outputs.len(), 1, "sweep tx has one output");
 
-    let sweep_out = to_local_output(&sweep_tx).1;
-    let expected_node2_btc = node2_btc_before + sweep_out;
+    // Assert the sweep structure: in the single-claim iteration (B held no RGB at
+    // the revoked state) the sweeper colors exactly the one justice output and
+    // emits one input, three outputs (OP_RETURN, P2WPKH destination, Taproot RGB
+    // receive output at dust). When B also claims its to_remote, the sweeps may
+    // consolidate into one tx, so only the BTC totals are asserted below.
+    if b_held_rgb == 0 {
+        let sweep_tx = tx_json(&sweep_txid);
+        let sweep_inputs = sweep_tx["vin"].as_array().expect("sweep vin");
+        assert_eq!(sweep_inputs.len(), 1, "sweep tx has one input");
+        assert_eq!(
+            sweep_inputs[0]["txid"].as_str(),
+            Some(justice_txid.as_str()),
+            "sweep input spends the justice output"
+        );
+        assert_eq!(
+            sweep_inputs[0]["vout"].as_u64(),
+            Some(0),
+            "sweep input spends justice:0"
+        );
+        let sweep_outputs = sweep_tx["vout"].as_array().expect("sweep vout");
+        assert_eq!(sweep_outputs.len(), 3, "sweep tx has three outputs");
+        assert_eq!(
+            sweep_outputs[0]["scriptPubKey"]["type"].as_str(),
+            Some("nulldata"),
+            "sweep first output is the RGB OP_RETURN"
+        );
+        assert_eq!(
+            sweep_outputs[0]["value"].as_f64(),
+            Some(0.0),
+            "sweep RGB OP_RETURN output has zero value"
+        );
+    }
+
+    // The to_remote claim may consolidate with the justice sweep (same digest) or
+    // broadcast separately; either way B must receive the sats of both claims.
+    let sweep_out = to_local_output(&tx_json(&sweep_txid)).1;
+    let to_remote_out = match to_remote_claim_txid.as_deref() {
+        Some(claim) if claim != sweep_txid => to_local_output(&tx_json(claim)).1,
+        _ => 0,
+    };
+    let expected_node2_btc = node2_btc_before + sweep_out + to_remote_out;
+    // the fee estimator's feerate varies with chain state; the bound only guards
+    // against gross overpaying
     assert!(
-        to_local_value - sweep_out < 5_000,
-        "total fees ({}) must be under 5 000 sats",
-        to_local_value - sweep_out,
+        to_local_value + to_remote_value - sweep_out - to_remote_out < 10_000,
+        "total fees ({}) must be under 10 000 sats",
+        to_local_value + to_remote_value - sweep_out - to_remote_out
     );
     wait_for_btc_balance_exact(node2_addr, expected_node2_btc).await;
 
-    // The 600 RGB on the revoked to_local were swept to the honest node (B).
+    // B ends up with the full 600: when B held RGB at the revoked state that is
+    // the spent to_local (500) plus the claimed to_remote (100); a justice tx that
+    // double-colored or burned the to_local would leave B at a different balance.
     wait_for_asset_balance_exact(node2_addr, &asset_id, RGB_ON_NODE_A).await;
 
     // A's wallet was never touched by the channel; its balance must be unchanged.
-    let (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    (node1_addr, _) = start_node(&test_dir_node1, NODE1_PEER_PORT, true).await;
+    refresh_transfers(node1_addr).await;
     wait_for_btc_balance_exact(node1_addr, node1_btc_after_open).await;
     // A issued 1000 RGB; the 600 put in the channel went to B on the penalty,
     // so A is left with the 400 it never committed.
@@ -365,4 +471,20 @@ async fn penalty_transaction() {
 
     // Stop both nodes and release their sockets.
     shutdown(&[node1_addr, node2_addr]).await;
+}
+
+// BOLT #3 / BOLT #5: after Node A broadcasts a revoked commitment transaction,
+// Node B must detect the breach and sweep the channel funds with a justice tx.
+// Run once with B holding no RGB before the cheat (all 600 on A's to_local) and
+// once with B holding 100 (the revoked commitment colors both sides).
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn penalty_transaction() {
+    initialize();
+
+    for b_held_rgb in B_HELD_RGB_ITERATIONS {
+        let iter_dir_base = format!("{TEST_DIR_BASE}b_held_{b_held_rgb}/");
+        run_penalty_scenario(&iter_dir_base, b_held_rgb).await;
+    }
 }
