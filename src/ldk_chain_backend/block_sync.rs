@@ -239,6 +239,7 @@ impl BitcoindClient {
 
                 store_fee_estimates(
                     &fees,
+                    &logger,
                     background_estimate,
                     normal_estimate,
                     high_prio_estimate,
