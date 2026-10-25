@@ -4268,6 +4268,12 @@ pub(crate) async fn shutdown(
     .await
 }
 
+/// Signs `message` (after trimming) with `secret_key`, LN-message style. Split out of
+/// [`sign_message`] so the signing logic can be unit-tested without a running node.
+fn sign_message_with_key(message: &str, secret_key: &bitcoin::secp256k1::SecretKey) -> String {
+    lightning::util::message_signing::sign(message.trim().as_bytes(), secret_key)
+}
+
 pub(crate) async fn sign_message(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<SignMessageRequest>, APIError>,
@@ -4275,9 +4281,8 @@ pub(crate) async fn sign_message(
     let guard = state.check_unlocked().await?;
     let unlocked_state = guard.as_ref().unwrap();
 
-    let message = payload.message.trim();
-    let signed_message = lightning::util::message_signing::sign(
-        &message.as_bytes()[message.len()..],
+    let signed_message = sign_message_with_key(
+        &payload.message,
         &unlocked_state.keys_manager.get_node_secret_key(),
     );
 
@@ -4371,4 +4376,48 @@ pub(crate) async fn unlock(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+#[cfg(test)]
+mod sign_message_tests {
+    use super::sign_message_with_key;
+    use bitcoin::secp256k1::constants::ONE;
+    use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+    /// Regression test for a bug where `/signmessage` signed
+    /// `message.as_bytes()[message.len()..]` (always an empty slice) instead of the
+    /// requested message, so every signature was over the empty string: identical
+    /// regardless of the message, and "verifying" against any message whatsoever.
+    #[test]
+    fn sign_message_signs_the_actual_message() {
+        let secret_key = SecretKey::from_slice(&ONE).unwrap();
+        let public_key = PublicKey::from_secret_key(&Secp256k1::new(), &secret_key);
+
+        let message_a = "authorize withdrawal of 0 sats";
+        let message_b = "authorize withdrawal of 1000000 sats";
+
+        let sig_a = sign_message_with_key(message_a, &secret_key);
+        let sig_b = sign_message_with_key(message_b, &secret_key);
+
+        assert!(
+            lightning::util::message_signing::verify(message_a.as_bytes(), &sig_a, &public_key),
+            "signature must verify against the exact message that was signed"
+        );
+        assert!(
+            lightning::util::message_signing::verify(message_b.as_bytes(), &sig_b, &public_key),
+            "signature must verify against the exact message that was signed"
+        );
+        assert!(
+            !lightning::util::message_signing::verify(message_b.as_bytes(), &sig_a, &public_key),
+            "a message's signature must not verify against a different message"
+        );
+        assert!(
+            !lightning::util::message_signing::verify("".as_bytes(), &sig_a, &public_key),
+            "a non-empty message's signature must not verify against the empty message"
+        );
+        assert_ne!(
+            sig_a, sig_b,
+            "signing two different messages must not produce the same signature"
+        );
+    }
 }
