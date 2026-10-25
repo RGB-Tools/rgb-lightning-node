@@ -16,7 +16,7 @@ use std::time::Duration;
 #[cfg(feature = "electrum")]
 use {
     bitcoin::consensus::encode,
-    electrum_client::{Client as ElectrumClient, ElectrumApi, Param},
+    electrum_client::{Client as ElectrumClient, ConfigBuilder, ElectrumApi, Param},
     lightning_transaction_sync::ElectrumSyncClient,
     std::str::FromStr,
 };
@@ -34,6 +34,9 @@ use crate::ldk::PeerGossipSync;
 use super::{default_fee_buckets, fee_from_bucket, store_fee_estimates, MIN_FEERATE};
 
 type Confirmable = Arc<dyn Confirm + Send + Sync>;
+
+#[cfg(any(feature = "electrum", feature = "esplora"))]
+const INDEXER_TIMEOUT_SECS: u64 = 10;
 
 enum IndexerBackend {
     #[cfg(feature = "electrum")]
@@ -80,9 +83,12 @@ impl IndexerClient {
         let backend = match protocol {
             #[cfg(feature = "electrum")]
             RgbLibIndexerProtocol::Electrum => {
-                let client = Arc::new(ElectrumClient::new(&server_url).map_err(|e| {
-                    io::Error::other(format!("failed to connect to electrum server: {e}"))
-                })?);
+                let config = ConfigBuilder::new()
+                    .timeout(Some(INDEXER_TIMEOUT_SECS as u8))
+                    .build();
+                let client = Arc::new(ElectrumClient::from_config(&server_url, config).map_err(
+                    |e| io::Error::other(format!("failed to connect to electrum server: {e}")),
+                )?);
                 client.server_features().map_err(|e| {
                     io::Error::other(format!("failed to query electrum server features: {e}"))
                 })?;
@@ -96,7 +102,11 @@ impl IndexerClient {
             }
             #[cfg(feature = "esplora")]
             RgbLibIndexerProtocol::Esplora => {
-                let client = Arc::new(EsploraBuilder::new(&server_url).build_blocking());
+                let client = Arc::new(
+                    EsploraBuilder::new(&server_url)
+                        .timeout(INDEXER_TIMEOUT_SECS)
+                        .build_blocking(),
+                );
                 client.get_tip_hash().map_err(|e| {
                     io::Error::other(format!("failed to connect to esplora server: {e}"))
                 })?;
