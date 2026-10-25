@@ -868,11 +868,40 @@ pub(crate) struct ListTransactionsResponse {
 pub(crate) struct ListTransfersRequest {
     pub(crate) asset_filter: AssetFilter,
     pub(crate) txid: Option<String>,
+    pub(crate) index_offset: Option<u64>,
+    pub(crate) max_transfers: Option<u64>,
+    pub(crate) status: Option<TransferStatus>,
+    pub(crate) created_after: Option<u64>,
+    pub(crate) created_before: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ListTransfersResponse {
     pub(crate) transfers: Vec<Transfer>,
+    pub(crate) first_index_offset: u64,
+    pub(crate) last_index_offset: u64,
+}
+
+fn in_time_range(ts: u64, after: Option<u64>, before: Option<u64>) -> bool {
+    after.is_none_or(|a| ts >= a) && before.is_none_or(|b| ts <= b)
+}
+
+fn paginate_newest_first<T>(
+    mut items: Vec<(u64, T)>,
+    index_offset: u64,
+    max: Option<u64>,
+) -> (Vec<T>, u64, u64) {
+    items.sort_by_key(|(idx, _)| std::cmp::Reverse(*idx));
+    let matched = items
+        .into_iter()
+        .filter(|(idx, _)| index_offset == 0 || *idx < index_offset);
+    let page: Vec<(u64, T)> = match max {
+        Some(m) => matched.take(m as usize).collect(),
+        None => matched.collect(),
+    };
+    let first = page.first().map(|(idx, _)| *idx).unwrap_or(0);
+    let last = page.last().map(|(idx, _)| *idx).unwrap_or(0);
+    (page.into_iter().map(|(_, v)| v).collect(), first, last)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2933,7 +2962,27 @@ pub(crate) async fn list_transfers(
                 .collect(),
         })
     }
-    Ok(Json(ListTransfersResponse { transfers }))
+    transfers.retain(|t| {
+        payload.status.as_ref().is_none_or(|s| &t.status == s)
+            && in_time_range(
+                t.created_at as u64,
+                payload.created_after,
+                payload.created_before,
+            )
+    });
+
+    let indexed = transfers.into_iter().map(|t| (t.idx as u64, t)).collect();
+    let (transfers, first_index_offset, last_index_offset) = paginate_newest_first(
+        indexed,
+        payload.index_offset.unwrap_or(0),
+        payload.max_transfers,
+    );
+
+    Ok(Json(ListTransfersResponse {
+        transfers,
+        first_index_offset,
+        last_index_offset,
+    }))
 }
 
 pub(crate) async fn list_unspents(
@@ -4371,4 +4420,57 @@ pub(crate) async fn unlock(
         Ok(Json(EmptyResponse {}))
     })
     .await
+}
+
+#[cfg(test)]
+mod list_transfers_pagination_tests {
+    use super::{in_time_range, paginate_newest_first};
+
+    #[test]
+    fn time_range_bounds_are_inclusive_and_open_ended() {
+        assert!(in_time_range(50, None, None));
+        assert!(in_time_range(50, Some(50), Some(50)));
+        assert!(!in_time_range(49, Some(50), None));
+        assert!(!in_time_range(51, None, Some(50)));
+        assert!(in_time_range(50, Some(40), Some(60)));
+    }
+
+    #[test]
+    fn no_max_returns_every_match_newest_first() {
+        let items = vec![(1u64, "a"), (3, "c"), (2, "b")];
+        let (page, first, last) = paginate_newest_first(items, 0, None);
+        assert_eq!(page, vec!["c", "b", "a"]);
+        assert_eq!((first, last), (3, 1));
+    }
+
+    #[test]
+    fn index_offset_is_an_exclusive_upper_bound() {
+        let items = vec![(1u64, "a"), (2, "b"), (3, "c"), (4, "d")];
+        let (page, first, last) = paginate_newest_first(items, 3, None);
+        assert_eq!(page, vec!["b", "a"]);
+        assert_eq!((first, last), (2, 1));
+    }
+
+    #[test]
+    fn max_caps_the_page_and_reports_its_edges() {
+        let items = vec![(1u64, "a"), (2, "b"), (3, "c"), (4, "d")];
+        let (page, first, last) = paginate_newest_first(items, 0, Some(2));
+        assert_eq!(page, vec!["d", "c"]);
+        assert_eq!((first, last), (4, 3));
+    }
+
+    #[test]
+    fn max_zero_returns_an_empty_page() {
+        let items = vec![(1u64, "a"), (2, "b")];
+        let (page, first, last) = paginate_newest_first(items, 0, Some(0));
+        assert!(page.is_empty());
+        assert_eq!((first, last), (0, 0));
+    }
+
+    #[test]
+    fn empty_input_reports_zero_edges() {
+        let (page, first, last) = paginate_newest_first::<&str>(vec![], 0, None);
+        assert!(page.is_empty());
+        assert_eq!((first, last), (0, 0));
+    }
 }

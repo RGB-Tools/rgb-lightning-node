@@ -2449,15 +2449,47 @@ components:
             - string
             - 'null'
           example: 47ee0f5b7bd5b0dd7f10ce54a94fee1b5cd54e5241b0f70f9f373d10e7a3c3e2
+        index_offset:
+          type:
+            - integer
+            - 'null'
+          example: 0
+        max_transfers:
+          type:
+            - integer
+            - 'null'
+          example: 100
+        status:
+          oneOf:
+            - $ref: '#/components/schemas/TransferStatus'
+            - type: 'null'
+        created_after:
+          type:
+            - integer
+            - 'null'
+          example: 1700000000
+        created_before:
+          type:
+            - integer
+            - 'null'
+          example: 1700086400
     ListTransfersResponse:
       type: object
       required:
         - transfers
+        - first_index_offset
+        - last_index_offset
       properties:
         transfers:
           type: array
           items:
             $ref: '#/components/schemas/Transfer'
+        first_index_offset:
+          type: integer
+          example: 0
+        last_index_offset:
+          type: integer
+          example: 0
     ListUnspentsRequest:
       type: object
       required:
