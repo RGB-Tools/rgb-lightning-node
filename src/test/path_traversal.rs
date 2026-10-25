@@ -129,9 +129,14 @@ async fn path_traversal() {
 
     // /getconsignment: transfers_dir.join(txid).join(asset_id).join("consignment_out")
     for bad in identifiers(&sentinel) {
-        for (asset_id, txid) in [
-            (asset_id.clone(), bad.clone()),
-            (bad.clone(), good_txid.clone()),
+        for (asset_id, txid, msg, name) in [
+            (asset_id.clone(), bad.clone(), "Invalid txid", "InvalidTxid"),
+            (
+                bad.clone(),
+                good_txid.clone(),
+                "Invalid asset ID",
+                "InvalidAssetID",
+            ),
         ] {
             let res = reqwest::Client::new()
                 .post(format!("http://{node1_addr}/getconsignment"))
@@ -139,13 +144,7 @@ async fn path_traversal() {
                 .send()
                 .await
                 .unwrap();
-            check_response_is_nok(
-                res,
-                reqwest::StatusCode::BAD_REQUEST,
-                "Consignment not found",
-                "ConsignmentNotFound",
-            )
-            .await;
+            check_response_is_nok(res, reqwest::StatusCode::BAD_REQUEST, msg, name).await;
         }
     }
 
