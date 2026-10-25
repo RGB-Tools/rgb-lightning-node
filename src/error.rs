@@ -248,6 +248,9 @@ pub enum APIError {
     #[error("Invalid transport endpoints: {0}")]
     InvalidTransportEndpoints(String),
 
+    #[error("Invalid txid: {0}")]
+    InvalidTxid(String),
+
     #[error("IO error: {0}")]
     IO(#[from] std::io::Error),
 
@@ -518,6 +521,7 @@ impl APIError {
             | APIError::InvalidTlvType(_)
             | APIError::InvalidTransportEndpoint(_)
             | APIError::InvalidTransportEndpoints(_)
+            | APIError::InvalidTxid(_)
             | APIError::MediaFileEmpty
             | APIError::MediaFileNotProvided
             | APIError::MissingSwapPaymentPreimage

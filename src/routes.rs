@@ -83,10 +83,10 @@ use tokio::{
 use crate::ldk::{node_override_matches, FORCE_PUSH_ASSET_AMOUNT_ON_NODE};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
-    check_already_initialized, check_channel_id, check_password_strength, check_password_validity,
-    description_fields, encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path,
-    get_route, hex_str, hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState,
-    UserOnionMessageContents,
+    check_already_initialized, check_asset_id, check_channel_id, check_media_digest,
+    check_password_strength, check_password_validity, check_txid, description_fields,
+    encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
+    hex_str_to_compressed_pubkey, hex_str_to_vec, UnlockedAppState, UserOnionMessageContents,
 };
 use crate::{
     backup::{do_backup, restore_backup},
@@ -2063,7 +2063,7 @@ pub(crate) async fn get_asset_media(
         .clone()
         .unwrap()
         .rgb_get_media_dir()
-        .join(payload.digest.to_lowercase());
+        .join(check_media_digest(&payload.digest)?);
     if !file_path.exists() {
         return Err(APIError::InvalidMediaDigest);
     }
@@ -2095,12 +2095,14 @@ pub(crate) async fn get_consignment(
     State(state): State<Arc<AppState>>,
     WithRejection(Json(payload), _): WithRejection<Json<GetConsignmentRequest>, APIError>,
 ) -> Result<Json<GetConsignmentResponse>, APIError> {
+    let contract_id = check_asset_id(&payload.asset_id)?;
+    let txid = check_txid(&payload.txid)?;
     let file_path = state
         .check_unlocked()
         .await?
         .clone()
         .unwrap()
-        .rgb_get_send_consignment_path(&payload.asset_id, &payload.txid);
+        .rgb_get_send_consignment_path(&contract_id.to_string(), &txid.to_string());
     if !file_path.exists() {
         return Err(APIError::ConsignmentNotFound);
     }
@@ -2345,13 +2347,18 @@ pub(crate) async fn issue_asset_cfa(
         let guard = state.check_unlocked().await?;
         let unlocked_state = guard.as_ref().unwrap();
 
-        let file_path = payload.file_digest.map(|d: String| {
-            unlocked_state
-                .rgb_get_media_dir()
-                .join(d.to_lowercase())
-                .to_string_lossy()
-                .to_string()
-        });
+        let file_path = payload
+            .file_digest
+            .map(|d: String| {
+                Ok::<_, APIError>(
+                    unlocked_state
+                        .rgb_get_media_dir()
+                        .join(check_media_digest(&d)?)
+                        .to_string_lossy()
+                        .to_string(),
+                )
+            })
+            .transpose()?;
 
         let asset = unlocked_state.rgb_issue_asset_cfa(
             payload.name,
@@ -2424,17 +2431,19 @@ pub(crate) async fn issue_asset_uda(
 
         let rgb_media_dir = unlocked_state.rgb_get_media_dir();
         let get_string_path = |d: String| {
-            rgb_media_dir
-                .join(d.to_lowercase())
-                .to_string_lossy()
-                .to_string()
+            Ok::<_, APIError>(
+                rgb_media_dir
+                    .join(check_media_digest(&d)?)
+                    .to_string_lossy()
+                    .to_string(),
+            )
         };
-        let media_file_path = payload.media_file_digest.map(get_string_path);
+        let media_file_path = payload.media_file_digest.map(get_string_path).transpose()?;
         let attachments_file_paths = payload
             .attachments_file_digests
             .into_iter()
             .map(get_string_path)
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let asset = unlocked_state.rgb_issue_asset_uda(
             payload.ticker,

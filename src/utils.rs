@@ -2,6 +2,7 @@ use amplify::s;
 use bitcoin::hashes::Hash;
 use bitcoin::io;
 use bitcoin::secp256k1::PublicKey;
+use bitcoin::Txid;
 use futures::Future;
 use lightning::ln::channel_state::ChannelDetails;
 use lightning::ln::types::ChannelId;
@@ -194,6 +195,10 @@ pub(crate) fn check_password_validity(
         .map_err(|e| APIError::CorruptedMnemonic(format!("invalid mnemonic: {e}")))
 }
 
+pub(crate) fn check_asset_id(asset_id: &str) -> Result<ContractId, APIError> {
+    ContractId::from_str(asset_id).map_err(|_| APIError::InvalidAssetID(asset_id.to_string()))
+}
+
 pub(crate) fn check_channel_id(channel_id_str: &str) -> Result<ChannelId, APIError> {
     if let Some(channel_id_bytes) = hex_str_to_vec(channel_id_str) {
         if channel_id_bytes.len() != 32 {
@@ -205,11 +210,23 @@ pub(crate) fn check_channel_id(channel_id_str: &str) -> Result<ChannelId, APIErr
     }
 }
 
+pub(crate) fn check_media_digest(digest: &str) -> Result<String, APIError> {
+    let digest = digest.to_lowercase();
+    match hex_str_to_vec(&digest) {
+        Some(bytes) if bytes.len() == 32 => Ok(digest),
+        _ => Err(APIError::InvalidMediaDigest),
+    }
+}
+
 pub(crate) fn check_port_is_available(port: u16) -> Result<(), AppError> {
     if TcpStream::connect(SocketAddr::from(([127, 0, 0, 1], port))).is_ok() {
         return Err(AppError::UnavailablePort(port));
     }
     Ok(())
+}
+
+pub(crate) fn check_txid(txid: &str) -> Result<Txid, APIError> {
+    Txid::from_str(txid).map_err(|_| APIError::InvalidTxid(txid.to_string()))
 }
 
 pub(crate) fn get_mnemonic_path(storage_dir_path: &Path) -> PathBuf {
