@@ -20,7 +20,6 @@ use lightning::rgb_utils::{
 use lightning::routing::gossip::RoutingFees;
 use lightning::routing::router::{Path as LnPath, Route, RouteHint, RouteHintHop};
 use lightning::sign::EntropySource;
-use lightning::util::config::ChannelConfig;
 use lightning::{chain::channelmonitor::Balance, impl_writeable_tlv_based_enum};
 use lightning::{
     ln::channel_state::ChannelShutdownState, onion_message::messenger::MessageSendInstructions,
@@ -95,29 +94,19 @@ use crate::{
 use crate::{
     disk::{self, CHANNEL_PEER_DATA},
     error::APIError,
-    ldk::{PaymentInfo, UTXO_SIZE_SAT},
+    ldk::PaymentInfo,
     utils::{
         connect_peer_if_necessary, get_current_timestamp, no_cancel, parse_peer_info, AppState,
     },
 };
 use crate::{
     error::error_name,
-    ldk::{start_ldk, stop_ldk, LdkBackgroundServices, MIN_CHANNEL_CONFIRMATIONS},
+    ldk::{start_ldk, stop_ldk, LdkBackgroundServices},
 };
 
-const UTXO_NUM: u8 = 4;
-
 pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
-pub(crate) const MAX_SWAP_FEE_MSAT: u64 = HTLC_MIN_MSAT;
-
-const OPENRGBCHANNEL_MIN_SAT: u64 = HTLC_MIN_MSAT / 1000 * 10 + 10;
-const OPENCHANNEL_MIN_SAT: u64 = 5506;
-const OPENCHANNEL_MAX_SAT: u64 = 16777215;
-const OPENCHANNEL_MIN_RGB_AMT: u64 = 1;
 
 pub const DUST_LIMIT_MSAT: u64 = 546000;
-
-const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 
 pub(crate) const DEFAULT_FINAL_CLTV_EXPIRY_DELTA: u32 = 14;
 
@@ -1739,7 +1728,10 @@ pub(crate) async fn change_password(
     no_cancel(async move {
         let _guard = state.check_locked().await?;
 
-        check_password_strength(payload.new_password.clone())?;
+        check_password_strength(
+            payload.new_password.clone(),
+            state.static_state.config.auth.password_min_length,
+        )?;
 
         let mnemonic =
             check_password_validity(&payload.old_password, &state.static_state.storage_dir_path)?;
@@ -1889,8 +1881,12 @@ pub(crate) async fn create_utxos(
 
         unlocked_state.rgb_create_utxos(
             payload.up_to,
-            payload.num.unwrap_or(UTXO_NUM),
-            payload.size.unwrap_or(UTXO_SIZE_SAT),
+            payload
+                .num
+                .unwrap_or(state.static_state.config.rgb.utxo_num),
+            payload
+                .size
+                .unwrap_or(state.static_state.config.rgb.utxo_size_sat),
             payload.fee_rate,
             payload.skip_sync,
         )?;
@@ -2291,7 +2287,10 @@ pub(crate) async fn init(
     no_cancel(async move {
         let _unlocked_state = state.check_locked().await?;
 
-        check_password_strength(payload.password.clone())?;
+        check_password_strength(
+            payload.password.clone(),
+            state.static_state.config.auth.password_min_length,
+        )?;
 
         let mnemonic_path = get_mnemonic_path(&state.static_state.storage_dir_path);
         check_already_initialized(&mnemonic_path)?;
@@ -2466,9 +2465,10 @@ pub(crate) async fn keysend(
         };
 
         let amt_msat = payload.amt_msat;
-        if amt_msat < HTLC_MIN_MSAT {
+        let htlc_min_msat = state.static_state.config.channels.htlc_min_msat;
+        if amt_msat < htlc_min_msat {
             return Err(APIError::InvalidAmount(format!(
-                "amt_msat cannot be less than {HTLC_MIN_MSAT}"
+                "amt_msat cannot be less than {htlc_min_msat}"
             )));
         }
 
@@ -2527,7 +2527,9 @@ pub(crate) async fn keysend(
             RecipientOnionFields::spontaneous_empty(),
             payment_id,
             route_params,
-            Retry::Timeout(Duration::from_secs(10)),
+            Retry::Timeout(Duration::from_secs(
+                state.static_state.config.payments.retry_timeout_secs,
+            )),
         ) {
             Ok(_payment_hash) => {
                 tracing::info!(
@@ -2982,9 +2984,10 @@ pub(crate) async fn ln_invoice(
             None
         };
 
-        if contract_id.is_some() && payload.amt_msat.unwrap_or(0) < INVOICE_MIN_MSAT {
+        let invoice_min_msat = state.static_state.config.channels.htlc_min_msat;
+        if contract_id.is_some() && payload.amt_msat.unwrap_or(0) < invoice_min_msat {
             return Err(APIError::InvalidAmount(format!(
-                "amt_msat cannot be less than {INVOICE_MIN_MSAT} when transferring an RGB asset"
+                "amt_msat cannot be less than {invoice_min_msat} when transferring an RGB asset"
             )));
         }
 
@@ -3149,16 +3152,18 @@ pub(crate) async fn maker_execute(
         let rgb_payment = swap_info
             .to_asset
             .map(|to_asset| (to_asset, swap_info.qty_to));
+        let htlc_min_msat = state.static_state.config.channels.htlc_min_msat;
         let first_leg = get_route(
+            &state.static_state.config,
             &unlocked_state.channel_manager,
             &unlocked_state.router,
             &state.static_state.ldk_data_dir,
             unlocked_state.channel_manager.get_our_node_id(),
             taker_pk,
             if swap_info.is_to_btc() {
-                Some(swap_info.qty_to + HTLC_MIN_MSAT)
+                Some(swap_info.qty_to + htlc_min_msat)
             } else {
-                Some(HTLC_MIN_MSAT)
+                Some(htlc_min_msat)
             },
             rgb_payment,
             vec![],
@@ -3168,15 +3173,16 @@ pub(crate) async fn maker_execute(
             .from_asset
             .map(|from_asset| (from_asset, swap_info.qty_from));
         let second_leg = get_route(
+            &state.static_state.config,
             &unlocked_state.channel_manager,
             &unlocked_state.router,
             &state.static_state.ldk_data_dir,
             taker_pk,
             unlocked_state.channel_manager.get_our_node_id(),
             if swap_info.is_to_btc() || swap_info.is_asset_asset() {
-                Some(HTLC_MIN_MSAT)
+                Some(htlc_min_msat)
             } else {
-                Some(swap_info.qty_from + HTLC_MIN_MSAT)
+                Some(swap_info.qty_from + htlc_min_msat)
             },
             rgb_payment,
             receive_hints,
@@ -3226,7 +3232,7 @@ pub(crate) async fn maker_execute(
             .map(|hop| hop.fee_msat)
             .sum::<u64>();
 
-        if total_fee >= MAX_SWAP_FEE_MSAT {
+        if total_fee >= state.static_state.config.payments.max_swap_fee_msat {
             return Err(APIError::FailedPayment(format!(
                 "Fee too high: {total_fee}"
             )));
@@ -3240,7 +3246,7 @@ pub(crate) async fn maker_execute(
             route_params: Some(RouteParameters {
                 payment_params: PaymentParameters::for_keysend(
                     unlocked_state.channel_manager.get_our_node_id(),
-                    DEFAULT_FINAL_CLTV_EXPIRY_DELTA,
+                    state.static_state.config.payments.final_cltv_expiry_delta,
                     false,
                 ),
                 // This value is not used anywhere, it's set by the router
@@ -3357,7 +3363,11 @@ pub(crate) async fn maker_init(
 
         let (payment_hash, payment_secret) = unlocked_state
             .channel_manager
-            .create_inbound_payment(Some(DUST_LIMIT_MSAT), payload.timeout_sec, None)
+            .create_inbound_payment(
+                Some(state.static_state.config.channels.dust_limit_msat),
+                payload.timeout_sec,
+                None,
+            )
             .unwrap();
         unlocked_state.add_maker_swap(payment_hash, swap_data);
 
@@ -3437,11 +3447,11 @@ pub(crate) async fn node_info(
         account_xpub_vanilla: unlocked_state.rgb_get_keys().account_xpub_vanilla,
         account_xpub_colored: unlocked_state.rgb_get_keys().account_xpub_colored,
         max_media_upload_size_mb: state.static_state.max_media_upload_size_mb,
-        rgb_htlc_min_msat: HTLC_MIN_MSAT,
-        rgb_channel_capacity_min_sat: OPENRGBCHANNEL_MIN_SAT,
-        channel_capacity_min_sat: OPENCHANNEL_MIN_SAT,
-        channel_capacity_max_sat: OPENCHANNEL_MAX_SAT,
-        channel_asset_min_amount: OPENCHANNEL_MIN_RGB_AMT,
+        rgb_htlc_min_msat: state.static_state.config.channels.htlc_min_msat,
+        rgb_channel_capacity_min_sat: state.static_state.config.channels.open_rgb_min_sat(),
+        channel_capacity_min_sat: state.static_state.config.channels.open_min_sat,
+        channel_capacity_max_sat: state.static_state.config.channels.open_max_sat,
+        channel_asset_min_amount: state.static_state.config.channels.open_min_rgb_amount,
         channel_asset_max_amount: u64::MAX,
         network_nodes,
         network_channels,
@@ -3466,10 +3476,12 @@ pub(crate) async fn open_channel(
             None
         };
 
+        let channels_config = &state.static_state.config.channels;
         let colored_info = match (payload.asset_id, payload.asset_amount) {
-            (Some(_), Some(amt)) if amt < OPENCHANNEL_MIN_RGB_AMT => {
+            (Some(_), Some(amt)) if amt < channels_config.open_min_rgb_amount => {
                 return Err(APIError::InvalidAmount(format!(
-                    "Channel RGB amount must be equal to or higher than {OPENCHANNEL_MIN_RGB_AMT}"
+                    "Channel RGB amount must be equal to or higher than {}",
+                    channels_config.open_min_rgb_amount
                 )));
             }
             (Some(asset), Some(amt)) => {
@@ -3483,18 +3495,21 @@ pub(crate) async fn open_channel(
             }
         };
 
-        if colored_info.is_some() && payload.capacity_sat < OPENRGBCHANNEL_MIN_SAT {
+        if colored_info.is_some() && payload.capacity_sat < channels_config.open_rgb_min_sat() {
             return Err(APIError::InvalidAmount(format!(
-                "RGB channel amount must be equal to or higher than {OPENRGBCHANNEL_MIN_SAT} sats"
+                "RGB channel amount must be equal to or higher than {} sats",
+                channels_config.open_rgb_min_sat()
             )));
-        } else if payload.capacity_sat < OPENCHANNEL_MIN_SAT {
+        } else if payload.capacity_sat < channels_config.open_min_sat {
             return Err(APIError::InvalidAmount(format!(
-                "Channel amount must be equal to or higher than {OPENCHANNEL_MIN_SAT} sats"
+                "Channel amount must be equal to or higher than {} sats",
+                channels_config.open_min_sat
             )));
         }
-        if payload.capacity_sat > OPENCHANNEL_MAX_SAT {
+        if payload.capacity_sat > channels_config.open_max_sat {
             return Err(APIError::InvalidAmount(format!(
-                "Channel amount must be equal to or less than {OPENCHANNEL_MAX_SAT} sats"
+                "Channel amount must be equal to or less than {} sats",
+                channels_config.open_max_sat
             )));
         }
 
@@ -3556,7 +3571,7 @@ pub(crate) async fn open_channel(
             )));
         }
 
-        let mut channel_config = ChannelConfig::default();
+        let mut channel_config = channels_config.channel_config();
         if let Some(fee_base_msat) = payload.fee_base_msat {
             channel_config.forwarding_fee_base_msat = fee_base_msat;
         }
@@ -3565,14 +3580,18 @@ pub(crate) async fn open_channel(
         }
         let config = UserConfig {
             channel_handshake_limits: ChannelHandshakeLimits {
-                // lnd's max to_self_delay is 2016, so we want to be compatible.
-                their_to_self_delay: 2016,
+                their_to_self_delay: channels_config.their_to_self_delay,
+                max_minimum_depth: channels_config.max_minimum_depth,
                 ..Default::default()
             },
             channel_handshake_config: ChannelHandshakeConfig {
                 announce_for_forwarding: payload.public,
-                our_htlc_minimum_msat: HTLC_MIN_MSAT,
-                minimum_depth: MIN_CHANNEL_CONFIRMATIONS as u32,
+                our_htlc_minimum_msat: channels_config.htlc_min_msat,
+                minimum_depth: state.static_state.config.rgb.min_channel_confirmations as u32,
+                our_to_self_delay: channels_config.our_to_self_delay,
+                max_inbound_htlc_value_in_flight_percent_of_channel: channels_config
+                    .max_inbound_htlc_value_in_flight_percent,
+                our_max_accepted_htlcs: channels_config.our_max_accepted_htlcs,
                 negotiate_anchors_zero_fee_htlc_tx: payload.with_anchors,
                 ..Default::default()
             },
@@ -4079,7 +4098,9 @@ pub(crate) async fn send_payment(
             )?;
 
             let params = OptionalOfferPaymentParams {
-                retry_strategy: Retry::Timeout(Duration::from_secs(10)),
+                retry_strategy: Retry::Timeout(Duration::from_secs(
+                    state.static_state.config.payments.retry_timeout_secs,
+                )),
                 ..Default::default()
             };
             let pay = unlocked_state.channel_manager
@@ -4120,19 +4141,20 @@ pub(crate) async fn send_payment(
                 invoice.amount_milli_satoshis().unwrap_or(0)
             };
 
+            let invoice_min_msat = state.static_state.config.channels.htlc_min_msat;
             let rgb_payment = match (invoice.rgb_contract_id(), invoice.rgb_amount()) {
                 (Some(rgb_contract_id), Some(rgb_amount)) => {
-                    if amt_msat < INVOICE_MIN_MSAT {
+                    if amt_msat < invoice_min_msat {
                         return Err(APIError::InvalidAmount(format!(
-                            "amt_msat in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
+                            "amt_msat in invoice sending an RGB asset cannot be less than {invoice_min_msat}"
                         )));
                     }
                     Some((rgb_contract_id, rgb_amount))
                 },
                 (Some(rgb_contract_id), None) => {
-                    if amt_msat < INVOICE_MIN_MSAT {
+                    if amt_msat < invoice_min_msat {
                         return Err(APIError::InvalidAmount(format!(
-                            "amt_msat in invoice sending an RGB asset cannot be less than {INVOICE_MIN_MSAT}"
+                            "amt_msat in invoice sending an RGB asset cannot be less than {invoice_min_msat}"
                         )));
                     }
                     if let Some(asset_id) = payload.asset_id.as_ref() {
@@ -4189,7 +4211,9 @@ pub(crate) async fn send_payment(
                 payment_id,
                 Some(amt_msat),
                 RouteParametersConfig::default(),
-                Retry::Timeout(Duration::from_secs(10)),
+                Retry::Timeout(Duration::from_secs(
+                    state.static_state.config.payments.retry_timeout_secs,
+                )),
             ) {
                 Ok(_) => {
                     let payee_pubkey = invoice.recover_payee_pub_key();

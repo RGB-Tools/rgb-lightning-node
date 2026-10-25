@@ -595,6 +595,9 @@ pub enum AppError {
     #[error("The provided authentication args are invalid")]
     InvalidAuthenticationArgs,
 
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+
     #[error("The revoked tokens file contains an invalid entry")]
     InvalidRevokedTokensFile,
 

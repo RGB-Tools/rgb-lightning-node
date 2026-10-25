@@ -9,6 +9,7 @@ compile_error!(
 mod args;
 mod auth;
 mod backup;
+mod config;
 mod crypto;
 mod disk;
 mod error;
