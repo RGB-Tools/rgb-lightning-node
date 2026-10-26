@@ -80,13 +80,10 @@ use tokio::{
 };
 
 #[cfg(test)]
-use crate::ldk::{
-    node_override_matches, FAIL_HODL_CLAIM_ON_NODE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
-    HODL_CLAIM_HELD, HOLD_HODL_CLAIM_ON_NODE,
-};
+use crate::ldk::{node_override_matches, FORCE_PUSH_ASSET_AMOUNT_ON_NODE};
 use crate::swap::{SwapData, SwapInfo, SwapString};
 use crate::utils::{
-check_already_initialized, check_asset_id, check_channel_id, check_media_digest,
+    check_already_initialized, check_asset_id, check_channel_id, check_media_digest,
     check_password_strength, check_password_validity, check_txid, description_fields,
     encrypt_and_save_mnemonic, get_max_local_rgb_amount, get_mnemonic_path, get_route, hex_str,
     hex_str_to_compressed_pubkey, hex_str_to_vec, validate_and_parse_payment_hash,
@@ -1052,6 +1049,10 @@ pub(crate) struct Payment {
     pub(crate) preimage: Option<String>,
     pub(crate) description: Option<String>,
     pub(crate) description_hash: Option<String>,
+    // Only set for inbound HODL payments: the absolute block height after
+    // which the held HTLC can no longer be claimed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) claim_deadline: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -1783,28 +1784,51 @@ pub(crate) async fn cancel_hodl_invoice(
         let unlocked_state = guard.as_ref().unwrap();
 
         let payment_hash = validate_and_parse_payment_hash(&payload.payment_hash)?;
-        let payment_info = unlocked_state
-            .get_inbound_payments()
-            .payments
-            .get(&payment_hash)
-            .cloned()
-            .ok_or(APIError::UnknownLNInvoice)?;
-        if !matches!(payment_info.invoice_type, Some(InvoiceType::Hodl)) {
+
+        // Read the status and write Cancelled under one guard: a
+        // PaymentClaimable firing in between must either win (Claimable arm)
+        // or lose (terminal arm), never be overwritten by this write.
+        let mut inbound = unlocked_state.get_inbound_payments();
+        let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
+            return Err(APIError::UnknownLNInvoice);
+        };
+        if !matches!(existing_payment_mut.invoice_type, Some(InvoiceType::Hodl)) {
             return Err(APIError::InvoiceNotHodl);
         }
-        match payment_info.status {
-            HTLCStatus::Claimable => {}
+        let mut fail_back = false;
+        match existing_payment_mut.status {
+            // no HTLC in flight: nothing to fail back.
+            HTLCStatus::Pending => {
+                existing_payment_mut.status = HTLCStatus::Cancelled;
+                existing_payment_mut.updated_at = get_current_timestamp();
+            }
+            HTLCStatus::Claimable => {
+                existing_payment_mut.status = HTLCStatus::Cancelled;
+                existing_payment_mut.updated_at = get_current_timestamp();
+                fail_back = true;
+            }
             HTLCStatus::Succeeded => return Err(APIError::InvoiceAlreadyClaimed),
             HTLCStatus::Claiming => return Err(APIError::InvoiceSettlingInProgress),
             _ => return Err(APIError::InvoiceNotCancellable),
         }
+        unlocked_state.save_inbound_payments(inbound);
+        if !fail_back {
+            return Ok(Json(EmptyResponse {}));
+        }
 
-        unlocked_state.fail_htlc_backwards_and_update_inbound_payment(
-            payment_hash,
-            HTLCStatus::Cancelled,
-            None,
-            None,
+        // Cancelled is already persisted above; only the HTLC needs failing back.
+        unlocked_state
+            .channel_manager
+            .fail_htlc_backwards(&payment_hash);
+        // remove the stale inbound RGB artifact (issue #21).
+        let rgb_path = get_rgb_payment_info_path(
+            &payment_hash,
+            &PathBuf::from(&state.static_state.ldk_data_dir),
+            true,
         );
+        if rgb_path.exists() {
+            std::fs::remove_file(&rgb_path).ok();
+        }
 
         Ok(Json(EmptyResponse {}))
     })
@@ -1857,76 +1881,46 @@ pub(crate) async fn claim_hodl_invoice(
     WithRejection(Json(payload), _): WithRejection<Json<ClaimHodlInvoiceRequest>, APIError>,
 ) -> Result<Json<EmptyResponse>, APIError> {
     no_cancel(async move {
-        let (channel_manager, _payment_hash, preimage) = {
-            let guard = state.check_unlocked().await?;
-            let unlocked_state = guard.as_ref().unwrap();
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
 
-            let payment_hash = validate_and_parse_payment_hash(&payload.payment_hash)?;
-            let preimage =
-                validate_and_parse_payment_preimage(&payload.payment_preimage, &payment_hash)?;
+        let payment_hash = validate_and_parse_payment_hash(&payload.payment_hash)?;
+        let preimage =
+            validate_and_parse_payment_preimage(&payload.payment_preimage, &payment_hash)?;
 
-            let mut inbound = unlocked_state.get_inbound_payments();
-            let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
-                return Err(APIError::UnknownLNInvoice);
-            };
-
-            if !matches!(existing_payment_mut.invoice_type, Some(InvoiceType::Hodl)) {
-                return Err(APIError::InvoiceNotHodl);
-            }
-
-            match existing_payment_mut.status {
-                HTLCStatus::Succeeded => return Err(APIError::InvoiceAlreadyClaimed),
-                HTLCStatus::Claiming => return Err(APIError::InvoiceSettlingInProgress),
-                HTLCStatus::Claimable => {}
-                _ => return Err(APIError::InvoiceNotClaimable),
-            }
-
-            let current_height = unlocked_state.channel_manager.current_best_block().height;
-            if let Some(deadline_height) = existing_payment_mut.claim_deadline_height {
-                if current_height >= deadline_height {
-                    return Err(APIError::ClaimDeadlineExceeded);
-                }
-            }
-
-            existing_payment_mut.status = HTLCStatus::Claiming;
-            existing_payment_mut.preimage = Some(preimage);
-            existing_payment_mut.updated_at = get_current_timestamp();
-            unlocked_state.save_inbound_payments(inbound);
-
-            (
-                unlocked_state.channel_manager.clone(),
-                payment_hash,
-                preimage,
-            )
+        let mut inbound = unlocked_state.get_inbound_payments();
+        let Some(existing_payment_mut) = inbound.payments.get_mut(&payment_hash) else {
+            return Err(APIError::UnknownLNInvoice);
         };
 
-        #[cfg(test)]
-        let payment_hash = _payment_hash;
-        #[cfg(test)]
-        let node_id = channel_manager.get_our_node_id();
+        if !matches!(existing_payment_mut.invoice_type, Some(InvoiceType::Hodl)) {
+            return Err(APIError::InvoiceNotHodl);
+        }
 
-        #[cfg(test)]
-        if node_override_matches(&HOLD_HODL_CLAIM_ON_NODE, node_id) {
-            HODL_CLAIM_HELD.store(true, std::sync::atomic::Ordering::SeqCst);
-            let held_at = std::time::Instant::now();
-            while node_override_matches(&HOLD_HODL_CLAIM_ON_NODE, node_id) {
-                if held_at.elapsed() > Duration::from_secs(60) {
-                    panic!("TEST: HODL claim held for too long");
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
+        match existing_payment_mut.status {
+            HTLCStatus::Claimable => {}
+            HTLCStatus::Claiming => return Err(APIError::InvoiceSettlingInProgress),
+            HTLCStatus::Succeeded => return Err(APIError::InvoiceAlreadyClaimed),
+            _ => return Err(APIError::InvoiceNotClaimable),
+        }
+
+        // claim_deadline is an absolute block height, not a timestamp.
+        let current_height = unlocked_state.channel_manager.current_best_block().height;
+        if let Some(deadline_height) = existing_payment_mut.claim_deadline_height {
+            if current_height >= deadline_height {
+                return Err(APIError::ClaimDeadlineExceeded);
             }
         }
 
-        #[cfg(test)]
-        if node_override_matches(&FAIL_HODL_CLAIM_ON_NODE, node_id) {
-            tracing::info!("TEST: failing HODL claim backwards for payment {payment_hash}");
-            channel_manager.fail_htlc_backwards(&payment_hash);
-        } else {
-            channel_manager.claim_funds(preimage);
-        }
-
-        #[cfg(not(test))]
-        channel_manager.claim_funds(preimage);
+        // Claim before saving: a crash before this point leaves the payment
+        // Claimable and the client retries; a crash after is recovered by LDK,
+        // which persists the preimage and emits PaymentClaimed on restart.
+        // Status and preimage are saved in the same write as the claim.
+        unlocked_state.channel_manager.claim_funds(preimage);
+        existing_payment_mut.status = HTLCStatus::Claiming;
+        existing_payment_mut.preimage = Some(preimage);
+        existing_payment_mut.updated_at = get_current_timestamp();
+        unlocked_state.save_inbound_payments(inbound);
 
         Ok(Json(EmptyResponse {}))
     })
@@ -2302,7 +2296,7 @@ pub(crate) async fn get_payment(
                         let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
                         (Some(info.amount), Some(info.contract_id.to_string()))
                     } else {
-                        (None, None)
+                        (payment_info.asset_amount, payment_info.asset_id.clone())
                     };
 
                     return Ok(Json(GetPaymentResponse {
@@ -2318,6 +2312,7 @@ pub(crate) async fn get_payment(
                             payee_pubkey: payment_info.payee_pubkey.to_string(),
                             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
                             description: payment_info.description.clone(),
+                            claim_deadline: payment_info.claim_deadline_height,
                             description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                         },
                     }));
@@ -2356,6 +2351,7 @@ pub(crate) async fn get_payment(
                             payee_pubkey: payment_info.payee_pubkey.to_string(),
                             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
                             description: payment_info.description.clone(),
+                            claim_deadline: None,
                             description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
                         },
                     }));
@@ -2925,7 +2921,7 @@ pub(crate) async fn list_payments(
             let info = parse_rgb_payment_info(&rgb_payment_info_path_inbound);
             (Some(info.amount), Some(info.contract_id.to_string()))
         } else {
-            (None, None)
+            (payment_info.asset_amount, payment_info.asset_id.clone())
         };
 
         payments.push(Payment {
@@ -2940,6 +2936,7 @@ pub(crate) async fn list_payments(
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
             description: payment_info.description.clone(),
+            claim_deadline: payment_info.claim_deadline_height,
             description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }
@@ -2969,6 +2966,7 @@ pub(crate) async fn list_payments(
             payee_pubkey: payment_info.payee_pubkey.to_string(),
             preimage: payment_info.preimage.map(|p| hex_str(&p.0)),
             description: payment_info.description.clone(),
+            claim_deadline: None,
             description_hash: payment_info.description_hash.map(|h| hex_str(&h)),
         });
     }

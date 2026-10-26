@@ -752,8 +752,13 @@ paths:
       description: >-
         Get a LN invoice to receive a payment. The description and
         description_hash fields are mutually exclusive.
-        Provide `payment_hash` to create a HODL invoice.
-        Provide `min_final_cltv_expiry_delta` to request an explicit inbound final CLTV policy.
+        Provide `payment_hash` to create a HODL invoice, whose HTLC is held
+        until it is claimed with `/claimhodlinvoice` or cancelled with
+        `/cancelhodlinvoice`.
+        `min_final_cltv_expiry_delta` is the number of blocks (the BOLT11 `c`
+        field) the payer must leave between the current height and the final
+        HTLC expiry; LDK rejects inbound HTLCs that expire sooner. When omitted,
+        LDK's default is used.
       requestBody:
         content:
           application/json:
@@ -2881,6 +2886,11 @@ components:
         preimage:
           type: string
           example: 89d28bd306aa9bb906fd0ac31092d04c37c919a171b343083167e2a3cdc60578
+        claim_deadline:
+          type:
+            - integer
+            - 'null'
+          example: 2546173
         description:
           type:
             - string
