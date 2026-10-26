@@ -96,7 +96,9 @@ use crate::{
 use crate::{
     disk::{self, CHANNEL_PEER_DATA},
     error::APIError,
-    ldk::{clear_rgb_payment_pending, InvoiceType, PaymentInfo, UTXO_SIZE_SAT},
+    ldk::{
+        clear_rgb_payment_info, clear_rgb_payment_pending, InvoiceType, PaymentInfo, UTXO_SIZE_SAT,
+    },
     utils::{
         connect_peer_if_necessary, get_current_timestamp, no_cancel, parse_peer_info, AppState,
     },
@@ -1821,14 +1823,10 @@ pub(crate) async fn cancel_hodl_invoice(
             .channel_manager
             .fail_htlc_backwards(&payment_hash);
         // remove the stale inbound RGB artifact (issue #21).
-        let rgb_path = get_rgb_payment_info_path(
+        clear_rgb_payment_info(
             &payment_hash,
             &PathBuf::from(&state.static_state.ldk_data_dir),
-            true,
         );
-        if rgb_path.exists() {
-            std::fs::remove_file(&rgb_path).ok();
-        }
 
         Ok(Json(EmptyResponse {}))
     })
