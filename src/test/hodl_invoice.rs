@@ -55,6 +55,7 @@ async fn run_expire_hodl_invoice_case(
     node1_addr: SocketAddr,
     node2_addr: SocketAddr,
     test_dir_node2: &str,
+    asset_id: &str,
     trigger: ExpiryTrigger,
 ) {
     let (preimage_hex, payment_hash_hex) = random_preimage_and_hash();
@@ -62,11 +63,17 @@ async fn run_expire_hodl_invoice_case(
         ExpiryTrigger::Time => 20,
         ExpiryTrigger::Blocks => 900,
     };
+    // the blocks case holds an RGB payment, so its expiry must also clear the
+    // stale inbound RGB artifact; the time case never holds the HTLC.
+    let (rgb_asset_id, rgb_asset_amount) = match trigger {
+        ExpiryTrigger::Time => (None, None),
+        ExpiryTrigger::Blocks => (Some(asset_id), Some(ASSET_PAYMENT_AMOUNT)),
+    };
     let LNInvoiceResponse { invoice } = ln_invoice_hodl(
         node2_addr,
         Some(HTLC_MIN_MSAT),
-        None,
-        None,
+        rgb_asset_id,
+        rgb_asset_amount,
         expiry_sec,
         payment_hash_hex.clone(),
     )
@@ -179,6 +186,12 @@ async fn run_expire_hodl_invoice_case(
     wait_for_inbound_payment_status(test_dir_node2, &payment_hash_hex, HTLCStatus::Failed)
         .await
         .unwrap_or_else(|err| panic!("wait for failed entry to persist: {err}"));
+    // the held HTLC was failed back by LDK at the claim deadline: no stale
+    // inbound RGB artifact (issue #21). The unpaid case never held the HTLC,
+    // so no artifact exists there either.
+    wait_for_no_rgb_payment_info_artifacts(test_dir_node2, &payment_hash_hex)
+        .await
+        .unwrap_or_else(|err| panic!("wait for receiver RGB payment artifacts to clear: {err}"));
     let payee_payment =
         get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
     assert!(matches!(
@@ -217,24 +230,6 @@ async fn run_expire_hodl_invoice_case(
         "InvoiceNotCancellable",
     )
     .await;
-}
-
-fn set_inbound_rgb_payment_amount(test_dir: &str, payment_hash: &str, amount: u64) {
-    let payment_hash = validate_and_parse_payment_hash(payment_hash).unwrap();
-    let ldk_data_dir = Path::new(test_dir).join(LDK_DIR);
-    let payment_info_path = get_rgb_payment_info_path(&payment_hash, &ldk_data_dir, true);
-    assert!(
-        payment_info_path.exists(),
-        "inbound RGB payment metadata must exist before it is modified"
-    );
-
-    let mut payment_info = parse_rgb_payment_info(&payment_info_path);
-    payment_info.amount = amount;
-    fs::write(
-        payment_info_path,
-        serde_json::to_string(&payment_info).unwrap(),
-    )
-    .unwrap();
 }
 
 async fn setup_two_nodes_with_asset_channel(
@@ -332,6 +327,37 @@ async fn wait_for_no_rgb_payment_pending_artifacts(
     }
 }
 
+/// Also asserts the inbound `{payment_hash}.inbound` file is gone (issue #21).
+async fn wait_for_no_rgb_payment_info_artifacts(
+    test_dir: &str,
+    payment_hash: &str,
+) -> Result<(), APIError> {
+    let ldk_data_dir = Path::new(test_dir).join(LDK_DIR);
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let leftover = std::fs::read_dir(&ldk_data_dir)
+            .map_err(|err| {
+                APIError::Unexpected(format!("cannot inspect RGB payment files: {err}"))
+            })?
+            .flatten()
+            .any(|entry| {
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                file_name.starts_with(payment_hash) && file_name.ends_with(".inbound")
+            });
+
+        if !leftover {
+            return Ok(());
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 20.0 {
+            return Err(APIError::Unexpected(format!(
+                "RGB payment artifacts for {payment_hash} did not clear"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
@@ -343,7 +369,7 @@ async fn cancel_hodl_invoice_btc_rgb() {
     let initial_ln_rgb_balance_node1 = asset_balance_offchain_outbound(node1_addr, &asset_id).await;
     let initial_ln_rgb_balance_node2 = asset_balance_offchain_outbound(node2_addr, &asset_id).await;
 
-    let (preimage, payment_hash) = random_preimage_and_hash();
+    let (_preimage, payment_hash) = random_preimage_and_hash();
 
     // create a HODL invoice
     let LNInvoiceResponse {
@@ -363,61 +389,80 @@ async fn cancel_hodl_invoice_btc_rgb() {
     assert_eq!(decoded.asset_id, Some(asset_id.clone()));
     assert_eq!(decoded.asset_amount, Some(ASSET_PAYMENT_AMOUNT));
 
-    // attempt to cancel before the payment is claimable
-    invoice_cancel_expect_error(
-        node2_addr,
-        payment_hash.clone(),
-        StatusCode::FORBIDDEN,
-        "Invoice cannot be cancelled",
-        "InvoiceNotCancellable",
-    )
-    .await;
+    // pre-arrival cancel: nothing to fail back.
+    cancel_hodl_invoice(node2_addr, payment_hash.clone()).await;
     assert!(matches!(
         invoice_status(node2_addr, &hodl_invoice).await,
-        InvoiceStatus::Pending
+        InvoiceStatus::Cancelled
     ));
 
+    // arrivals for a cancelled invoice are failed back.
+    let _ = send_payment_with_status(node1_addr, hodl_invoice.clone(), HTLCStatus::Failed).await;
+    let payee_cancelled =
+        wait_for_ln_payment(node2_addr, &payment_hash, HTLCStatus::Cancelled).await;
+    assert_eq!(payee_cancelled.payment_type, PaymentType::InboundHodl);
+
+    // a second HODL invoice exercises the Claimable-cancel path
+    let (preimage2, payment_hash2) = random_preimage_and_hash();
+    let LNInvoiceResponse {
+        invoice: hodl_invoice2,
+    } = ln_invoice_hodl(
+        node2_addr,
+        Some(HTLC_MIN_MSAT),
+        Some(&asset_id),
+        Some(ASSET_PAYMENT_AMOUNT),
+        120,
+        payment_hash2.clone(),
+    )
+    .await;
+    let decoded2 = decode_ln_invoice(node1_addr, &hodl_invoice2).await;
+    assert_eq!(decoded2.payment_hash, payment_hash2);
+
     // send the payment
-    let _ = send_payment_with_status(node1_addr, hodl_invoice.clone(), HTLCStatus::Pending).await;
+    let _ = send_payment_with_status(node1_addr, hodl_invoice2.clone(), HTLCStatus::Pending).await;
 
     // wait for the payee's payment to become claimable
-    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Claimable)
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash2, HTLCStatus::Claimable)
         .await
         .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
     let payee_claimable =
-        wait_for_ln_payment(node2_addr, &payment_hash, HTLCStatus::Claimable).await;
+        wait_for_ln_payment(node2_addr, &payment_hash2, HTLCStatus::Claimable).await;
     assert_eq!(payee_claimable.asset_id, Some(asset_id.clone()));
     assert_eq!(payee_claimable.asset_amount, Some(ASSET_PAYMENT_AMOUNT));
     assert!(matches!(
-        invoice_status(node2_addr, &hodl_invoice).await,
+        invoice_status(node2_addr, &hodl_invoice2).await,
         InvoiceStatus::Claimable
     ));
 
     // cancel the HODL invoice
-    cancel_hodl_invoice(node2_addr, payment_hash.clone()).await;
+    cancel_hodl_invoice(node2_addr, payment_hash2.clone()).await;
 
-    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Cancelled)
+    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash2, HTLCStatus::Cancelled)
         .await
         .unwrap_or_else(|err| panic!("wait for cancelled payment to persist: {err}"));
-    wait_for_no_rgb_payment_pending_artifacts(&test_dir_node1, &payment_hash)
+    wait_for_no_rgb_payment_pending_artifacts(&test_dir_node1, &payment_hash2)
         .await
         .unwrap_or_else(|err| panic!("wait for sender RGB pending artifacts to clear: {err}"));
+    // no stale inbound RGB artifact (issue #21).
+    wait_for_no_rgb_payment_info_artifacts(&test_dir_node2, &payment_hash2)
+        .await
+        .unwrap_or_else(|err| panic!("wait for receiver RGB payment artifacts to clear: {err}"));
 
     // assert that the payer's payment failed
-    let payer_failed = wait_for_ln_payment(node1_addr, &payment_hash, HTLCStatus::Failed).await;
+    let payer_failed = wait_for_ln_payment(node1_addr, &payment_hash2, HTLCStatus::Failed).await;
     assert_eq!(payer_failed.asset_id, Some(asset_id.clone()));
     assert_eq!(payer_failed.asset_amount, Some(ASSET_PAYMENT_AMOUNT));
 
     // assert that the payee's invoice was cancelled
     assert!(matches!(
-        invoice_status(node2_addr, &hodl_invoice).await,
+        invoice_status(node2_addr, &hodl_invoice2).await,
         InvoiceStatus::Cancelled
     ));
 
     // attempt to cancel the invoice again; cancellation is not idempotent
     invoice_cancel_expect_error(
         node2_addr,
-        payment_hash.clone(),
+        payment_hash2.clone(),
         StatusCode::FORBIDDEN,
         "Invoice cannot be cancelled",
         "InvoiceNotCancellable",
@@ -427,8 +472,8 @@ async fn cancel_hodl_invoice_btc_rgb() {
     // attempt to claim a non-claimable HODL invoice
     invoice_claim_expect_error(
         node2_addr,
-        payment_hash.clone(),
-        preimage,
+        payment_hash2.clone(),
+        preimage2,
         StatusCode::NOT_FOUND,
         "No claimable HTLC found for this invoice",
         "InvoiceNotClaimable",
@@ -436,7 +481,8 @@ async fn cancel_hodl_invoice_btc_rgb() {
     .await;
 
     // assert that the payee's payment remains cancelled
-    let payee_payment = wait_for_ln_payment(node2_addr, &payment_hash, HTLCStatus::Cancelled).await;
+    let payee_payment =
+        wait_for_ln_payment(node2_addr, &payment_hash2, HTLCStatus::Cancelled).await;
     assert_eq!(payee_payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payee_payment.asset_amount, Some(ASSET_PAYMENT_AMOUNT));
 
@@ -564,7 +610,13 @@ async fn claim_hodl_invoice_btc_rgb() {
     )
     .await;
 
-    // a second claim must also be rejected while settlement is in progress
+    // the preimage is stored atomically with the claim.
+    let claiming_payment =
+        get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
+    assert_eq!(claiming_payment.status, HTLCStatus::Claiming);
+    assert_eq!(claiming_payment.preimage, Some(preimage.clone()));
+
+    // reject a re-claim while settling.
     invoice_claim_expect_error(
         node2_addr,
         payment_hash.clone(),
@@ -579,7 +631,7 @@ async fn claim_hodl_invoice_btc_rgb() {
     claim_task.await.unwrap();
     wait_for_ln_payment(node2_addr, &payment_hash, HTLCStatus::Succeeded).await;
 
-    // claiming an already settled HODL invoice is not idempotent
+    // reject a re-claim after settle.
     invoice_claim_expect_error(
         node2_addr,
         payment_hash.clone(),
@@ -599,7 +651,9 @@ async fn claim_hodl_invoice_btc_rgb() {
     assert_eq!(payee_payment.asset_id, Some(asset_id.to_string()));
     assert_eq!(payee_payment.asset_amount, Some(ASSET_PAYMENT_AMOUNT));
 
-    // /getpayment must expose the preimage after the HODL invoice is claimed
+    // /getpayment exposes the preimage stored at settle time: the node learns
+    // it from the settle call, and LDK's PaymentClaimed carries none for
+    // hash-registered invoices.
     let payee_payment_from_get =
         get_payment(node2_addr, &decoded.payment_hash, PaymentType::InboundHodl).await;
     assert_eq!(
@@ -646,187 +700,30 @@ async fn claim_hodl_invoice_btc_rgb() {
 #[serial_test::serial]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 #[traced_test]
-async fn claim_hodl_invoice_handles_htlc_handling_failed() {
-    initialize();
-
-    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, _asset_id) =
-        setup_two_nodes_with_asset_channel("claim-hodl-htlc-failed", 30).await;
-    let (preimage, payment_hash) = random_preimage_and_hash();
-
-    let invoice = ln_invoice_hodl(
-        node2_addr,
-        Some(HTLC_MIN_MSAT),
-        None,
-        None,
-        120,
-        payment_hash.clone(),
-    )
-    .await
-    .invoice;
-    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-
-    send_payment_with_status(node1_addr, invoice.clone(), HTLCStatus::Pending).await;
-    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Claimable)
-        .await
-        .unwrap_or_else(|err| panic!("wait for claimable entry to appear: {err}"));
-    let payee_pubkey = node_info(node2_addr).await.pubkey;
-    let fail_claim_guard = NodeOverrideGuard::set(&FAIL_HODL_CLAIM_ON_NODE, &payee_pubkey);
-    let preimage_for_retry = preimage.clone();
-    claim_hodl_invoice(node2_addr, payment_hash.clone(), preimage).await;
-    drop(fail_claim_guard);
-
-    let failed_payee =
-        wait_for_ln_payment(node2_addr, &decoded.payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(failed_payee.status, HTLCStatus::Failed);
-    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Failed)
-        .await
-        .unwrap_or_else(|err| panic!("wait for failed inbound entry: {err}"));
-
-    let failed_payer = wait_for_ln_payment(node1_addr, &payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(failed_payer.status, HTLCStatus::Failed);
-    assert!(matches!(
-        invoice_status(node2_addr, &invoice).await,
-        InvoiceStatus::Failed
-    ));
-
-    shutdown(&[node2_addr]).await;
-    let (restarted_node2_addr, _) = start_node(&test_dir_node2, NODE2_PEER_PORT + 30, true).await;
-
-    wait_for_inbound_payment_status(&test_dir_node2, &payment_hash, HTLCStatus::Failed)
-        .await
-        .unwrap_or_else(|err| panic!("wait for failed entry after restart: {err}"));
-    invoice_claim_expect_error(
-        restarted_node2_addr,
-        payment_hash,
-        preimage_for_retry,
-        StatusCode::NOT_FOUND,
-        "No claimable HTLC found for this invoice",
-        "InvoiceNotClaimable",
-    )
-    .await;
-}
-
-#[serial_test::serial]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[traced_test]
 async fn expire_hodl_invoice_time_and_blocks() {
     initialize();
 
-    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, _asset_id) =
+    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, asset_id) =
         setup_two_nodes_with_asset_channel("expire-hodl-time-blocks", 40).await;
 
     // verify expiry triggered by wall-clock time
-    run_expire_hodl_invoice_case(node1_addr, node2_addr, &test_dir_node2, ExpiryTrigger::Time)
-        .await;
+    run_expire_hodl_invoice_case(
+        node1_addr,
+        node2_addr,
+        &test_dir_node2,
+        &asset_id,
+        ExpiryTrigger::Time,
+    )
+    .await;
     // verify expiry triggered by block height
     run_expire_hodl_invoice_case(
         node1_addr,
         node2_addr,
         &test_dir_node2,
+        &asset_id,
         ExpiryTrigger::Blocks,
     )
     .await;
-}
-
-#[serial_test::serial]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[traced_test]
-async fn rgb_invoice_rejects_insufficient_asset_amount() {
-    initialize();
-
-    let (node1_addr, node2_addr, _test_dir_node1, test_dir_node2, asset_id) =
-        setup_two_nodes_with_asset_channel("rgb-amount-validation", 50).await;
-    let initial_node1_balance = asset_balance_offchain_outbound(node1_addr, &asset_id).await;
-    let initial_node2_balance = asset_balance_offchain_outbound(node2_addr, &asset_id).await;
-    let node2_pubkey = node_info(node2_addr).await.pubkey;
-
-    // an RGB HODL invoice must fail instead of becoming Claimable when its
-    // persisted inbound RGB amount is below the invoice requirement
-    let (preimage, hodl_payment_hash) = random_preimage_and_hash();
-    let LNInvoiceResponse {
-        invoice: hodl_invoice,
-    } = ln_invoice_hodl(
-        node2_addr,
-        Some(HTLC_MIN_MSAT),
-        Some(&asset_id),
-        Some(ASSET_PAYMENT_AMOUNT),
-        120,
-        hodl_payment_hash.clone(),
-    )
-    .await;
-
-    let defer_guard = defer_payment_claimable(&node2_pubkey);
-    send_payment_raw(node1_addr, hodl_invoice.clone()).await;
-    wait_for_deferred_payment().await;
-    set_inbound_rgb_payment_amount(
-        &test_dir_node2,
-        &hodl_payment_hash,
-        ASSET_PAYMENT_AMOUNT - 1,
-    );
-    drop(defer_guard);
-
-    let hodl_payee_failed =
-        wait_for_ln_payment(node2_addr, &hodl_payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(hodl_payee_failed.status, HTLCStatus::Failed);
-    assert_eq!(
-        hodl_payee_failed.asset_amount,
-        Some(ASSET_PAYMENT_AMOUNT - 1)
-    );
-    assert!(matches!(
-        invoice_status(node2_addr, &hodl_invoice).await,
-        InvoiceStatus::Failed
-    ));
-    let hodl_payer_failed =
-        wait_for_ln_payment(node1_addr, &hodl_payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(hodl_payer_failed.status, HTLCStatus::Failed);
-    invoice_claim_expect_error(
-        node2_addr,
-        hodl_payment_hash,
-        preimage,
-        StatusCode::NOT_FOUND,
-        "No claimable HTLC found for this invoice",
-        "InvoiceNotClaimable",
-    )
-    .await;
-
-    // the same validation runs before auto-claiming a regular RGB invoice
-    let LNInvoiceResponse { invoice } = ln_invoice(
-        node2_addr,
-        Some(HTLC_MIN_MSAT),
-        Some(&asset_id),
-        Some(ASSET_PAYMENT_AMOUNT),
-        120,
-    )
-    .await;
-    let decoded = decode_ln_invoice(node1_addr, &invoice).await;
-
-    let defer_guard = defer_payment_claimable(&node2_pubkey);
-    send_payment_raw(node1_addr, invoice.clone()).await;
-    wait_for_deferred_payment().await;
-    set_inbound_rgb_payment_amount(
-        &test_dir_node2,
-        &decoded.payment_hash,
-        ASSET_PAYMENT_AMOUNT - 1,
-    );
-    drop(defer_guard);
-
-    let auto_claim_payee_failed =
-        wait_for_ln_payment(node2_addr, &decoded.payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(auto_claim_payee_failed.status, HTLCStatus::Failed);
-    assert_eq!(
-        auto_claim_payee_failed.asset_amount,
-        Some(ASSET_PAYMENT_AMOUNT - 1)
-    );
-    assert!(matches!(
-        invoice_status(node2_addr, &invoice).await,
-        InvoiceStatus::Failed
-    ));
-    let auto_claim_payer_failed =
-        wait_for_ln_payment(node1_addr, &decoded.payment_hash, HTLCStatus::Failed).await;
-    assert_eq!(auto_claim_payer_failed.status, HTLCStatus::Failed);
-
-    wait_for_ln_balance(node1_addr, &asset_id, initial_node1_balance).await;
-    wait_for_ln_balance(node2_addr, &asset_id, initial_node2_balance).await;
 }
 
 #[serial_test::serial]

@@ -19,7 +19,6 @@ use lightning::chain::transaction::TransactionData;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 use lightning::chain::{Confirm, Filter};
 use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
-use lightning::rgb_utils::{get_rgb_payment_info_path, parse_rgb_payment_info};
 use lightning_invoice::Bolt11Invoice;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 use lightning_transaction_sync::ElectrumSyncClient;
@@ -28,7 +27,7 @@ use rand::RngCore;
 use reqwest::{Response, StatusCode};
 use rgb_lib::BitcoinNetwork;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -47,10 +46,9 @@ use crate::disk::FilesystemLogger;
 use crate::disk::{read_inbound_payment_info, INBOUND_PAYMENTS_FNAME, LDK_LOGS_FILE};
 use crate::error::{APIError, APIErrorResponse};
 use crate::ldk::{
-    DEFER_PAYMENT_CLAIMABLE_ON_NODE, FAIL_HODL_CLAIM_ON_NODE, FEE_RATE,
-    FORCE_PUSH_ASSET_AMOUNT_ON_NODE, HELD_PAYMENT_CLAIMABLE_COUNT, HODL_CLAIM_HELD,
-    HOLD_HODL_CLAIM_ON_NODE, HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE,
-    PAYMENT_CLAIMABLE_DEFERRED,
+    DEFER_PAYMENT_CLAIMABLE_ON_NODE, FEE_RATE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
+    HELD_PAYMENT_CLAIMABLE_COUNT, HODL_CLAIM_HELD, HOLD_HODL_CLAIM_ON_NODE,
+    HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE, PAYMENT_CLAIMABLE_DEFERRED,
 };
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetFilter, AssetIFA,

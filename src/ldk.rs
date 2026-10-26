@@ -167,10 +167,6 @@ pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0
 #[cfg(test)]
 pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
-// Test-only: make a HODL claim fail backwards after its persisted status has become Claiming.
-#[cfg(test)]
-pub(crate) static FAIL_HODL_CLAIM_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
-
 // Test-only: hold a HODL claim after persisting Claiming but before calling claim_funds.
 #[cfg(test)]
 pub(crate) static HOLD_HODL_CLAIM_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);

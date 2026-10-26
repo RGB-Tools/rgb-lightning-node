@@ -254,7 +254,7 @@ pub enum APIError {
     #[error("Invalid transport endpoints: {0}")]
     InvalidTransportEndpoints(String),
 
-#[error("Invalid txid: {0}")]
+    #[error("Invalid txid: {0}")]
     InvalidTxid(String),
 
     #[error("Invoice is already claimed")]
