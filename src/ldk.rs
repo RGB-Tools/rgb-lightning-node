@@ -165,6 +165,16 @@ pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0
 #[cfg(test)]
 pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
+// SECURITY REPRO (test-only, compiled out in production): the node with this pubkey sends a
+// garbage "consignment" over p2p for the funding txid of an otherwise ordinary *vanilla* (uncolored)
+// channel open. `rgb_file_transfer.rs`'s `handle_chunk` only checks that the sender has a channel
+// with us -- it has no idea, and no way to know, whether that channel actually negotiated as
+// colored -- so nothing stops a peer from doing this on its own, entirely independent of what its
+// own REST/RGB layer would ever construct. Models a malicious node, not a broken honest one.
+#[cfg(test)]
+pub(crate) static INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE: Mutex<Option<PublicKey>> =
+    Mutex::new(None);
+
 // Test-only: whether the given override targets the node we are running as
 #[cfg(test)]
 pub(crate) fn node_override_matches(
@@ -1003,6 +1013,22 @@ async fn handle_ldk_events(
                     }
                 }
 
+                unlocked_state.peer_manager.process_events();
+            }
+
+            // SECURITY REPRO HOOK (test-only, compiled out in production): fires regardless of
+            // whether this open carried an asset at all -- the vanilla-channel bypass this models
+            // has nothing to do with the `asset_id` branch above, that's exactly the point.
+            #[cfg(test)]
+            if node_override_matches(
+                &INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE,
+                unlocked_state.channel_manager.get_our_node_id(),
+            ) {
+                let _ = unlocked_state.rgb_file_transfer_handler.queue_consignment(
+                    counterparty_node_id,
+                    funding_txid_str.clone(),
+                    b"this is not an RGB consignment, it is attacker-controlled junk".to_vec(),
+                );
                 unlocked_state.peer_manager.process_events();
             }
 
