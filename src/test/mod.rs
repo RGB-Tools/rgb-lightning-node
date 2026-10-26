@@ -187,6 +187,27 @@ impl Drop for NodeOverrideGuard {
     }
 }
 
+// Makes a node hold incoming payments (see HOLD_PAYMENT_CLAIMABLE_ON_NODE). It zeroes
+// HELD_PAYMENT_CLAIMABLE_COUNT on creation and on drop, so a test cannot start from, or leave
+// behind, a stale count.
+struct HoldPaymentsGuard(#[allow(dead_code)] NodeOverrideGuard);
+
+impl HoldPaymentsGuard {
+    fn set(node_pubkey: &str) -> Self {
+        HELD_PAYMENT_CLAIMABLE_COUNT.store(0, Ordering::SeqCst);
+        Self(NodeOverrideGuard::set(
+            &HOLD_PAYMENT_CLAIMABLE_ON_NODE,
+            node_pubkey,
+        ))
+    }
+}
+
+impl Drop for HoldPaymentsGuard {
+    fn drop(&mut self) {
+        HELD_PAYMENT_CLAIMABLE_COUNT.store(0, Ordering::SeqCst);
+    }
+}
+
 // Makes the payee defer claiming incoming payments, so the payer's HTLC (and any swap it is part
 // of) stays pending until the returned guard is dropped.
 //
@@ -2401,6 +2422,7 @@ mod payment;
 mod push_asset_amount_above_chan_amt;
 mod refuse_high_fees;
 mod restart;
+mod rgb_htlc_balance_checks;
 mod send_receive;
 mod swap_assets_liquidity_both_ways;
 mod swap_reverse_same_channel;

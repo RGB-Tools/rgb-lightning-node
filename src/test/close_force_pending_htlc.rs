@@ -42,8 +42,7 @@ async fn close_force_pending_htlc() {
     let node2_spendable_before = spendable_sats(node2_addr).await;
 
     // node2 holds the incoming payment: the 10-asset HTLC stays pending.
-    HELD_PAYMENT_CLAIMABLE_COUNT.store(0, Ordering::SeqCst);
-    let _hold_guard = NodeOverrideGuard::set(&HOLD_PAYMENT_CLAIMABLE_ON_NODE, &node2_pubkey);
+    let _hold_guard = HoldPaymentsGuard::set(&node2_pubkey);
 
     let LNInvoiceResponse { invoice } = ln_invoice(
         node2_addr,
