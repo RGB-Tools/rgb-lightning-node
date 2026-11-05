@@ -23,6 +23,8 @@ async fn invoice() {
         asset_amount: Some(1),
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -40,6 +42,8 @@ async fn invoice() {
         asset_amount: Some(1),
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -57,6 +61,8 @@ async fn invoice() {
         asset_amount: None,
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -70,6 +76,10 @@ async fn invoice() {
 
     // an invoice with a description should carry it as the BOLT11 d tag
     let description = "1 cup of coffee";
+
+    // check that the invoice preserves the custom min_final_cltv_expiry_delta
+    let requested_min_final_cltv_expiry_delta = 144;
+
     let payload = LNInvoiceRequest {
         amt_msat: None,
         expiry_sec: 900,
@@ -77,6 +87,8 @@ async fn invoice() {
         asset_amount: None,
         description: Some(description.to_string()),
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: Some(requested_min_final_cltv_expiry_delta),
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -93,6 +105,10 @@ async fn invoice() {
         lightning_invoice::Bolt11InvoiceDescriptionRef::Direct(d) if d.to_string() == description
     ));
     let decoded = decode_ln_invoice(node1_addr, &res.invoice).await;
+    assert_eq!(
+        decoded.min_final_cltv_expiry_delta,
+        u64::from(requested_min_final_cltv_expiry_delta) + 3
+    );
     assert_eq!(decoded.description.as_deref(), Some(description));
     assert_eq!(decoded.description_hash, None);
     let payment = list_payments(node1_addr)
@@ -112,6 +128,8 @@ async fn invoice() {
         asset_amount: None,
         description: None,
         description_hash: Some(description_hash.0.to_string()),
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -152,6 +170,8 @@ async fn invoice() {
         asset_amount: None,
         description: Some(description.to_string()),
         description_hash: Some(description_hash.0.to_string()),
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -175,6 +195,8 @@ async fn invoice() {
         asset_amount: None,
         description: None,
         description_hash: Some(s!("not-a-valid-description-hash")),
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -198,6 +220,8 @@ async fn invoice() {
         asset_amount: None,
         description: Some("a".repeat(640)),
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node1_addr}/lninvoice"))
@@ -252,6 +276,8 @@ async fn zero_amount_invoice() {
         asset_amount: None,
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let res = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -298,7 +324,8 @@ async fn zero_amount_invoice() {
     wait_for_ln_payment(node2_addr, &decoded.payment_hash, HTLCStatus::Succeeded).await;
 
     // Verify that both sender and receiver payments record the actual amount
-    let payment_sender = get_payment(node1_addr, &decoded.payment_hash).await;
+    let payment_sender =
+        get_payment(node1_addr, &decoded.payment_hash, PaymentType::Outbound).await;
     assert_eq!(
         payment_sender.amt_msat,
         Some(payment_amount),
@@ -306,7 +333,12 @@ async fn zero_amount_invoice() {
     );
     assert_eq!(payment_sender.status, HTLCStatus::Succeeded);
 
-    let payment_receiver = get_payment(node2_addr, &decoded.payment_hash).await;
+    let payment_receiver = get_payment(
+        node2_addr,
+        &decoded.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(
         payment_receiver.amt_msat,
         Some(payment_amount),
@@ -334,6 +366,8 @@ async fn zero_amount_invoice() {
         asset_amount: None,
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let invoice_without_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -358,6 +392,8 @@ async fn zero_amount_invoice() {
         asset_amount: Some(50),
         description: None,
         description_hash: None,
+        payment_hash: None,
+        min_final_cltv_expiry_delta: None,
     };
     let invoice_with_amount = reqwest::Client::new()
         .post(format!("http://{node2_addr}/lninvoice"))
@@ -395,7 +431,12 @@ async fn zero_amount_invoice() {
         HTLCStatus::Succeeded,
     )
     .await;
-    let payment = get_payment(node2_addr, &decoded_with_amount.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded_with_amount.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_id, Some(asset_id.clone()));
     assert_eq!(payment.asset_amount, Some(50));
 
@@ -488,6 +529,11 @@ async fn zero_amount_invoice() {
         HTLCStatus::Succeeded,
     )
     .await;
-    let payment = get_payment(node2_addr, &decoded_without_amount.payment_hash).await;
+    let payment = get_payment(
+        node2_addr,
+        &decoded_without_amount.payment_hash,
+        PaymentType::InboundAutoClaim,
+    )
+    .await;
     assert_eq!(payment.asset_amount, Some(100));
 }

@@ -13,8 +13,9 @@ use lightning::chain::Confirm;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter};
 use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
-use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
-use lightning::impl_writeable_tlv_based;
+use lightning::events::{
+    Event, HTLCHandlingFailureType, PaymentFailureReason, PaymentPurpose, ReplayEvent,
+};
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
 use lightning::ln::channelmanager::{
     ChainParameters, ChannelManagerReadArgs, SimpleArcChannelManager,
@@ -28,9 +29,9 @@ use lightning::onion_message::messenger::{
     DefaultMessageRouter, OnionMessenger as LdkOnionMessenger,
 };
 use lightning::rgb_utils::{
-    get_rgb_channel_info_pending, is_channel_rgb, parse_rgb_payment_info, read_rgb_transfer_info,
-    update_rgb_channel_amount, write_rgb_channel_info, INDEXER_URL_FNAME, STATIC_BLINDING,
-    WALLET_MASTER_FINGERPRINT_FNAME,
+    get_rgb_channel_info_pending, get_rgb_payment_info_path, is_channel_rgb,
+    parse_rgb_payment_info, read_rgb_transfer_info, update_rgb_channel_amount,
+    write_rgb_channel_info, INDEXER_URL_FNAME, STATIC_BLINDING, WALLET_MASTER_FINGERPRINT_FNAME,
 };
 use lightning::routing::gossip;
 use lightning::routing::gossip::{NodeId, P2PGossipSync};
@@ -51,6 +52,7 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::{ReadableArgs, Writeable};
 use lightning::util::sweep as ldk_sweep;
+use lightning::{impl_writeable_tlv_based, impl_writeable_tlv_based_enum};
 use lightning_background_processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
 #[cfg(feature = "block-sync")]
 use lightning_block_sync::{init, poll, SpvClient, UnboundedCache};
@@ -165,6 +167,14 @@ pub(crate) static HELD_PAYMENT_CLAIMABLE_COUNT: AtomicUsize = AtomicUsize::new(0
 #[cfg(test)]
 pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
+// Test-only: hold a HODL claim after persisting Claiming but before calling claim_funds.
+#[cfg(test)]
+pub(crate) static HOLD_HODL_CLAIM_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
+// Test-only: whether a HODL claim is currently held by HOLD_HODL_CLAIM_ON_NODE.
+#[cfg(test)]
+pub(crate) static HODL_CLAIM_HELD: AtomicBool = AtomicBool::new(false);
+
 // Test-only: whether the given override targets the node we are running as
 #[cfg(test)]
 pub(crate) fn node_override_matches(
@@ -177,6 +187,17 @@ pub(crate) fn node_override_matches(
         .as_ref()
         .is_some_and(|id| *id == our_node_id)
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum InvoiceType {
+    AutoClaim,
+    Hodl,
+}
+
+impl_writeable_tlv_based_enum!(InvoiceType,
+    (0, AutoClaim) => {},
+    (1, Hodl) => {},
+);
 
 pub(crate) struct LdkBackgroundServices {
     stop_processing: Arc<AtomicBool>,
@@ -197,6 +218,10 @@ pub(crate) struct PaymentInfo {
     pub(crate) expires_at: Option<u64>,
     pub(crate) description: Option<String>,
     pub(crate) description_hash: Option<[u8; 32]>,
+    pub(crate) claim_deadline_height: Option<u32>,
+    pub(crate) invoice_type: Option<InvoiceType>,
+    pub(crate) asset_id: Option<String>,
+    pub(crate) asset_amount: Option<u64>,
 }
 
 impl_writeable_tlv_based!(PaymentInfo, {
@@ -210,6 +235,10 @@ impl_writeable_tlv_based!(PaymentInfo, {
     (14, expires_at, option),
     (16, description, option),
     (18, description_hash, option),
+    (20, claim_deadline_height, option),
+    (22, invoice_type, option),
+    (24, asset_id, option),
+    (26, asset_amount, option),
 });
 
 pub(crate) struct InboundPaymentInfoStorage {
@@ -360,16 +389,14 @@ impl UnlockedAppState {
         let now = get_current_timestamp();
         let mut inbound = self.get_inbound_payments();
         let mut failed = false;
-        for (_, payment_info) in inbound
-            .payments
-            .iter_mut()
-            .filter(|(_, i)| matches!(i.status, HTLCStatus::Pending))
-        {
-            if let Some(expires_at) = payment_info.expires_at {
-                if now > expires_at {
-                    payment_info.status = HTLCStatus::Failed;
-                    payment_info.updated_at = now;
-                    failed = true;
+        for (_payment_hash, payment_info) in inbound.payments.iter_mut() {
+            if payment_info.status == HTLCStatus::Pending {
+                if let Some(expires_at) = payment_info.expires_at {
+                    if now > expires_at {
+                        payment_info.status = HTLCStatus::Failed;
+                        payment_info.updated_at = now;
+                        failed = true;
+                    }
                 }
             }
         }
@@ -388,7 +415,7 @@ impl UnlockedAppState {
         self.get_outbound_payments().payments.clone()
     }
 
-    fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
+    pub(crate) fn save_inbound_payments(&self, inbound: MutexGuard<InboundPaymentInfoStorage>) {
         self.fs_store
             .write("", "", INBOUND_PAYMENTS_FNAME, inbound.encode())
             .unwrap();
@@ -400,7 +427,8 @@ impl UnlockedAppState {
             .unwrap();
     }
 
-    fn upsert_inbound_payment(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upsert_inbound_payment(
         &self,
         payment_hash: PaymentHash,
         status: HTLCStatus,
@@ -408,18 +436,23 @@ impl UnlockedAppState {
         secret: Option<PaymentSecret>,
         amt_msat: Option<u64>,
         payee_pubkey: PublicKey,
+        claim_deadline_height: Option<u32>,
+        invoice_type: Option<InvoiceType>,
     ) {
         let mut inbound = self.get_inbound_payments();
         match inbound.payments.entry(payment_hash) {
             Entry::Occupied(mut e) => {
                 let payment_info = e.get_mut();
                 payment_info.status = status;
-                payment_info.preimage = preimage;
-                payment_info.secret = secret;
+                payment_info.preimage = preimage.or(payment_info.preimage);
+                payment_info.secret = secret.or(payment_info.secret);
                 if amt_msat.is_some() {
                     payment_info.amt_msat = amt_msat;
                 }
                 payment_info.updated_at = get_current_timestamp();
+                if claim_deadline_height.is_some() {
+                    payment_info.claim_deadline_height = claim_deadline_height;
+                }
             }
             Entry::Vacant(e) => {
                 let created_at = get_current_timestamp();
@@ -434,6 +467,10 @@ impl UnlockedAppState {
                     expires_at: None,
                     description: None,
                     description_hash: None,
+                    claim_deadline_height,
+                    invoice_type,
+                    asset_id: None,
+                    asset_amount: None,
                 });
             }
         }
@@ -634,6 +671,37 @@ fn find_and_update_rgb_chan_amt(ldk_data_dir: &Path, payment_hash: &PaymentHash,
             };
             update_rgb_channel_amount(&channel_id_str, offered, received, ldk_data_dir, false);
             break;
+        }
+    }
+}
+
+pub(crate) fn clear_rgb_payment_pending(payment_hash: &PaymentHash, ldk_data_dir: &Path) {
+    let payment_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir, false);
+    let extension = payment_path
+        .extension()
+        .expect("RGB payment info path has an extension")
+        .to_string_lossy();
+
+    let pending_payment_path = payment_path.with_extension(format!("{extension}_pending"));
+    if let Err(err) = fs::remove_file(&pending_payment_path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(
+                "Unable to remove RGB pending payment artifact {}: {err}",
+                pending_payment_path.display()
+            );
+        }
+    }
+}
+
+/// Removes the inbound RGB payment info file of a terminal HODL payment (issue #21).
+pub(crate) fn clear_rgb_payment_info(payment_hash: &PaymentHash, ldk_data_dir: &Path) {
+    let payment_path = get_rgb_payment_info_path(payment_hash, ldk_data_dir, true);
+    if payment_path.exists() {
+        if let Err(err) = fs::remove_file(&payment_path) {
+            tracing::warn!(
+                "Unable to remove inbound RGB payment artifact {}: {err}",
+                payment_path.display()
+            );
         }
     }
 }
@@ -1031,7 +1099,7 @@ async fn handle_ldk_events(
             purpose,
             amount_msat,
             receiver_node_id: _,
-            claim_deadline: _,
+            claim_deadline,
             onion_fields: _,
             counterparty_skimmed_fee_msat: _,
             receiving_channel_ids: _,
@@ -1069,21 +1137,146 @@ async fn handle_ldk_events(
                     tracing::info!("TEST: resuming PaymentClaimable for {}", payment_hash);
                 }
             }
-            let payment_preimage = match purpose {
+            let (payment_preimage, _payment_secret, invoice) = match purpose {
+                PaymentPurpose::SpontaneousPayment(preimage) => {
+                    unlocked_state.channel_manager.claim_funds(preimage);
+                    return Ok(());
+                }
                 PaymentPurpose::Bolt11InvoicePayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12OfferPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::Bolt12RefundPayment {
-                    payment_preimage, ..
-                } => payment_preimage,
-                PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12OfferPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                }
+                | PaymentPurpose::Bolt12RefundPayment {
+                    payment_preimage,
+                    payment_secret,
+                    ..
+                } => {
+                    let invoice = unlocked_state
+                        .get_inbound_payments()
+                        .payments
+                        .get(&payment_hash)
+                        .cloned()
+                        .expect("Missing inbound payment state for claimable payment");
+
+                    (payment_preimage, Some(payment_secret), invoice)
+                }
             };
-            unlocked_state
-                .channel_manager
-                .claim_funds(payment_preimage.unwrap());
+
+            if let (Some(expected_asset_id), Some(expected_asset_amount)) =
+                (invoice.asset_id.as_deref(), invoice.asset_amount)
+            {
+                let inbound_rgb_payment_path = get_rgb_payment_info_path(
+                    &payment_hash,
+                    &PathBuf::from(&static_state.ldk_data_dir),
+                    true,
+                );
+                let rgb_payment = inbound_rgb_payment_path
+                    .exists()
+                    .then(|| parse_rgb_payment_info(&inbound_rgb_payment_path));
+                let asset_id_matches = rgb_payment
+                    .as_ref()
+                    .is_some_and(|payment| payment.contract_id.to_string() == expected_asset_id);
+                let asset_amount_is_sufficient = rgb_payment
+                    .as_ref()
+                    .is_some_and(|payment| payment.amount >= expected_asset_amount);
+
+                if !asset_id_matches || !asset_amount_is_sufficient {
+                    let invalid_fields = match (asset_id_matches, asset_amount_is_sufficient) {
+                        (false, false) => "asset ID and asset amount",
+                        (false, true) => "asset ID",
+                        (true, false) => "asset amount",
+                        (true, true) => unreachable!(),
+                    };
+                    let received_asset_id = rgb_payment
+                        .as_ref()
+                        .map(|payment| payment.contract_id.to_string());
+                    let received_asset_amount = rgb_payment.as_ref().map(|payment| payment.amount);
+                    tracing::warn!(
+                        "Received invalid {invalid_fields} for invoice with payment hash {payment_hash}: expected asset ID {expected_asset_id} and asset amount at least {expected_asset_amount}; received asset ID {received_asset_id:?} and asset amount {received_asset_amount:?}",
+                    );
+                    // Read the status and write under one guard: a concurrent
+                    // cancel may have closed this invoice while the HTLC was
+                    // in flight; keep the terminal status and only fail the
+                    // HTLC back.
+                    let mut marked_failed = false;
+                    {
+                        let mut inbound = unlocked_state.get_inbound_payments();
+                        if let Some(info) = inbound.payments.get_mut(&payment_hash) {
+                            if !matches!(
+                                info.status,
+                                HTLCStatus::Cancelled | HTLCStatus::Failed | HTLCStatus::Succeeded
+                            ) {
+                                info.status = HTLCStatus::Failed;
+                                info.updated_at = get_current_timestamp();
+                                marked_failed = true;
+                            }
+                        }
+                        if marked_failed {
+                            unlocked_state.save_inbound_payments(inbound);
+                        }
+                    }
+                    unlocked_state
+                        .channel_manager
+                        .fail_htlc_backwards(&payment_hash);
+                    return Ok(());
+                }
+            }
+
+            // The preimage is Some exactly when LDK knows it (auto-claim
+            // invoices); a HODL invoice is registered by hash and has none.
+            match payment_preimage {
+                Some(preimage) => unlocked_state.channel_manager.claim_funds(preimage),
+                None => {
+                    // LDK re-emits PaymentClaimable on restart: read the
+                    // status and write under one guard so a concurrent cancel
+                    // cannot interleave between check and write. Never regress
+                    // a held or terminal state.
+                    let mut inbound = unlocked_state.get_inbound_payments();
+                    let Some(payment_info) = inbound.payments.get_mut(&payment_hash) else {
+                        return Ok(());
+                    };
+                    match payment_info.status {
+                        HTLCStatus::Pending => {
+                            // expires_at only matters before the HTLC is held.
+                            let now_ts = get_current_timestamp();
+                            if let Some(expiry) = invoice.expires_at {
+                                if now_ts >= expiry {
+                                    tracing::warn!(
+                                        "Received HTLC for expired invoice {payment_hash:?} (expiry {expiry})"
+                                    );
+                                    payment_info.status = HTLCStatus::Failed;
+                                    payment_info.updated_at = now_ts;
+                                    unlocked_state.save_inbound_payments(inbound);
+                                    unlocked_state
+                                        .channel_manager
+                                        .fail_htlc_backwards(&payment_hash);
+                                    return Ok(());
+                                }
+                            }
+
+                            payment_info.status = HTLCStatus::Claimable;
+                            payment_info.claim_deadline_height = claim_deadline;
+                            payment_info.amt_msat = Some(amount_msat);
+                            payment_info.updated_at = now_ts;
+                            unlocked_state.save_inbound_payments(inbound);
+                        }
+                        // restart replay: already held.
+                        HTLCStatus::Claimable => {}
+                        // closed invoice: fail back, keep the terminal status.
+                        _ => {
+                            unlocked_state
+                                .channel_manager
+                                .fail_htlc_backwards(&payment_hash);
+                        }
+                    }
+                }
+            }
         }
         Event::PaymentClaimed {
             payment_hash,
@@ -1100,6 +1293,25 @@ async fn handle_ldk_events(
                 payment_hash,
                 amount_msat,
             );
+
+            // Test-only: hold the Claiming window by parking the
+            // PaymentClaimed processing before the status changes. No state
+            // lock is held while parked.
+            #[cfg(test)]
+            {
+                let our_node_id = unlocked_state.channel_manager.get_our_node_id();
+                if node_override_matches(&HOLD_HODL_CLAIM_ON_NODE, our_node_id) {
+                    HODL_CLAIM_HELD.store(true, Ordering::SeqCst);
+                    let held_at = Instant::now();
+                    while node_override_matches(&HOLD_HODL_CLAIM_ON_NODE, our_node_id) {
+                        if held_at.elapsed() > Duration::from_secs(60) {
+                            panic!("TEST: HODL claim held for too long");
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+
             let (payment_preimage, payment_secret) = match purpose {
                 PaymentPurpose::Bolt11InvoicePayment {
                     payment_preimage,
@@ -1150,6 +1362,8 @@ async fn handle_ldk_events(
                     payment_secret,
                     Some(amount_msat),
                     receiver_node_id.unwrap(),
+                    None,
+                    None,
                 );
             }
         }
@@ -1243,6 +1457,7 @@ async fn handle_ldk_events(
             ..
         } => {
             if let Some(hash) = payment_hash {
+                clear_rgb_payment_pending(&hash, &static_state.ldk_data_dir);
                 tracing::error!(
                     "EVENT: Failed to send payment to payment ID {}, payment hash {}: {:?}",
                     payment_id,
@@ -1289,6 +1504,7 @@ async fn handle_ldk_events(
             inbound_amount_forwarded_rgb,
             payment_hash,
         } => {
+            clear_rgb_payment_pending(&payment_hash, &static_state.ldk_data_dir);
             let prev_channel_id_str = prev_channel_id.expect("prev_channel_id").to_string();
             let next_channel_id_str = next_channel_id.expect("next_channel_id").to_string();
 
@@ -1381,7 +1597,38 @@ async fn handle_ldk_events(
                 );
             }
         }
-        Event::HTLCHandlingFailed { .. } => {}
+        Event::HTLCHandlingFailed {
+            prev_channel_id,
+            failure_type,
+            failure_reason,
+        } => {
+            tracing::warn!(
+                "EVENT: HTLC handling failed on channel {prev_channel_id}: type {failure_type:?}, reason {failure_reason:?}"
+            );
+
+            if let HTLCHandlingFailureType::Receive { payment_hash } = failure_type {
+                let mut inbound = unlocked_state.get_inbound_payments();
+                if let Some(payment_info) = inbound.payments.get_mut(&payment_hash) {
+                    // LDK fails held HTLCs on its own once the claim deadline
+                    // is reached. Mark in-flight HODL payments Failed and drop
+                    // the stale inbound RGB artifact. Terminal states are left
+                    // untouched: a cancel fails the HTLC back itself and may
+                    // emit the same event.
+                    if matches!(
+                        payment_info.status,
+                        HTLCStatus::Claiming | HTLCStatus::Claimable
+                    ) {
+                        payment_info.status = HTLCStatus::Failed;
+                        payment_info.updated_at = get_current_timestamp();
+                        unlocked_state.save_inbound_payments(inbound);
+                        clear_rgb_payment_info(&payment_hash, &static_state.ldk_data_dir);
+                        tracing::warn!(
+                            "Marked inbound HODL payment {payment_hash} as failed after HTLC handling failure"
+                        );
+                    }
+                }
+            }
+        }
         Event::SpendableOutputs {
             outputs,
             channel_id,
