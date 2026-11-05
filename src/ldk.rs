@@ -12,7 +12,9 @@ use lightning::chain;
 use lightning::chain::Confirm;
 use lightning::chain::{chainmonitor, ChannelMonitorUpdateStatus};
 use lightning::chain::{BestBlock, Filter};
-use lightning::events::bump_transaction::{BumpTransactionEventHandler, Wallet};
+use lightning::events::bump_transaction::{
+    BumpTransactionEvent, BumpTransactionEventHandler, Wallet,
+};
 use lightning::events::{Event, PaymentFailureReason, PaymentPurpose, ReplayEvent};
 use lightning::impl_writeable_tlv_based;
 use lightning::ln::channelmanager::{self, PaymentId, RecentPaymentDetails};
@@ -98,6 +100,10 @@ use tokio::runtime::Handle;
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
+use crate::bump_force_close::{
+    commitment_feerate_sat_per_kw, BumpBroadcastRecorder, BumpTracker, ChannelCloseBumpRecord,
+    ChannelCloseBumpStatus, PRIMARY_NAMESPACE,
+};
 use crate::disk::{
     self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
@@ -112,7 +118,7 @@ use crate::ldk_chain_backend::transaction_sync::{
     IndexerClient, IndexerGossipVerifier, IndexerSyncClient,
 };
 use crate::ldk_chain_backend::{ChainBackend, ChainSetup, DynBroadcaster, DynFeeEstimator};
-use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
+use crate::rgb::{get_rgb_channel_info_optional, RgbBumpWalletSource, RgbLibWalletWrapper};
 use crate::rgb_file_transfer::{
     PeerChannelGate, RgbFileTransferHandler, REASSEMBLY_SWEEP_INTERVAL,
 };
@@ -584,8 +590,8 @@ pub(crate) type OnionMessenger = LdkOnionMessenger<
 >;
 
 pub(crate) type BumpTxEventHandler = BumpTransactionEventHandler<
-    Arc<DynBroadcaster>,
-    Arc<Wallet<Arc<RgbLibWalletWrapper>, Arc<FilesystemLogger>>>,
+    Arc<BumpBroadcastRecorder>,
+    Arc<Wallet<Arc<RgbBumpWalletSource>, Arc<FilesystemLogger>>>,
     Arc<KeysManager>,
     Arc<FilesystemLogger>,
 >;
@@ -1683,10 +1689,63 @@ async fn handle_ldk_events(
             // event.
         }
         Event::BumpTransaction(event) => {
-            unlocked_state
-                .bump_tx_event_handler
-                .handle_event(&event)
-                .await
+            let tracker = &unlocked_state.bump_tracker;
+            if let BumpTransactionEvent::ChannelClose {
+                channel_id,
+                claim_id,
+                package_target_feerate_sat_per_1000_weight,
+                commitment_tx,
+                commitment_tx_fee_satoshis,
+                ..
+            } = &event
+            {
+                let commitment_txid = commitment_tx.compute_txid();
+                let commitment_feerate =
+                    commitment_feerate_sat_per_kw(commitment_tx, *commitment_tx_fee_satoshis);
+                let mut record = ChannelCloseBumpRecord::new(
+                    *channel_id,
+                    *claim_id,
+                    commitment_txid,
+                    *package_target_feerate_sat_per_1000_weight,
+                );
+                let store = unlocked_state.fs_store.as_ref();
+                let previous = match ChannelCloseBumpRecord::read(store, &record.channel_id) {
+                    Ok(record) => record,
+                    Err(e) => {
+                        tracing::error!(%e, "cannot read channel close bump");
+                        None
+                    }
+                };
+                tracker.begin();
+                // LDK re-emits this event every timer tick until confirmation. Write the pending
+                // record only for a first attempt, and the outcome only when it changed.
+                if previous.is_none() {
+                    if let Err(e) = record.persist(store) {
+                        tracing::error!(%e, "cannot persist channel close bump");
+                    }
+                }
+                unlocked_state
+                    .bump_tx_event_handler
+                    .handle_event(&event)
+                    .await;
+                let broadcast = tracker.broadcast();
+                tracker.apply_outcome(&mut record, commitment_txid, commitment_feerate, &broadcast);
+                let unchanged = previous.is_some_and(|previous| {
+                    previous.status == record.status && previous.child_txid == record.child_txid
+                });
+                if !unchanged {
+                    if let Err(e) = record.persist(store) {
+                        tracing::error!(%e, "cannot persist channel close bump outcome");
+                    }
+                }
+            } else {
+                unlocked_state
+                    .bump_tx_event_handler
+                    .handle_event(&event)
+                    .await;
+                // HTLC-claim broadcasts share the recorder; drain them so the buffer cannot grow.
+                let _ = tracker.broadcast();
+            }
         }
         Event::ConnectionNeeded { node_id, addresses } => {
             tokio::spawn(async move {
@@ -2083,6 +2142,8 @@ pub(crate) async fn start_ldk(
             }
         }
     };
+
+    let broadcast_failure = backend.broadcast_failure();
 
     // Initialize the KeysManager
     // The key seed that we use to derive the node privkey (that corresponds to the node pubkey) and
@@ -2557,6 +2618,11 @@ pub(crate) async fn start_ldk(
             let chain_tip =
                 block_sync_chain_tip.expect("block-sync chain tip is set while syncing listeners");
             let mut cache = block_sync_cache;
+            // Flip non-terminal bump records to `confirmed` once the backend confirms the
+            // commitment; bitcoind only.
+            let bump_client = Arc::clone(&client);
+            let fs_store = Arc::clone(&fs_store);
+            let bump_stop = Arc::clone(&stop_processing);
             tokio::spawn(async move {
                 let chain_poller = poll::ChainPoller::new(client.as_ref(), network);
                 let chain_listener = (
@@ -2573,6 +2639,38 @@ pub(crate) async fn start_ldk(
                         tracing::error!("Error while polling best tip: {:?}", e);
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    if bump_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    interval.tick().await;
+                    let Ok(keys) = fs_store.list(PRIMARY_NAMESPACE, "") else {
+                        continue;
+                    };
+                    for key in keys {
+                        let Ok(Some(mut record)) =
+                            ChannelCloseBumpRecord::read(fs_store.as_ref(), &key)
+                        else {
+                            continue;
+                        };
+                        if record.status == ChannelCloseBumpStatus::Confirmed {
+                            continue;
+                        }
+                        let Ok(txid) = record.commitment_txid.parse() else {
+                            continue;
+                        };
+                        if bump_client.tx_confirmed(&txid).await {
+                            record.mark_confirmed();
+                            if let Err(e) = record.persist(fs_store.as_ref()) {
+                                tracing::error!(%e, "cannot persist confirmed channel close bump");
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -2608,9 +2706,19 @@ pub(crate) async fn start_ldk(
         &ldk_data_dir.join(OUTBOUND_PAYMENTS_FNAME),
     )));
 
-    let bump_tx_event_handler = Arc::new(BumpTransactionEventHandler::new(
+    let bump_tracker = Arc::new(BumpTracker::new(
         Arc::clone(&broadcaster),
-        Arc::new(Wallet::new(rgb_wallet_wrapper.clone(), Arc::clone(&logger))),
+        broadcast_failure,
+    ));
+
+    let bump_wallet_source = Arc::new(RgbBumpWalletSource {
+        inner: rgb_wallet_wrapper.clone(),
+        signer_failed: bump_tracker.signer_failed_flag(),
+    });
+
+    let bump_tx_event_handler = Arc::new(BumpTransactionEventHandler::new(
+        bump_tracker.recorder(),
+        Arc::new(Wallet::new(bump_wallet_source, Arc::clone(&logger))),
         Arc::clone(&keys_manager),
         Arc::clone(&logger),
     ));
@@ -2643,7 +2751,8 @@ pub(crate) async fn start_ldk(
         rgb_file_transfer_handler: Arc::clone(&rgb_file_transfer_handler),
         fs_store: Arc::clone(&fs_store),
         bump_tx_event_handler,
-        rgb_wallet_wrapper,
+        bump_tracker,
+        rgb_wallet_wrapper: Arc::clone(&rgb_wallet_wrapper),
         maker_swaps,
         taker_swaps,
         router: Arc::clone(&router),

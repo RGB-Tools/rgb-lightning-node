@@ -9,6 +9,7 @@ compile_error!(
 mod args;
 mod auth;
 mod backup;
+mod bump_force_close;
 mod crypto;
 mod disk;
 mod error;
@@ -59,11 +60,11 @@ use crate::error::AppError;
 use crate::ldk::stop_ldk;
 use crate::rgb_file_transfer::MAX_CONSIGNMENT_SIZE;
 use crate::routes::{
-    address, asset_balance, asset_metadata, backup, btc_balance, change_password,
-    check_indexer_url, check_proxy_endpoint, close_channel, connect_peer, create_utxos,
-    decode_ln_invoice, decode_rgb_invoice, decode_swapstring, disconnect_peer, estimate_fee,
-    fail_transfers, get_asset_media, get_channel_id, get_consignment, get_payment, get_swap,
-    inflate, init, invoice_status, issue_asset_cfa, issue_asset_ifa, issue_asset_nia,
+    address, asset_balance, asset_metadata, backup, btc_balance, bump_force_close_fee,
+    change_password, check_indexer_url, check_proxy_endpoint, close_channel, connect_peer,
+    create_utxos, decode_ln_invoice, decode_rgb_invoice, decode_swapstring, disconnect_peer,
+    estimate_fee, fail_transfers, get_asset_media, get_channel_id, get_consignment, get_payment,
+    get_swap, inflate, init, invoice_status, issue_asset_cfa, issue_asset_ifa, issue_asset_nia,
     issue_asset_uda, keysend, list_assets, list_channels, list_payments, list_peers, list_swaps,
     list_transactions, list_transfers, list_unspents, ln_invoice, lock, maker_execute, maker_init,
     network_info, node_info, open_channel, post_asset_media, provide_out_of_band_ack,
@@ -157,6 +158,7 @@ pub(crate) async fn app(args: UserArgs) -> Result<(Router, Arc<AppState>), AppEr
         .route("/assetmetadata", post(asset_metadata))
         .route("/backup", post(backup))
         .route("/btcbalance", post(btc_balance))
+        .route("/bumpforceclosefee", post(bump_force_close_fee))
         .route("/changepassword", post(change_password))
         .route("/checkindexerurl", post(check_indexer_url))
         .route("/checkproxyendpoint", post(check_proxy_endpoint))
