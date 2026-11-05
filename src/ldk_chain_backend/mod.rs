@@ -18,6 +18,28 @@ pub(crate) type DynFeeEstimator = dyn lightning::chain::chaininterface::FeeEstim
 pub(crate) type DynBroadcaster =
     dyn lightning::chain::chaininterface::BroadcasterInterface + Send + Sync;
 
+/// Last genuine broadcast rejection reported by the chain backend, drained by the bump tracker.
+pub(crate) type BroadcastFailure = Arc<std::sync::Mutex<Option<String>>>;
+
+pub(crate) fn broadcast_failure() -> BroadcastFailure {
+    Arc::new(std::sync::Mutex::new(None))
+}
+
+/// Errors the chain backends return for a transaction the network already knows; these are
+/// normal rebroadcasts, not failures.
+pub(crate) fn broadcast_error_is_benign(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    [
+        "already in mempool",
+        "already known",
+        "already in block chain",
+        "txn-already-in-mempool",
+        "txn-already-known",
+    ]
+    .iter()
+    .any(|known| message.contains(known))
+}
+
 pub(crate) const MIN_FEERATE: u32 = 253;
 
 pub(crate) enum ChainBackend {
@@ -31,6 +53,17 @@ pub(crate) enum ChainBackend {
         client: Arc<transaction_sync::IndexerClient>,
         tx_sync: Arc<transaction_sync::IndexerSyncClient>,
     },
+}
+
+impl ChainBackend {
+    pub(crate) fn broadcast_failure(&self) -> BroadcastFailure {
+        match self {
+            #[cfg(feature = "block-sync")]
+            ChainBackend::BlockSync { client, .. } => Arc::clone(&client.broadcast_failure),
+            #[cfg(feature = "transaction-sync")]
+            ChainBackend::TransactionSync { client, .. } => Arc::clone(&client.broadcast_failure),
+        }
+    }
 }
 
 pub(crate) struct ChainSetup {
@@ -51,7 +84,7 @@ pub(crate) async fn sync_chain_data(
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?
 }
 
-fn default_fee_buckets() -> HashMap<ConfirmationTarget, AtomicU32> {
+pub(crate) fn default_fee_buckets() -> HashMap<ConfirmationTarget, AtomicU32> {
     let mut fees = HashMap::new();
     fees.insert(
         ConfirmationTarget::MaximumFeeEstimate,
@@ -93,8 +126,8 @@ fn fee_from_bucket(
         .get(&confirmation_target)
         .unwrap()
         .load(Ordering::Acquire);
-    #[cfg(all(test, feature = "electrum"))]
-    let fee = crate::test::mock_fee(fee);
+    #[cfg(test)]
+    let fee = crate::test::fee_mock::mock_fee(confirmation_target, fee);
     fee
 }
 
@@ -125,4 +158,20 @@ fn store_fee_estimates(
     set(ConfirmationTarget::NonAnchorChannelFee, normal);
     set(ConfirmationTarget::ChannelCloseMinimum, background);
     set(ConfirmationTarget::OutputSpendingFee, background);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::broadcast_error_is_benign;
+
+    #[test]
+    fn already_known_broadcasts_are_not_failures() {
+        assert!(broadcast_error_is_benign(
+            r#"{"code":-27,"message":"Transaction already in block chain"}"#
+        ));
+        assert!(broadcast_error_is_benign("txn-already-in-mempool"));
+        assert!(!broadcast_error_is_benign(
+            "mempool-script-verify-flag-failed (Invalid Schnorr signature)"
+        ));
+    }
 }
