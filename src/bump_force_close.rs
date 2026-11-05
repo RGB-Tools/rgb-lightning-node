@@ -112,6 +112,7 @@ impl ChannelCloseBumpRecord {
     }
 
     /// Marks the record terminal once the backend reports the commitment confirmed.
+    #[cfg(any(test, feature = "block-sync"))]
     pub(crate) fn mark_confirmed(&mut self) {
         self.status = ChannelCloseBumpStatus::Confirmed;
         self.message = None;

@@ -3,11 +3,16 @@ use crate::routes::HTLC_MIN_MSAT;
 use lightning::chain::chaininterface::ConfirmationTarget;
 
 const TEST_DIR_BASE: &str = "tmp/anchor_cpfp_force_close/";
-// UrgentOnChainSweep, in sat per 1000 weight units: 1.2 sat/vB, just above the commitment's
-// ~1 sat/vB feerate so LDK requires an anchor child, but low enough that the 330 sat anchor
-// output plus the commitment's own fee can satisfy the target without an external sponsor
-// input. The regtest wallet only holds P2TR UTXOs, which the bump PSBT signing path cannot
-// sign into a valid package here, so any sponsor input would make bitcoind reject the package.
+// Fee pins, in sat per 1000 weight units. LDK derives the commitment feerate from
+// AnchorChannelFee and bounds the open-time peer-feerate check below by
+// MinAllowedAnchorChannelRemoteFee; both are pinned to 220, which LDK's
+// LowerBoundedFeeEstimator lifts to its 253 s/kW floor (~1 sat/vB), so the commitment feerate
+// is deterministic across runs. UrgentOnChainSweep is pinned to 1.2 sat/vB, just above the
+// commitment, so LDK requires an anchor child, but low enough that the 330 sat anchor output
+// plus the commitment's own fee can satisfy the target without an external sponsor input: the
+// regtest wallet only holds P2TR UTXOs, which the bump PSBT signing path cannot sign into a
+// valid package here, so any sponsor input would make bitcoind reject the package.
+const COMMITMENT_FEE_RATE_SAT_PER_KW: u32 = 220;
 const TARGET_FEE_RATE_SAT_PER_KW: u32 = 300;
 const TARGET_FEE_RATE_SAT_PER_VB: f64 = TARGET_FEE_RATE_SAT_PER_KW as f64 / 250.0;
 const CHANNEL_CAPACITY_SAT: u64 = 100_000;
@@ -16,6 +21,11 @@ struct TargetFeeOverride;
 
 impl Drop for TargetFeeOverride {
     fn drop(&mut self) {
+        fee_mock::set_target_fee_for_tests(ConfirmationTarget::AnchorChannelFee, None);
+        fee_mock::set_target_fee_for_tests(
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+            None,
+        );
         fee_mock::set_target_fee_for_tests(ConfirmationTarget::UrgentOnChainSweep, None);
     }
 }
@@ -68,6 +78,14 @@ async fn anchor_cpfp_force_close() {
     initialize();
     let _fee_override = TargetFeeOverride;
     fee_mock::set_target_fee_for_tests(
+        ConfirmationTarget::AnchorChannelFee,
+        Some(COMMITMENT_FEE_RATE_SAT_PER_KW),
+    );
+    fee_mock::set_target_fee_for_tests(
+        ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+        Some(COMMITMENT_FEE_RATE_SAT_PER_KW),
+    );
+    fee_mock::set_target_fee_for_tests(
         ConfirmationTarget::UrgentOnChainSweep,
         Some(TARGET_FEE_RATE_SAT_PER_KW),
     );
@@ -116,8 +134,37 @@ async fn anchor_cpfp_force_close() {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
-    // Force close without mining, so the package stays observable in the mempool.
-    close_channel(node2_addr, &channel.channel_id, &node1_pubkey, true).await;
+    // Force close without mining, so the package stays observable in the mempool. The shared
+    // `close_channel` helper mines 144 blocks once the channel disappears, which would confirm
+    // the package before it can be asserted on, so the close request is issued directly.
+    stop_mining();
+    let payload = CloseChannelRequest {
+        channel_id: channel.channel_id.clone(),
+        peer_pubkey: node1_pubkey.clone(),
+        force: true,
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node2_addr}/closechannel"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    check_response_is_ok(res)
+        .await
+        .json::<EmptyResponse>()
+        .await
+        .unwrap();
+    let t_0 = OffsetDateTime::now_utc();
+    loop {
+        let channels = list_channels(node2_addr).await;
+        if !channels.iter().any(|c| c.channel_id == channel.channel_id) {
+            break;
+        }
+        if (OffsetDateTime::now_utc() - t_0).as_seconds_f32() > 30.0 {
+            panic!("channel is taking too long to close");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 
     // The status is written before the handler runs, so an absent record means the event has not
     // been processed yet. Wait for the handler's outcome instead of sleeping.

@@ -115,6 +115,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BtcBalanceResponse'
+  /bumpforceclosefee:
+    post:
+      tags:
+        - Channels
+      summary: Get the anchor CPFP fee bump status
+      description: Return the persisted fee-bump status of an unconfirmed local force-close commitment. Status is one of `pending`, `not_required`, `broadcast`, `insufficient_funds`, `signer_failure` or `retryable_failure`. `broadcast` means the package was handed to the chain backend, not that it entered the mempool. `insufficient_funds` means no package was produced; any handler failure that produces no broadcast looks the same. `retryable_failure` means the chain backend rejected the last attempt or no anchor child was produced. Check the node log for the underlying error.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BumpForceCloseFeeRequest'
+      responses:
+        '403':
+          $ref: '#/components/responses/LightningUnsupportedOnMainnet'
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BumpForceCloseFeeResponse'
   /changepassword:
     post:
       tags:
@@ -1665,6 +1685,56 @@ components:
         proxy_endpoint:
           type: string
           example: rpc://127.0.0.1:3000/json-rpc
+    BumpForceCloseFeeRequest:
+      type: object
+      required:
+        - channel_id
+      properties:
+        channel_id:
+          type: string
+          example: 8129afe1b1d7cf60d5e1bf4c04b09bec925ed4df5417ceee0484e24f816a105a
+    BumpForceCloseFeeResponse:
+      type: object
+      required:
+        - channel_id
+        - claim_id
+        - status
+        - commitment_txid
+        - target_fee_rate_sat_vb
+        - updated_at
+      properties:
+        channel_id:
+          type: string
+        claim_id:
+          type: string
+        status:
+          type: string
+          description: Handed to the broadcaster (`broadcast`), not required (`not_required`), a failure that LDK retries (`retryable_failure`), or confirmed on-chain (`confirmed`); see the endpoint description.
+          enum:
+            - pending
+            - not_required
+            - broadcast
+            - insufficient_funds
+            - signer_failure
+            - retryable_failure
+            - confirmed
+        commitment_txid:
+          type: string
+        child_txid:
+          type:
+            - string
+            - 'null'
+        target_fee_rate_sat_vb:
+          type: number
+          example: 20.0
+        updated_at:
+          type: integer
+          description: Unix seconds of the last status change.
+        message:
+          type:
+            - string
+            - 'null'
+          description: Backend rejection or handler failure reason when known.
     CloseChannelRequest:
       type: object
       required:

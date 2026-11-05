@@ -126,7 +126,7 @@ fn fee_from_bucket(
         .get(&confirmation_target)
         .unwrap()
         .load(Ordering::Acquire);
-    #[cfg(test)]
+    #[cfg(all(test, feature = "electrum"))]
     let fee = crate::test::fee_mock::mock_fee(confirmation_target, fee);
     fee
 }

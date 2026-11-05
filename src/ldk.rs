@@ -102,8 +102,9 @@ use tokio::task::JoinHandle;
 
 use crate::bump_force_close::{
     commitment_feerate_sat_per_kw, BumpBroadcastRecorder, BumpTracker, ChannelCloseBumpRecord,
-    ChannelCloseBumpStatus, PRIMARY_NAMESPACE,
 };
+#[cfg(feature = "block-sync")]
+use crate::bump_force_close::{ChannelCloseBumpStatus, PRIMARY_NAMESPACE};
 use crate::disk::{
     self, FilesystemLogger, CHANNEL_IDS_FNAME, CHANNEL_PEER_DATA, INBOUND_PAYMENTS_FNAME,
     MAKER_SWAPS_FNAME, OUTBOUND_PAYMENTS_FNAME, OUTPUT_SPENDER_TXES, TAKER_SWAPS_FNAME,
