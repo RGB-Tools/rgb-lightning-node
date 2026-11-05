@@ -52,27 +52,28 @@ use crate::ldk::{
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetFilter, AssetIFA,
     AssetNIA, AssetUDA, Assignment, BackupRequest, BtcBalanceRequest, BtcBalanceResponse,
-    ChangePasswordRequest, Channel, CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest,
-    DecodeLNInvoiceRequest, DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest,
-    DecodeRGBInvoiceResponse, DecodeSwapstringRequest, DecodeSwapstringResponse,
-    DisconnectPeerRequest, EmptyResponse, FailTransfersRequest, FailTransfersResponse,
-    GetAssetMediaRequest, GetAssetMediaResponse, GetChannelIdRequest, GetChannelIdResponse,
-    GetConsignmentRequest, GetConsignmentResponse, GetPaymentRequest, GetPaymentResponse,
-    GetSwapRequest, GetSwapResponse, HTLCStatus, InflateRequest, InflateResponse, InitRequest,
-    InitResponse, InvoiceStatus, InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest,
-    IssueAssetCFAResponse, IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest,
-    IssueAssetNIAResponse, IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest,
-    KeysendResponse, LNInvoiceRequest, LNInvoiceResponse, LdkChainSync, ListAssetsRequest,
-    ListAssetsResponse, ListChannelsResponse, ListPaymentsResponse, ListPeersResponse,
-    ListSwapsResponse, ListTransactionsRequest, ListTransactionsResponse, ListTransfersRequest,
-    ListTransfersResponse, ListUnspentsRequest, ListUnspentsResponse, MakerExecuteRequest,
-    MakerInitRequest, MakerInitResponse, NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest,
-    OpenChannelResponse, Payment, Peer, PostAssetMediaResponse, ProvideOutOfBandAckRequest,
-    ProvideOutOfBandAckResponse, ProvideOutOfBandConsignmentResponse, Recipient, RefreshRequest,
-    RefreshResponse, RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse,
-    SendBtcRequest, SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest,
-    SendRgbResponse, Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus,
-    UnlockRequest, Unspent, WitnessData,
+    BumpForceCloseFeeRequest, BumpForceCloseFeeResponse, ChangePasswordRequest, Channel,
+    CloseChannelRequest, ConnectPeerRequest, CreateUtxosRequest, DecodeLNInvoiceRequest,
+    DecodeLNInvoiceResponse, DecodeRGBInvoiceRequest, DecodeRGBInvoiceResponse,
+    DecodeSwapstringRequest, DecodeSwapstringResponse, DisconnectPeerRequest, EmptyResponse,
+    FailTransfersRequest, FailTransfersResponse, GetAssetMediaRequest, GetAssetMediaResponse,
+    GetChannelIdRequest, GetChannelIdResponse, GetConsignmentRequest, GetConsignmentResponse,
+    GetPaymentRequest, GetPaymentResponse, GetSwapRequest, GetSwapResponse, HTLCStatus,
+    InflateRequest, InflateResponse, InitRequest, InitResponse, InvoiceStatus,
+    InvoiceStatusRequest, InvoiceStatusResponse, IssueAssetCFARequest, IssueAssetCFAResponse,
+    IssueAssetIFARequest, IssueAssetIFAResponse, IssueAssetNIARequest, IssueAssetNIAResponse,
+    IssueAssetUDARequest, IssueAssetUDAResponse, KeysendRequest, KeysendResponse, LNInvoiceRequest,
+    LNInvoiceResponse, LdkChainSync, ListAssetsRequest, ListAssetsResponse, ListChannelsResponse,
+    ListPaymentsResponse, ListPeersResponse, ListSwapsResponse, ListTransactionsRequest,
+    ListTransactionsResponse, ListTransfersRequest, ListTransfersResponse, ListUnspentsRequest,
+    ListUnspentsResponse, MakerExecuteRequest, MakerInitRequest, MakerInitResponse,
+    NetworkInfoResponse, NodeInfoResponse, OpenChannelRequest, OpenChannelResponse, Payment, Peer,
+    PostAssetMediaResponse, ProvideOutOfBandAckRequest, ProvideOutOfBandAckResponse,
+    ProvideOutOfBandConsignmentResponse, Recipient, RefreshRequest, RefreshResponse,
+    RestoreRequest, RevokeTokenRequest, RgbInvoiceRequest, RgbInvoiceResponse, SendBtcRequest,
+    SendBtcResponse, SendPaymentRequest, SendPaymentResponse, SendRgbRequest, SendRgbResponse,
+    Swap, SwapStatus, TakerRequest, Transaction, Transfer, TransferStatus, UnlockRequest, Unspent,
+    WitnessData,
 };
 use crate::utils::{hex_str, hex_str_to_vec, ELECTRUM_URL_REGTEST, LDK_DIR, PROXY_ENDPOINT_LOCAL};
 
@@ -1145,6 +1146,33 @@ async fn list_swaps(node_address: SocketAddr) -> ListSwapsResponse {
         .await
         .unwrap();
     check_response_is_ok(res).await.json().await.unwrap()
+}
+
+async fn bump_force_close_fee(
+    node_address: SocketAddr,
+    channel_id: &str,
+) -> Option<BumpForceCloseFeeResponse> {
+    println!("getting force-close fee bump status for channel {channel_id} on node {node_address}");
+    let payload = BumpForceCloseFeeRequest {
+        channel_id: channel_id.to_string(),
+    };
+    let res = reqwest::Client::new()
+        .post(format!("http://{node_address}/bumpforceclosefee"))
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return None;
+    }
+    if res.status() != reqwest::StatusCode::OK {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        panic!(
+            "force-close fee bump request for channel {channel_id} failed with {status}: {body}"
+        );
+    }
+    Some(res.json::<BumpForceCloseFeeResponse>().await.unwrap())
 }
 
 async fn get_swap(node_address: SocketAddr, payment_hash: &str, taker: bool) -> Swap {
@@ -2362,6 +2390,7 @@ pub fn mock_fee(fee: u32) -> u32 {
     }
 }
 
+mod anchor_cpfp_force_close;
 mod authentication;
 mod backup_and_restore;
 mod close_coop_nobtc_acceptor;
@@ -2379,6 +2408,7 @@ mod drop_funding_signed;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;
 mod fail_transfers;
+pub(crate) mod fee_mock;
 mod getchannelid;
 mod htlc_amount_checks;
 mod inflate;
