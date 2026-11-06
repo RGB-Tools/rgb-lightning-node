@@ -548,6 +548,24 @@ impl RgbFileTransferHandler {
             .retain(|key, _| key.funding_txid != funding_txid);
     }
 
+    // Delete the files staged for a funding that turned out to be a vanilla channel, and its
+    // record. Only `handle_funding` validates staged files, and it never runs for a vanilla
+    // channel, so whatever a peer sent for one is junk.
+    pub(crate) fn discard_staged_funding(&self, funding_txid: &str) {
+        let _ = fs::remove_dir_all(get_media_staging_dir(&self.ldk_data_dir, funding_txid));
+        match fs::remove_file(self.consignment_path(funding_txid)) {
+            Ok(()) => tracing::warn!(
+                "Discarded RGB consignment sent for vanilla channel with funding txid {funding_txid}"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!(
+                "Failed to remove RGB consignment for vanilla channel with funding txid \
+                 {funding_txid}: {e}"
+            ),
+        }
+        self.forget_staged_funding(funding_txid);
+    }
+
     // Delete what abandoned transfers left behind, in memory and on disk.
     pub(crate) fn sweep_stale_state(&self) {
         let now = Instant::now();
@@ -560,10 +578,9 @@ impl RgbFileTransferHandler {
     // A peer can open a channel, send files naming any funding txid it likes, and simply never fund
     // it, costing it nothing. Those files are deleted here.
     //
-    // The age check is what keeps this safe. A consignment file's *absence* is how the acceptor
-    // decides a channel is vanilla, so removing one that a funding still needs would silently drop
-    // the asset. Only a funding whose transaction never arrived, long after it would have, is
-    // touched.
+    // The age check is what keeps this safe. A colored channel's acceptor loads the asset from its
+    // consignment file, so removing one that a funding still needs would silently drop the asset.
+    // Only a funding whose transaction never arrived, long after it would have, is touched.
     fn sweep_unfunded_stagings_at(&self, now: Instant) {
         let mut persisted = self.staged_fundings.lock().unwrap();
         persisted.retain(|key, record| {

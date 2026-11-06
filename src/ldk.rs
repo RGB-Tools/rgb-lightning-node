@@ -1488,11 +1488,18 @@ async fn handle_ldk_events(
                 fs::remove_file(&pending_funding_path).unwrap();
             } else {
                 // acceptor
+                if !is_channel_rgb(&channel_id, &static_state.ldk_data_dir) {
+                    // vanilla channel: nothing validated what a peer may have staged for this
+                    // funding, so it must not be loaded
+                    unlocked_state
+                        .rgb_file_transfer_handler
+                        .discard_staged_funding(&funding_txid);
+                    return Ok(());
+                }
                 let consignment_path = static_state
                     .ldk_data_dir
                     .join(format!("consignment_{funding_txid}"));
                 if !consignment_path.exists() {
-                    // vanilla channel
                     return Ok(());
                 }
                 let consignment =
