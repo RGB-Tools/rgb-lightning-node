@@ -565,9 +565,14 @@ pub(crate) type ChannelManager =
     SimpleArcChannelManager<ChainMonitor, DynBroadcaster, DynFeeEstimator, FilesystemLogger>;
 
 impl PeerChannelGate for ChannelManager {
-    fn channel_count_with(&self, peer: &PublicKey) -> usize {
-        // unlike list_channels, this doesn't filter out unfunded channels
-        self.list_channels_with_counterparty(peer).len()
+    fn colored_fundings_with(&self, peer: &PublicKey) -> Vec<ChannelId> {
+        // unlike list_channels, this doesn't filter out unfunded channels. The acceptor learns the
+        // funding outpoint from `funding_created`, which comes after the files
+        self.list_channels_with_counterparty(peer)
+            .iter()
+            .filter(|chan| chan.is_colored && !chan.is_outbound && chan.funding_txo.is_none())
+            .map(|chan| chan.channel_id)
+            .collect()
     }
 
     fn has_channel_funded_by(&self, funding_txid: &str) -> bool {
@@ -961,6 +966,7 @@ async fn handle_ldk_events(
                     .rgb_file_transfer_handler
                     .queue_consignment(
                         counterparty_node_id,
+                        temporary_channel_id,
                         funding_txid_str.clone(),
                         consignment_bytes,
                     )
@@ -1008,6 +1014,7 @@ async fn handle_ldk_events(
                             .rgb_file_transfer_handler
                             .queue_media(
                                 counterparty_node_id,
+                                temporary_channel_id,
                                 funding_txid_str.clone(),
                                 media.digest,
                                 media_bytes,
@@ -1027,7 +1034,9 @@ async fn handle_ldk_events(
                 unlocked_state.peer_manager.process_events();
             }
 
-            // Test-only: send a junk consignment for this vanilla channel
+            // Test-only: send a junk consignment for this vanilla channel. It names a colored
+            // channel we left unfunded to the same peer if there is one, as only those pass the
+            // receiver's gate
             #[cfg(test)]
             if !is_colored
                 && node_override_matches(
@@ -1035,10 +1044,17 @@ async fn handle_ldk_events(
                     unlocked_state.channel_manager.get_our_node_id(),
                 )
             {
+                let named_channel_id = unlocked_state
+                    .channel_manager
+                    .list_channels_with_counterparty(&counterparty_node_id)
+                    .iter()
+                    .find(|chan| chan.is_colored && chan.is_outbound && chan.funding_txo.is_none())
+                    .map_or(temporary_channel_id, |chan| chan.channel_id);
                 unlocked_state
                     .rgb_file_transfer_handler
                     .queue_consignment(
                         counterparty_node_id,
+                        named_channel_id,
                         funding_txid_str.clone(),
                         b"this is not an RGB consignment, it is attacker-controlled junk".to_vec(),
                     )
@@ -1577,6 +1593,11 @@ async fn handle_ldk_events(
                 unlocked_state
                     .rgb_file_transfer_handler
                     .forget_staged_funding(&funding_txid);
+            } else if let Some(counterparty_node_id) = counterparty_node_id {
+                // closed before we learned its funding, so free whatever the peer staged for it
+                unlocked_state
+                    .rgb_file_transfer_handler
+                    .release_stale_stagings(&counterparty_node_id);
             }
 
             // the ChannelClosed event gets fired also after node crashes/restarts, so it's better

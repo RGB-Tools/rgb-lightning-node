@@ -2397,6 +2397,7 @@ mod openchannel_media;
 mod openchannel_no_indexer;
 mod openchannel_optional_addr;
 mod openchannel_push_asset_amount;
+mod openchannel_retry_after_failed_funding;
 mod out_of_band;
 mod path_traversal;
 mod payment;

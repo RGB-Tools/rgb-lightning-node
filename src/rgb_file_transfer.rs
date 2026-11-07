@@ -13,9 +13,10 @@
 //! media set is trusted.
 //!
 //! Because Lightning wire messages are capped at `LN_MAX_MSG_LEN` (65535 bytes), every file is split
-//! into chunks and reassembled on the receiving side. Only channel counterparties may send us files
-//! (see [`PeerChannelGate`]); a peer's in-flight chunks are capped, dropped when it disconnects, and
-//! swept once a transfer stops making progress (see [`REASSEMBLY_TTL`]).
+//! into chunks and reassembled on the receiving side. Only a peer funding a colored channel to us
+//! may send us files, one funding's worth per such channel (see [`PeerChannelGate`]); a peer's
+//! in-flight chunks are capped, dropped when it disconnects, and swept once a transfer stops making
+//! progress (see [`REASSEMBLY_TTL`]).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -27,6 +28,7 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::PublicKey;
 use lightning::ln::msgs::{DecodeError, Init, LightningError};
 use lightning::ln::peer_handler::CustomMessageHandler;
+use lightning::ln::types::ChannelId;
 use lightning::ln::wire::{CustomMessageReader, Type};
 use lightning::rgb_utils::get_media_staging_dir;
 use lightning::types::features::{InitFeatures, NodeFeatures};
@@ -49,7 +51,7 @@ const FILE_KIND_MEDIA: u8 = 1;
 // Maximum number of file payload bytes carried in a single chunk.
 //
 // Kept well below `LN_MAX_MSG_LEN` (65535) to leave room for the 2-byte message type and the chunk
-// framing (version, kind, funding txid, file id, indices and length prefixes).
+// framing (version, kind, channel ID, funding txid, file id, indices and length prefixes).
 const CHUNK_SIZE: usize = 60_000;
 
 // How long a transfer may make no progress before its buffered chunks are dropped.
@@ -127,6 +129,9 @@ fn is_hash_hex(s: &str) -> bool {
 pub(crate) struct RgbFileMessage {
     // Which kind of file this chunk belongs to.
     pub(crate) file_kind: u8,
+    // The temporary ID of the channel being funded, which both sides know it by until
+    // `funding_created`.
+    pub(crate) channel_id: ChannelId,
     // The funding transaction id (canonical hex string) this transfer belongs to.
     pub(crate) funding_txid: String,
     // Per-file identifier. For media it is the claimed SHA-256 digest; empty for the consignment
@@ -150,6 +155,7 @@ impl Writeable for RgbFileMessage {
     fn write<W: Writer>(&self, w: &mut W) -> Result<(), bitcoin::io::Error> {
         WIRE_VERSION.write(w)?;
         self.file_kind.write(w)?;
+        self.channel_id.write(w)?;
         let txid_bytes = self.funding_txid.as_bytes();
         (txid_bytes.len() as u16).write(w)?;
         w.write_all(txid_bytes)?;
@@ -174,6 +180,7 @@ impl RgbFileMessage {
         if !matches!(file_kind, FILE_KIND_CONSIGNMENT | FILE_KIND_MEDIA) {
             return Err(DecodeError::InvalidValue);
         }
+        let channel_id: ChannelId = Readable::read(buffer)?;
         let txid_len: u16 = Readable::read(buffer)?;
         let mut txid_bytes = vec![0u8; txid_len as usize];
         buffer.read_exact(&mut txid_bytes)?;
@@ -205,6 +212,7 @@ impl RgbFileMessage {
         buffer.read_exact(&mut data)?;
         Ok(RgbFileMessage {
             file_kind,
+            channel_id,
             funding_txid,
             file_id,
             chunk_index,
@@ -238,8 +246,10 @@ struct ReassemblyKey {
 // Kept as a trait so the transport depends on these two questions rather than on the whole channel
 // manager, and so it can be unit tested.
 pub(crate) trait PeerChannelGate: Send + Sync {
-    // How many channels, including ones still being funded, we have with `peer`.
-    fn channel_count_with(&self, peer: &PublicKey) -> usize;
+    // The IDs of the colored channels `peer` is funding to us: inbound, negotiated as colored, and
+    // not yet funded, so still under their temporary ID. These are the only channels files are
+    // ever sent for.
+    fn colored_fundings_with(&self, peer: &PublicKey) -> Vec<ChannelId>;
 
     // Whether any of our channels is funded by `funding_txid`.
     fn has_channel_funded_by(&self, funding_txid: &str) -> bool;
@@ -255,8 +265,10 @@ struct FundingStagingKey {
     funding_txid: String,
 }
 
-// Per-funding bookkeeping: when the consignment landed and the media staged with it.
+// Per-funding bookkeeping: the channel it was sent for, when the consignment landed and the media
+// staged with it.
 struct FundingStagingRecord {
+    channel_id: ChannelId,
     written_at: Instant,
     // Media bytes staged against this funding, bounding one channel's media aggregate.
     staged_media_bytes: usize,
@@ -266,6 +278,8 @@ struct FundingStagingRecord {
 
 // Reassembly state for a single in-flight file.
 struct ReassemblyState {
+    // The channel its funding was sent for, carried to the funding's record once it is written.
+    channel_id: ChannelId,
     // The sender's claimed total number of chunks, which the receiver verifies.
     total_chunks: u16,
     // Received chunks, keyed by index. A map rather than a pre-sized `Vec` so it holds only the
@@ -279,8 +293,9 @@ struct ReassemblyState {
 }
 
 impl ReassemblyState {
-    fn new(now: Instant) -> Self {
+    fn new(now: Instant, channel_id: ChannelId) -> Self {
         ReassemblyState {
+            channel_id,
             total_chunks: 0,
             chunks: BTreeMap::new(),
             buffered: 0,
@@ -401,6 +416,7 @@ impl RgbFileTransferHandler {
         &self,
         peer: PublicKey,
         file_kind: u8,
+        channel_id: ChannelId,
         funding_txid: String,
         file_id: String,
         bytes: Vec<u8>,
@@ -427,6 +443,7 @@ impl RgbFileTransferHandler {
                 peer,
                 RgbFileMessage {
                     file_kind,
+                    channel_id,
                     funding_txid: funding_txid.clone(),
                     file_id: file_id.clone(),
                     // bounded by `total_chunks`, which `chunk_count` proved fits
@@ -446,12 +463,14 @@ impl RgbFileTransferHandler {
     pub(crate) fn queue_consignment(
         &self,
         peer: PublicKey,
+        channel_id: ChannelId,
         funding_txid: String,
         bytes: Vec<u8>,
     ) -> Result<(), ()> {
         self.queue_file(
             peer,
             FILE_KIND_CONSIGNMENT,
+            channel_id,
             funding_txid,
             String::new(),
             bytes,
@@ -465,11 +484,19 @@ impl RgbFileTransferHandler {
     pub(crate) fn queue_media(
         &self,
         peer: PublicKey,
+        channel_id: ChannelId,
         funding_txid: String,
         digest: String,
         bytes: Vec<u8>,
     ) -> Result<(), ()> {
-        self.queue_file(peer, FILE_KIND_MEDIA, funding_txid, digest, bytes)
+        self.queue_file(
+            peer,
+            FILE_KIND_MEDIA,
+            channel_id,
+            funding_txid,
+            digest,
+            bytes,
+        )
     }
 
     // On startup, delete the consignment and staged-media files of channels that never funded.
@@ -566,6 +593,76 @@ impl RgbFileTransferHandler {
         self.forget_staged_funding(funding_txid);
     }
 
+    // Free what `peer` staged for opens that are gone. Called when one of its channels closes
+    // before being funded on our side.
+    pub(crate) fn release_stale_stagings(&self, peer: &PublicKey) {
+        let live_channels = self.channel_gate.colored_fundings_with(peer);
+        let mut reassembly = self.reassembly.lock().unwrap();
+        let mut persisted = self.staged_fundings.lock().unwrap();
+        self.release_stale_stagings_locked(&mut reassembly, &mut persisted, peer, &live_channels);
+    }
+
+    // Drop the fundings `peer` staged whose channel is no longer among `live_channels`, the
+    // colored channels it is still funding to us, and that didn't fund either. LDK drops a channel
+    // whose `funding_created` it rejects at once, while its `ChannelClosed` comes later, so this
+    // also runs on the next new funding the peer sends, which may be for another of its channels.
+    fn release_stale_stagings_locked(
+        &self,
+        reassembly: &mut HashMap<ReassemblyKey, ReassemblyState>,
+        persisted: &mut HashMap<FundingStagingKey, FundingStagingRecord>,
+        peer: &PublicKey,
+        live_channels: &[ChannelId],
+    ) {
+        let stale: HashSet<String> = reassembly
+            .iter()
+            .filter(|(k, _)| k.peer == *peer)
+            .map(|(k, state)| (&k.funding_txid, &state.channel_id))
+            .chain(
+                persisted
+                    .iter()
+                    .filter(|(k, _)| k.peer == *peer)
+                    .map(|(k, record)| (&k.funding_txid, &record.channel_id)),
+            )
+            .filter(|(txid, channel_id)| {
+                !live_channels.contains(channel_id)
+                    && !self.channel_gate.has_channel_funded_by(txid)
+            })
+            .map(|(txid, _)| txid.clone())
+            .collect();
+        for txid in stale {
+            self.evict_staged_funding(reassembly, persisted, *peer, &txid);
+        }
+    }
+
+    // Drop what `peer` staged for `funding_txid`, in flight and on disk.
+    fn evict_staged_funding(
+        &self,
+        reassembly: &mut HashMap<ReassemblyKey, ReassemblyState>,
+        persisted: &mut HashMap<FundingStagingKey, FundingStagingRecord>,
+        peer: PublicKey,
+        funding_txid: &str,
+    ) {
+        reassembly.retain(|k, _| k.peer != peer || k.funding_txid != funding_txid);
+        persisted.remove(&FundingStagingKey {
+            peer,
+            funding_txid: funding_txid.to_string(),
+        });
+        // the files are named by txid alone, so they stay while another peer has a record for it
+        if persisted.keys().any(|k| k.funding_txid == funding_txid) {
+            return;
+        }
+        let _ = fs::remove_dir_all(get_media_staging_dir(&self.ldk_data_dir, funding_txid));
+        match fs::remove_file(self.consignment_path(funding_txid)) {
+            Ok(()) => tracing::debug!(
+                "Released RGB consignment from peer {peer} for funding txid {funding_txid}, staged for an open that never funded"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!(
+                "Failed to remove RGB consignment for funding txid {funding_txid}: {e}"
+            ),
+        }
+    }
+
     // Delete what abandoned transfers left behind, in memory and on disk.
     pub(crate) fn sweep_stale_state(&self) {
         let now = Instant::now();
@@ -639,7 +736,13 @@ impl RgbFileTransferHandler {
     }
 
     // Persist a fully reassembled file to disk according to its kind.
-    fn persist_file(&self, key: &ReassemblyKey, bytes: Vec<u8>, now: Instant) {
+    fn persist_file(
+        &self,
+        key: &ReassemblyKey,
+        channel_id: ChannelId,
+        bytes: Vec<u8>,
+        now: Instant,
+    ) {
         match key.file_kind {
             FILE_KIND_CONSIGNMENT => {
                 // peer identities are free, so the count of held consignments is bounded node-wide
@@ -682,6 +785,7 @@ impl RgbFileTransferHandler {
                     persisted.insert(
                         staging_key,
                         FundingStagingRecord {
+                            channel_id,
                             written_at: now,
                             staged_media_bytes: 0,
                             staged_media_count: 0,
@@ -805,12 +909,15 @@ impl RgbFileTransferHandler {
         sender_node_id: PublicKey,
         now: Instant,
     ) -> Result<(), LightningError> {
-        // refuse anyone who isn't a channel counterparty before buffering or persisting anything.
-        // Logged at debug level because any peer on the internet can trigger this at will, so it
-        // must not be able to flood the logs
-        if self.channel_gate.channel_count_with(&sender_node_id) == 0 {
+        // refuse a chunk for anything but a colored channel the sender is funding to us, before
+        // buffering or persisting anything: a peer with only vanilla channels, or none, has no
+        // files to send. Logged at debug level because any peer on the internet can trigger this at
+        // will, so it must not be able to flood the logs
+        let live_channels = self.channel_gate.colored_fundings_with(&sender_node_id);
+        if !live_channels.contains(&msg.channel_id) {
             tracing::debug!(
-                "Ignoring RGB file chunk from peer {sender_node_id}: no channel with this node"
+                "Ignoring RGB file chunk from peer {sender_node_id}: channel {} is not a colored channel it is funding to this node",
+                msg.channel_id
             );
             return Ok(());
         }
@@ -829,6 +936,7 @@ impl RgbFileTransferHandler {
             return Ok(());
         }
 
+        let channel_id = msg.channel_id;
         let key = ReassemblyKey {
             peer: sender_node_id,
             file_kind: msg.file_kind,
@@ -917,28 +1025,87 @@ impl RgbFileTransferHandler {
         let file_prospective = entry_buffered + msg.data.len();
 
         {
-            let persisted = self.staged_fundings.lock().unwrap();
+            let mut persisted = self.staged_fundings.lock().unwrap();
 
-            // count a funding as pending from its first chunk, in flight or persisted, so the cap
-            // bounds memory, not just completed files on disk: a peer can otherwise open endless
+            // count a funding as pending from its first chunk, in flight or persisted, so the caps
+            // bound memory, not just completed files on disk: a peer can otherwise open endless
             // never-completing transfers under invented funding txids, none of which ever get counted
-            // because none ever complete
-            let funding_known = reassembly
-                .keys()
-                .any(|k| k.funding_txid == key.funding_txid)
-                || persisted.keys().any(|k| k.funding_txid == key.funding_txid);
-            if !funding_known {
-                let mut fundings: HashSet<&str> =
-                    reassembly.keys().map(|k| k.funding_txid.as_str()).collect();
-                fundings.extend(persisted.keys().map(|k| k.funding_txid.as_str()));
-                if fundings.len() >= self.max_pending_fundings {
+            // because none ever complete. A funding is counted per peer, as its files are keyed by
+            // peer too: counting it by txid alone would let any number of peers stage files under
+            // one txid while taking a single slot
+            let staging_key = FundingStagingKey {
+                peer: key.peer,
+                funding_txid: key.funding_txid.clone(),
+            };
+            let funding_channel = reassembly
+                .iter()
+                .find(|(k, _)| k.peer == key.peer && k.funding_txid == key.funding_txid)
+                .map(|(_, state)| state.channel_id)
+                .or_else(|| persisted.get(&staging_key).map(|record| record.channel_id));
+            match funding_channel {
+                // a funding belongs to the channel its first chunk named. This assumes one colored
+                // channel per funding txid, as the RGB files are named by txid alone: batch funding
+                // several channels in one transaction would need them keyed by funding outpoint
+                Some(funding_channel) if funding_channel != channel_id => {
                     tracing::debug!(
-                        "Ignoring RGB file chunk from peer {}: {} fundings already pending, new funding txid {} refused",
+                        "Ignoring RGB file chunk from peer {}: funding txid {} was sent for channel {funding_channel}, not {channel_id}",
                         key.peer,
-                        fundings.len(),
                         key.funding_txid,
                     );
                     return Ok(());
+                }
+                Some(_) => {}
+                None => {
+                    // what the peer staged for a channel it is no longer funding to us is
+                    // leftover, so it shouldn't hold the slots checked below
+                    self.release_stale_stagings_locked(
+                        &mut reassembly,
+                        &mut persisted,
+                        &key.peer,
+                        &live_channels,
+                    );
+
+                    // a channel needs one funding's files, so a peer can't take more of the
+                    // node-wide cap than its own opens account for, nor rotate files through a
+                    // channel it keeps open. A funding that already happened is left out, as its
+                    // channel is no longer being funded
+                    let staged_for_channel = reassembly
+                        .iter()
+                        .filter(|(k, _)| k.peer == key.peer)
+                        .map(|(k, state)| (&k.funding_txid, &state.channel_id))
+                        .chain(
+                            persisted
+                                .iter()
+                                .filter(|(k, _)| k.peer == key.peer)
+                                .map(|(k, record)| (&k.funding_txid, &record.channel_id)),
+                        )
+                        .find(|(txid, chan)| {
+                            **chan == channel_id && !self.channel_gate.has_channel_funded_by(txid)
+                        })
+                        .map(|(txid, _)| txid.clone());
+                    if let Some(staged_txid) = staged_for_channel {
+                        tracing::debug!(
+                            "Ignoring RGB file chunk from peer {}: channel {channel_id} already has files staged for funding txid {staged_txid}, new funding txid {} refused",
+                            key.peer,
+                            key.funding_txid,
+                        );
+                        return Ok(());
+                    }
+
+                    let mut fundings: HashSet<(&PublicKey, &str)> = reassembly
+                        .keys()
+                        .map(|k| (&k.peer, k.funding_txid.as_str()))
+                        .collect();
+                    fundings.extend(persisted.keys().map(|k| (&k.peer, k.funding_txid.as_str())));
+                    if fundings.len() >= self.max_pending_fundings {
+                        tracing::debug!(
+                            "Ignoring RGB file chunk from peer {}: {} fundings already pending, new funding txid {} refused",
+                            key.peer,
+                            fundings.len(),
+                            key.funding_txid,
+                        );
+                        return Ok(());
+                    }
                 }
             }
 
@@ -946,10 +1113,6 @@ impl RgbFileTransferHandler {
             // their total for one channel, in flight plus already staged, is capped, so memory
             // can't grow with the file count
             if key.file_kind == FILE_KIND_MEDIA {
-                let staging_key = FundingStagingKey {
-                    peer: key.peer,
-                    funding_txid: key.funding_txid.clone(),
-                };
                 let record = persisted.get(&staging_key);
                 let other_media: usize = reassembly
                     .iter()
@@ -1005,7 +1168,7 @@ impl RgbFileTransferHandler {
 
         let state = reassembly
             .entry(key.clone())
-            .or_insert_with(|| ReassemblyState::new(now));
+            .or_insert_with(|| ReassemblyState::new(now, channel_id));
         // first chunk locks in total_chunks; later chunks were checked to agree with it above
         if state.total_chunks == 0 {
             state.total_chunks = msg.total_chunks;
@@ -1028,7 +1191,7 @@ impl RgbFileTransferHandler {
             drop(reassembly);
             // written synchronously so the files are in place before `funding_created` (which
             // arrives after the chunks on the same ordered connection) is processed
-            self.persist_file(&key, bytes, now);
+            self.persist_file(&key, channel_id, bytes, now);
         }
         Ok(())
     }
@@ -1087,26 +1250,58 @@ mod tests {
         peer_id(0x01)
     }
 
+    // the temporary ID of a peer's `n`th channel. Chunks name the first unless told otherwise
+    fn nth_chan(n: u8) -> ChannelId {
+        ChannelId([0xc0 + n; 32])
+    }
+
+    impl RgbFileMessage {
+        fn on(mut self, channel_id: ChannelId) -> Self {
+            self.channel_id = channel_id;
+            self
+        }
+    }
+
     // stands in for the channel manager
     #[derive(Default)]
     struct TestGate {
-        // holds one entry per channel, so a peer appearing twice has two channels with us
-        channels: Vec<PublicKey>,
+        // the colored channels being funded to us. Behind a mutex so a test can close one
+        channels: Mutex<Vec<(PublicKey, ChannelId)>>,
         funded_txids: Vec<String>,
     }
 
     impl TestGate {
-        fn with_channels(channels: Vec<PublicKey>) -> Self {
+        // one channel per entry, so a peer appearing twice is funding two: its `nth_chan(0)` and
+        // `nth_chan(1)`
+        fn with_channels(peers: Vec<PublicKey>) -> Self {
+            let mut channels: Vec<(PublicKey, ChannelId)> = Vec::new();
+            for peer in peers {
+                let n = channels.iter().filter(|(p, _)| *p == peer).count();
+                channels.push((peer, nth_chan(n as u8)));
+            }
             TestGate {
-                channels,
+                channels: Mutex::new(channels),
                 ..Default::default()
             }
+        }
+
+        fn close(&self, peer: PublicKey, channel_id: ChannelId) {
+            self.channels
+                .lock()
+                .unwrap()
+                .retain(|chan| *chan != (peer, channel_id));
         }
     }
 
     impl PeerChannelGate for TestGate {
-        fn channel_count_with(&self, peer: &PublicKey) -> usize {
-            self.channels.iter().filter(|p| *p == peer).count()
+        fn colored_fundings_with(&self, peer: &PublicKey) -> Vec<ChannelId> {
+            self.channels
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(p, _)| p == peer)
+                .map(|(_, channel_id)| *channel_id)
+                .collect()
         }
 
         fn has_channel_funded_by(&self, funding_txid: &str) -> bool {
@@ -1135,6 +1330,7 @@ mod tests {
     fn media_chunk(funding_txid: &str, data: Vec<u8>) -> RgbFileMessage {
         RgbFileMessage {
             file_kind: FILE_KIND_MEDIA,
+            channel_id: nth_chan(0),
             funding_txid: funding_txid.to_string(),
             file_id: sha256::Hash::hash(&data).to_string(),
             chunk_index: 0,
@@ -1156,6 +1352,7 @@ mod tests {
     ) -> RgbFileMessage {
         RgbFileMessage {
             file_kind: FILE_KIND_CONSIGNMENT,
+            channel_id: nth_chan(0),
             funding_txid: funding_txid.to_string(),
             file_id: String::new(),
             chunk_index,
@@ -1223,8 +1420,8 @@ mod tests {
         let handler = handler_gated(
             &dir,
             TestGate {
-                channels: vec![peer],
                 funded_txids: vec![txid.clone()],
+                ..TestGate::with_channels(vec![peer])
             },
         );
         let t0 = Instant::now();
@@ -1296,8 +1493,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let peer = dummy_peer();
         let other = peer_id(0x02);
-        // node-wide limit for one consignment
-        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer, other]))
+        // node-wide limit for one consignment, while `peer` funds two colored channels, so its own
+        // allowance isn't what stops it
+        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer, peer, other]))
             .with_pending_consignments_limit(1);
         let t0 = Instant::now();
         let txid1 = "01".repeat(32);
@@ -1312,7 +1510,11 @@ mod tests {
         // funding txids can be invented by a sender, so without the cap a peer could fill the disk
         // with invalid consignments it never funds
         handler
-            .handle_chunk(consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()), peer, t0)
+            .handle_chunk(
+                consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()).on(nth_chan(1)),
+                peer,
+                t0,
+            )
             .unwrap();
         assert!(!handler.consignment_path(&txid2).exists());
 
@@ -1328,6 +1530,202 @@ mod tests {
             .handle_chunk(consignment_chunk(&txid1, 0, 1, b"ddd".to_vec()), peer, t0)
             .unwrap();
         assert_eq!(fs::read(handler.consignment_path(&txid1)).unwrap(), b"aaa");
+    }
+
+    #[test]
+    fn a_peer_stages_one_funding_per_colored_channel_it_funds() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        let other = peer_id(0x02);
+        // `peer` funds one colored channel to us, `other` funds two
+        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer, other, other]));
+        let t0 = Instant::now();
+        let txid1 = "11".repeat(32);
+        let txid2 = "12".repeat(32);
+        let txid3 = "13".repeat(32);
+        let txid4 = "14".repeat(32);
+
+        handler
+            .handle_chunk(consignment_chunk(&txid1, 0, 1, b"aaa".to_vec()), peer, t0)
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid1)).unwrap(), b"aaa");
+
+        // one channel needs one funding's files, so a second funding txid is refused even with
+        // room left under the node-wide cap, and leaves the first one's alone: a peer can't
+        // rotate files through the channel it keeps open
+        handler
+            .handle_chunk(consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()), peer, t0)
+            .unwrap();
+        assert!(!handler.consignment_path(&txid2).exists());
+        assert_eq!(fs::read(handler.consignment_path(&txid1)).unwrap(), b"aaa");
+
+        // nor can it name a channel it isn't funding to us, though `other` is funding one by
+        // that ID
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()).on(nth_chan(1)),
+                peer,
+                t0,
+            )
+            .unwrap();
+        assert!(!handler.consignment_path(&txid2).exists());
+
+        // a peer funding two channels gets one funding's files for each
+        handler
+            .handle_chunk(consignment_chunk(&txid3, 0, 1, b"ccc".to_vec()), other, t0)
+            .unwrap();
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid4, 0, 1, b"ddd".to_vec()).on(nth_chan(1)),
+                other,
+                t0,
+            )
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid3)).unwrap(), b"ccc");
+        assert_eq!(fs::read(handler.consignment_path(&txid4)).unwrap(), b"ddd");
+    }
+
+    #[test]
+    fn a_rejected_funding_frees_its_slot_before_its_close_is_handled() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        let gate = Arc::new(TestGate::with_channels(vec![peer, peer]));
+        let handler = RgbFileTransferHandler::new(
+            dir.path().to_path_buf(),
+            gate.clone(),
+            MAX_PENDING_CONSIGNMENTS,
+            MAX_MEDIA_BYTES_PER_CHANNEL,
+            MAX_MEDIA_FILES_PER_CHANNEL,
+        );
+        let t0 = Instant::now();
+        let txid1 = "1b".repeat(32);
+        let txid2 = "1c".repeat(32);
+
+        handler
+            .handle_chunk(consignment_chunk(&txid1, 0, 1, b"aaa".to_vec()), peer, t0)
+            .unwrap();
+
+        // the first channel's `funding_created` is rejected, which drops the channel at once, but
+        // its `ChannelClosed` is handled later by the event loop. The second channel's files can
+        // come in between
+        gate.close(peer, nth_chan(0));
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()).on(nth_chan(1)),
+                peer,
+                t0,
+            )
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid2)).unwrap(), b"bbb");
+        assert!(!handler.consignment_path(&txid1).exists());
+    }
+
+    #[test]
+    fn closing_an_unfunded_channel_releases_its_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        let gate = Arc::new(TestGate::with_channels(vec![peer, peer]));
+        let handler = RgbFileTransferHandler::new(
+            dir.path().to_path_buf(),
+            gate.clone(),
+            MAX_PENDING_CONSIGNMENTS,
+            MAX_MEDIA_BYTES_PER_CHANNEL,
+            MAX_MEDIA_FILES_PER_CHANNEL,
+        );
+        let t0 = Instant::now();
+        let txid1 = "16".repeat(32);
+        let txid2 = "17".repeat(32);
+        let txid3 = "18".repeat(32);
+
+        // both channels sent their files, the second one first
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()).on(nth_chan(1)),
+                peer,
+                t0,
+            )
+            .unwrap();
+        handler
+            .handle_chunk(consignment_chunk(&txid1, 0, 1, b"aaa".to_vec()), peer, t0)
+            .unwrap();
+        let media = b"picture".to_vec();
+        handler
+            .handle_chunk(media_chunk(&txid1, media.clone()), peer, t0)
+            .unwrap();
+
+        // the first fails before funding: its files go, whatever their age, and the other
+        // channel's stay
+        gate.close(peer, nth_chan(0));
+        handler.release_stale_stagings(&peer);
+        assert!(!handler.consignment_path(&txid1).exists());
+        assert!(!get_media_staging_dir(&handler.ldk_data_dir, &txid1).exists());
+        assert_eq!(fs::read(handler.consignment_path(&txid2)).unwrap(), b"bbb");
+
+        // and the freed slot takes the retry, which would otherwise wait for the sweep
+        gate.channels.lock().unwrap().push((peer, nth_chan(2)));
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid3, 0, 1, b"ccc".to_vec()).on(nth_chan(2)),
+                peer,
+                t0,
+            )
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid3)).unwrap(), b"ccc");
+    }
+
+    #[test]
+    fn a_funding_stays_with_the_channel_it_was_sent_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        let handler =
+            handler_gated(&dir, TestGate::with_channels(vec![peer, peer])).with_chunk_size(2);
+        let t0 = Instant::now();
+        let txid = "1d".repeat(32);
+
+        // a chunk naming another of the peer's channels can't add to a funding begun for the
+        // first, which would let it claim both channels' slots with one funding
+        handler
+            .handle_chunk(consignment_chunk(&txid, 0, 2, b"aa".to_vec()), peer, t0)
+            .unwrap();
+        handler
+            .handle_chunk(
+                consignment_chunk(&txid, 1, 2, b"a".to_vec()).on(nth_chan(1)),
+                peer,
+                t0,
+            )
+            .unwrap();
+        assert!(!handler.consignment_path(&txid).exists());
+
+        handler
+            .handle_chunk(consignment_chunk(&txid, 1, 2, b"a".to_vec()), peer, t0)
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid)).unwrap(), b"aaa");
+    }
+
+    #[test]
+    fn peers_sharing_a_funding_txid_each_take_a_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        let other = peer_id(0x02);
+        // node-wide room for one pending funding
+        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer, other]))
+            .with_pending_consignments_limit(1)
+            .with_chunk_size(2);
+        let t0 = Instant::now();
+        let txid = "15".repeat(32);
+
+        handler
+            .handle_chunk(consignment_chunk(&txid, 0, 2, b"aa".to_vec()), peer, t0)
+            .unwrap();
+
+        // transfers are buffered per peer, so a second peer naming the same txid buffers its own:
+        // counting the txid once would let any number of peers share one slot
+        handler
+            .handle_chunk(consignment_chunk(&txid, 0, 2, b"bb".to_vec()), other, t0)
+            .unwrap();
+        let reassembly = handler.reassembly.lock().unwrap();
+        assert_eq!(reassembly.len(), 1);
+        assert!(reassembly.keys().all(|k| k.peer == peer));
     }
 
     #[test]
@@ -1380,6 +1778,7 @@ mod tests {
         // flight holding a single byte: the object-count amplification the byte budget can't stop
         let incomplete = |seed: u8| RgbFileMessage {
             file_kind: FILE_KIND_MEDIA,
+            channel_id: nth_chan(0),
             funding_txid: txid.clone(),
             file_id: sha256::Hash::hash(&[seed; 8]).to_string(),
             chunk_index: 1,
@@ -1476,8 +1875,9 @@ mod tests {
     fn incomplete_transfers_count_against_the_pending_cap() {
         let dir = tempfile::tempdir().unwrap();
         let peer = dummy_peer();
-        // room for one pending funding
-        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer]))
+        // room for one pending funding, while `peer` funds two colored channels, so its own
+        // allowance isn't what stops it
+        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer, peer]))
             .with_pending_consignments_limit(1)
             .with_chunk_size(2);
         let t0 = Instant::now();
@@ -1497,7 +1897,7 @@ mod tests {
         // so a new funding is refused at its first chunk, not only once something completes
         handler
             .handle_chunk(
-                consignment_chunk(&fresh_txid, 0, 2, b"bb".to_vec()),
+                consignment_chunk(&fresh_txid, 0, 2, b"bb".to_vec()).on(nth_chan(1)),
                 peer,
                 t0,
             )
@@ -1527,6 +1927,7 @@ mod tests {
         // one media file holding a full chunk in flight (2 chunks, only the first sent)
         let media = |file_id: &str| RgbFileMessage {
             file_kind: FILE_KIND_MEDIA,
+            channel_id: nth_chan(0),
             funding_txid: txid.clone(),
             file_id: file_id.to_string(),
             chunk_index: 0,
@@ -1562,8 +1963,8 @@ mod tests {
         let handler = handler_gated(
             &dir,
             TestGate {
-                channels: vec![peer, peer],
                 funded_txids: vec![funded_txid.clone()],
+                ..TestGate::with_channels(vec![peer, peer])
             },
         );
         let t0 = Instant::now();
@@ -1585,6 +1986,7 @@ mod tests {
                 funding_txid: funded_txid.clone(),
             },
             FundingStagingRecord {
+                channel_id: nth_chan(1),
                 written_at: t0,
                 staged_media_bytes: 0,
                 staged_media_count: 0,
@@ -1612,8 +2014,8 @@ mod tests {
         let handler = handler_gated(
             &dir,
             TestGate {
-                channels: vec![peer],
                 funded_txids: vec![funded_txid.clone()],
+                ..TestGate::with_channels(vec![peer])
             },
         )
         .with_pending_consignments_limit(1);
@@ -1668,6 +2070,39 @@ mod tests {
         assert!(handler.staged_fundings.lock().unwrap().is_empty());
 
         // with the slot freed, the next channel's consignment is accepted rather than refused
+        handler
+            .handle_chunk(consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()), peer, t0)
+            .unwrap();
+        assert_eq!(fs::read(handler.consignment_path(&txid2)).unwrap(), b"bbb");
+    }
+
+    #[test]
+    fn discarding_a_vanilla_funding_removes_its_files_and_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = dummy_peer();
+        // node-wide room for one consignment
+        let handler = handler_gated(&dir, TestGate::with_channels(vec![peer]))
+            .with_pending_consignments_limit(1);
+        let t0 = Instant::now();
+        let txid1 = "09".repeat(32);
+        let txid2 = "0b".repeat(32);
+
+        handler
+            .handle_chunk(consignment_chunk(&txid1, 0, 1, b"aaa".to_vec()), peer, t0)
+            .unwrap();
+        let media = b"picture".to_vec();
+        handler
+            .handle_chunk(media_chunk(&txid1, media.clone()), peer, t0)
+            .unwrap();
+        assert!(staged_path(&handler, &txid1, &media).exists());
+
+        // the funding turned out to be a vanilla channel, which nothing ever validates files for
+        handler.discard_staged_funding(&txid1);
+        assert!(!handler.consignment_path(&txid1).exists());
+        assert!(!get_media_staging_dir(&handler.ldk_data_dir, &txid1).exists());
+        assert!(handler.staged_fundings.lock().unwrap().is_empty());
+
+        // and the slot it held is free for the next channel
         handler
             .handle_chunk(consignment_chunk(&txid2, 0, 1, b"bbb".to_vec()), peer, t0)
             .unwrap();
@@ -1792,16 +2227,25 @@ mod tests {
             let handler = handler_gated(
                 &dir,
                 TestGate {
-                    channels: vec![peer, peer],
                     funded_txids: vec![],
+                    ..TestGate::with_channels(vec![peer, peer])
                 },
             );
-            for txid in [&funded_txid, &never_funded_txid] {
+            for (n, txid) in [&funded_txid, &never_funded_txid].into_iter().enumerate() {
+                let channel_id = nth_chan(n as u8);
                 handler
-                    .handle_chunk(consignment_chunk(txid, 0, 1, b"aaa".to_vec()), peer, t0)
+                    .handle_chunk(
+                        consignment_chunk(txid, 0, 1, b"aaa".to_vec()).on(channel_id),
+                        peer,
+                        t0,
+                    )
                     .unwrap();
                 handler
-                    .handle_chunk(media_chunk(txid, b"picture".to_vec()), peer, t0)
+                    .handle_chunk(
+                        media_chunk(txid, b"picture".to_vec()).on(channel_id),
+                        peer,
+                        t0,
+                    )
                     .unwrap();
             }
         }
@@ -1811,8 +2255,8 @@ mod tests {
         let handler = handler_gated(
             &dir,
             TestGate {
-                channels: vec![peer, peer],
                 funded_txids: vec![funded_txid.clone()],
+                ..TestGate::with_channels(vec![peer, peer])
             },
         );
         assert!(handler.staged_fundings.lock().unwrap().is_empty());
@@ -1994,6 +2438,7 @@ mod tests {
         let txid = "ab".repeat(32);
         let media = |file_id: &str| RgbFileMessage {
             file_kind: FILE_KIND_MEDIA,
+            channel_id: nth_chan(0),
             funding_txid: txid.clone(),
             file_id: file_id.to_string(),
             chunk_index: 0,
