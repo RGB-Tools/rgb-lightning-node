@@ -54,23 +54,48 @@ async fn pay_victim(attacker_addr: SocketAddr, victim_addr: SocketAddr, victim_p
     keysend(attacker_addr, victim_pubkey, None, None, None).await;
 }
 
-/// A peer opens a vanilla channel and sends a junk consignment tagged with its funding txid.
-/// The victim must not panic on the junk or after a restart, and the channel must stay usable.
-#[serial_test::serial]
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-#[traced_test]
-async fn junk_consignment_vanilla_bypass() {
+// Runs the attack, then restarts the victim, asserting it never panics and the channel stays
+// usable. With `unfunded_colored_channel` the attacker first opens a colored channel to the victim
+// and never funds it, which lets its files past the transport's gate: the files name their own
+// funding txid, so only `ChannelPending` learns that it belongs to a vanilla channel
+async fn junk_consignment_attack(test_name: &str, unfunded_colored_channel: bool) {
     initialize();
     record_ldk_panics();
     take_ldk_panics();
 
-    let victim_dir = format!("{TEST_DIR_BASE}victim");
-    let attacker_dir = format!("{TEST_DIR_BASE}attacker");
+    let victim_dir = format!("{TEST_DIR_BASE}{test_name}/victim");
+    let attacker_dir = format!("{TEST_DIR_BASE}{test_name}/attacker");
     let (victim_addr, _) = start_node(&victim_dir, NODE2_PEER_PORT, false).await;
     let (attacker_addr, _) = start_node(&attacker_dir, NODE1_PEER_PORT, false).await;
     fund_and_create_utxos(attacker_addr, None).await;
     let victim_pubkey = node_info(victim_addr).await.pubkey;
     let attacker_pubkey = node_info(attacker_addr).await.pubkey;
+
+    // the victim accepts it before the vanilla channel below, so it is pending when the junk comes
+    let _unfunded_guard = if unfunded_colored_channel {
+        let guard = NodeOverrideGuard::set(&LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE, &attacker_pubkey);
+        let asset_id = issue_asset_nia(attacker_addr).await.asset_id;
+        open_channel_raw(
+            attacker_addr,
+            &victim_pubkey,
+            Some(NODE2_PEER_PORT),
+            None,
+            None,
+            Some(100),
+            Some(&asset_id),
+            None,
+            None,
+            None,
+            None,
+            true,
+            true,
+        )
+        .await
+        .unwrap();
+        Some(guard)
+    } else {
+        None
+    };
 
     // `open_channel_raw` just sends the request and returns, unlike `open_channel`, which would
     // fail on the panic before the restart below can run
@@ -101,12 +126,13 @@ async fn junk_consignment_vanilla_bypass() {
     while !ldk_panicked() {
         let funding_txid = list_channels(attacker_addr)
             .await
-            .first()
-            .and_then(|channel| channel.funding_txid.clone());
+            .into_iter()
+            .find_map(|channel| channel.funding_txid);
         if let Some(funding_txid) = funding_txid.filter(|txid| !get_txout(txid).is_empty()) {
             let victim_channels = list_channels(victim_addr).await;
-            assert_eq!(victim_channels.len(), 1);
-            assert_eq!(victim_channels[0].funding_txid, Some(funding_txid));
+            assert!(victim_channels
+                .iter()
+                .any(|channel| channel.funding_txid.as_ref() == Some(&funding_txid)));
             mine_n_blocks(false, 6);
             break;
         }
@@ -134,4 +160,21 @@ async fn junk_consignment_vanilla_bypass() {
         first_run_panics.is_empty() && second_run_panics.is_empty(),
         "victim panicked\nfirst run: {first_run_panics:?}\nsecond run: {second_run_panics:?}"
     );
+}
+
+/// A peer opens a vanilla channel and sends a junk consignment tagged with its funding txid.
+/// The victim must not panic on the junk or after a restart, and the channel must stay usable.
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn junk_consignment_vanilla_bypass() {
+    junk_consignment_attack("vanilla_bypass", false).await;
+}
+
+/// The same, from a peer that also opened a colored channel to the victim, which it never funds.
+#[serial_test::serial]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[traced_test]
+async fn junk_consignment_vanilla_bypass_with_colored_channel() {
+    junk_consignment_attack("with_colored_channel", true).await;
 }

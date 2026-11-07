@@ -170,6 +170,10 @@ pub(crate) static FORCE_PUSH_ASSET_AMOUNT_ON_NODE: Mutex<Option<PublicKey>> = Mu
 pub(crate) static INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE: Mutex<Option<PublicKey>> =
     Mutex::new(None);
 
+// Test-only: the node with this pubkey never funds the colored channels it opens
+#[cfg(test)]
+pub(crate) static LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
+
 // Test-only: whether the given override targets the node we are running as
 #[cfg(test)]
 pub(crate) fn node_override_matches(
@@ -798,6 +802,18 @@ async fn handle_ldk_events(
                 &temporary_channel_id,
                 &PathBuf::from(&static_state.ldk_data_dir),
             );
+
+            // Test-only: leave this colored channel unfunded
+            #[cfg(test)]
+            if is_colored
+                && node_override_matches(
+                    &LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE,
+                    unlocked_state.channel_manager.get_our_node_id(),
+                )
+            {
+                return Ok(());
+            }
+
             let (unsigned_psbt, asset_id) = if is_colored {
                 let (rgb_info, _) = get_rgb_channel_info_pending(
                     &temporary_channel_id,
