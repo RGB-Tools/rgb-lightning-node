@@ -19,6 +19,7 @@ use lightning::chain::transaction::TransactionData;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 use lightning::chain::{Confirm, Filter};
 use lightning::ln::channelmanager::DROP_FUNDING_SIGNED_ON_NODE;
+use lightning::rgb_utils::{RgbInfo, SKIP_COMMITMENT_COLORING_FOR_DIR};
 use lightning_invoice::Bolt11Invoice;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 use lightning_transaction_sync::ElectrumSyncClient;
@@ -45,10 +46,10 @@ use crate::disk::FilesystemLogger;
 use crate::disk::LDK_LOGS_FILE;
 use crate::error::APIErrorResponse;
 use crate::ldk::{
-    DEFER_PAYMENT_CLAIMABLE_ON_NODE, FEE_RATE, FORCE_PUSH_ASSET_AMOUNT_ON_NODE,
-    HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE, IGNORE_INBOUND_CHANNELS_ON_NODE,
-    INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE, LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE,
-    PAYMENT_CLAIMABLE_DEFERRED,
+    DEFER_PAYMENT_CLAIMABLE_ON_NODE, DIVERT_COLORED_FUNDING_ASSETS_ON_NODE, FEE_RATE,
+    FORCE_PUSH_ASSET_AMOUNT_ON_NODE, HELD_PAYMENT_CLAIMABLE_COUNT, HOLD_PAYMENT_CLAIMABLE_ON_NODE,
+    IGNORE_INBOUND_CHANNELS_ON_NODE, INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE,
+    LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE, PAYMENT_CLAIMABLE_DEFERRED,
 };
 use crate::routes::{
     AddressResponse, AssetBalanceRequest, AssetBalanceResponse, AssetCFA, AssetFilter, AssetIFA,
@@ -2376,6 +2377,7 @@ mod close_force_pending_htlc;
 mod close_force_standard;
 mod concurrent_btc_payments;
 mod concurrent_openchannel;
+mod diverted_funding_assets;
 mod drop_funding_signed;
 #[cfg(all(feature = "transaction-sync", feature = "electrum"))]
 mod electrum_opret_confirm;

@@ -174,6 +174,13 @@ pub(crate) static INJECT_FAKE_CONSIGNMENT_ON_VANILLA_OPEN_ON_NODE: Mutex<Option<
 #[cfg(test)]
 pub(crate) static LEAVE_COLORED_OPEN_UNFUNDED_ON_NODE: Mutex<Option<PublicKey>> = Mutex::new(None);
 
+// Test-only: the node with this pubkey funds its colored channels with a TX that sends the channel
+// assets, sealed with the static blinding, to its own address at vout 1 and puts the channel
+// funding output at vout 2, with a single unit of the asset
+#[cfg(test)]
+pub(crate) static DIVERT_COLORED_FUNDING_ASSETS_ON_NODE: Mutex<Option<PublicKey>> =
+    Mutex::new(None);
+
 // Test-only: whether the given override targets the node we are running as
 #[cfg(test)]
 pub(crate) fn node_override_matches(
@@ -837,7 +844,8 @@ async fn handle_ldk_events(
                 let recipient_id =
                     recipient_id_from_script_buf(script_buf.clone(), static_state.network);
 
-                let recipient_map = map! {
+                #[allow(unused_mut)]
+                let mut recipient_map = map! {
                     asset_id.clone() => vec![Recipient {
                         recipient_id: recipient_id.clone(),
                         witness_data: Some(WitnessData {
@@ -847,6 +855,55 @@ async fn handle_ldk_events(
                         assignment,
                         transport_endpoints: vec![]
                 }]};
+
+                // Test-only: seal a full channel's worth of assets to our own address at vout 1,
+                // with the static blinding the acceptor validates against, and leave only a token
+                // unit on the real 2-of-2 funding output at vout 2. The acceptor hardcodes
+                // funding_vout = 1, so it reads the assets off this output of ours and accepts the
+                // channel, even though its funding output (vout 2) holds none of them. Pairs with
+                // SKIP_COMMITMENT_COLORING_FOR_DIR, which keeps our own (dishonest) node from
+                // panicking when it colors a commitment spending the near-empty funding output.
+                #[cfg(test)]
+                if node_override_matches(
+                    &DIVERT_COLORED_FUNDING_ASSETS_ON_NODE,
+                    unlocked_state.channel_manager.get_our_node_id(),
+                ) {
+                    let unlocked_state_copy = unlocked_state.clone();
+                    let own_address = tokio::task::spawn_blocking(move || {
+                        unlocked_state_copy.rgb_get_address().unwrap()
+                    })
+                    .await
+                    .unwrap();
+                    let own_script_buf = bitcoin::Address::from_str(&own_address)
+                        .unwrap()
+                        .assume_checked()
+                        .script_pubkey();
+                    recipient_map = map! {
+                        asset_id.clone() => vec![
+                            Recipient {
+                                recipient_id: recipient_id_from_script_buf(
+                                    own_script_buf,
+                                    static_state.network,
+                                ),
+                                witness_data: Some(WitnessData {
+                                    amount_sat: 1000,
+                                    blinding: Some(STATIC_BLINDING),
+                                }),
+                                assignment: Assignment::Fungible(channel_rgb_amount),
+                                transport_endpoints: vec![],
+                            },
+                            Recipient {
+                                recipient_id: recipient_id.clone(),
+                                witness_data: Some(WitnessData {
+                                    amount_sat: channel_value_satoshis,
+                                    blinding: None,
+                                }),
+                                assignment: Assignment::Fungible(1),
+                                transport_endpoints: vec![],
+                            },
+                        ]
+                    };
+                }
 
                 let unlocked_state_copy = unlocked_state.clone();
                 let res = tokio::task::spawn_blocking(move || {
