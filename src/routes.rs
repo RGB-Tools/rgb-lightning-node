@@ -1,3 +1,4 @@
+use crate::bump_force_close::ChannelCloseBumpRecord;
 use amplify::{s, Display};
 use axum::{
     extract::{Multipart, State},
@@ -1846,6 +1847,56 @@ pub(crate) async fn close_channel(
         }
 
         Ok(Json(EmptyResponse {}))
+    })
+    .await
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BumpForceCloseFeeRequest {
+    pub(crate) channel_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct BumpForceCloseFeeResponse {
+    pub(crate) channel_id: String,
+    pub(crate) claim_id: String,
+    pub(crate) status: String,
+    pub(crate) commitment_txid: String,
+    pub(crate) child_txid: Option<String>,
+    pub(crate) target_fee_rate_sat_vb: f64,
+    pub(crate) updated_at: u64,
+    pub(crate) message: Option<String>,
+}
+
+pub(crate) async fn bump_force_close_fee(
+    State(state): State<Arc<AppState>>,
+    WithRejection(Json(payload), _): WithRejection<Json<BumpForceCloseFeeRequest>, APIError>,
+) -> Result<Json<BumpForceCloseFeeResponse>, APIError> {
+    no_cancel(async move {
+        let guard = state.check_unlocked().await?;
+        let unlocked_state = guard.as_ref().unwrap();
+
+        let channel_id_vec = hex_str_to_vec(&payload.channel_id);
+        if channel_id_vec.is_none() || channel_id_vec.as_ref().unwrap().len() != 32 {
+            return Err(APIError::InvalidChannelID);
+        }
+        let channel_id = ChannelId(channel_id_vec.unwrap().try_into().unwrap());
+
+        let record =
+            ChannelCloseBumpRecord::read(unlocked_state.fs_store.as_ref(), &channel_id.to_string())
+                .map_err(APIError::Unexpected)?
+                .ok_or(APIError::UnknownChannelId)?;
+
+        Ok(Json(BumpForceCloseFeeResponse {
+            channel_id: record.channel_id,
+            claim_id: record.claim_id,
+            status: record.status.as_str().to_string(),
+            commitment_txid: record.commitment_txid,
+            child_txid: record.child_txid,
+            target_fee_rate_sat_vb: f64::from(record.target_fee_rate_sat_per_kw) / 250.0,
+            updated_at: record.updated_at,
+            message: record.message,
+        }))
     })
     .await
 }

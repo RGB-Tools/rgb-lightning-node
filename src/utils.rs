@@ -32,6 +32,7 @@ use std::{
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use crate::bump_force_close::BumpTracker;
 use crate::crypto::{decrypt_mnemonic, encrypt_mnemonic};
 use crate::ldk::{ChannelIdsMap, Router};
 use crate::rgb::{get_rgb_channel_info_optional, RgbLibWalletWrapper};
@@ -113,6 +114,7 @@ pub(crate) struct UnlockedAppState {
     pub(crate) rgb_file_transfer_handler: Arc<RgbFileTransferHandler>,
     pub(crate) fs_store: Arc<FilesystemStore>,
     pub(crate) bump_tx_event_handler: Arc<BumpTxEventHandler>,
+    pub(crate) bump_tracker: Arc<BumpTracker>,
     pub(crate) maker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) taker_swaps: Arc<Mutex<SwapMap>>,
     pub(crate) rgb_wallet_wrapper: Arc<RgbLibWalletWrapper>,

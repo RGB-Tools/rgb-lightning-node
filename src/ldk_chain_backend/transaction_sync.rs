@@ -31,7 +31,10 @@ use {
 use crate::disk::FilesystemLogger;
 use crate::ldk::PeerGossipSync;
 
-use super::{default_fee_buckets, fee_from_bucket, store_fee_estimates, MIN_FEERATE};
+use super::{
+    broadcast_error_is_benign, default_fee_buckets, fee_from_bucket, store_fee_estimates,
+    BroadcastFailure, MIN_FEERATE,
+};
 
 type Confirmable = Arc<dyn Confirm + Send + Sync>;
 
@@ -47,6 +50,7 @@ pub(crate) struct IndexerClient {
     fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
     handle: tokio::runtime::Handle,
     logger: Arc<FilesystemLogger>,
+    pub(crate) broadcast_failure: BroadcastFailure,
 }
 
 pub(crate) struct IndexerGossipVerifier {
@@ -117,6 +121,7 @@ impl IndexerClient {
             fees,
             handle,
             logger,
+            broadcast_failure: super::broadcast_failure(),
         })
     }
 
@@ -367,6 +372,7 @@ impl BroadcasterInterface for IndexerClient {
                     .collect::<Vec<_>>();
                 let client = client.clone();
                 let logger = self.logger.clone();
+                let broadcast_failure = Arc::clone(&self.broadcast_failure);
                 self.handle.spawn(async move {
                     let res = tokio::task::spawn_blocking(move || {
                         let mut last_error = None;
@@ -379,14 +385,18 @@ impl BroadcasterInterface for IndexerClient {
                     })
                     .await;
 
-                    match res {
-                        Ok(Ok(())) => {}
+                    let message = match res {
+                        Ok(Ok(())) => {
+                            *broadcast_failure.lock().unwrap() = None;
+                            return;
+                        }
                         Ok(Err(e)) => {
                             log_warn!(
                                 logger,
                                 "Warning, failed to broadcast transaction(s) via electrum: {}",
                                 e
                             );
+                            e
                         }
                         Err(e) => {
                             log_warn!(
@@ -394,7 +404,11 @@ impl BroadcasterInterface for IndexerClient {
                                 "Warning, failed to spawn electrum broadcaster task: {}",
                                 e
                             );
+                            e.to_string()
                         }
+                    };
+                    if !broadcast_error_is_benign(&message) {
+                        *broadcast_failure.lock().unwrap() = Some(message);
                     }
                 });
             }
@@ -403,6 +417,7 @@ impl BroadcasterInterface for IndexerClient {
                 let txs = txs.iter().map(|tx| (*tx).clone()).collect::<Vec<_>>();
                 let client = client.clone();
                 let logger = self.logger.clone();
+                let broadcast_failure = Arc::clone(&self.broadcast_failure);
                 self.handle.spawn(async move {
                     let res = tokio::task::spawn_blocking(move || {
                         let mut last_error = None;
@@ -415,14 +430,18 @@ impl BroadcasterInterface for IndexerClient {
                     })
                     .await;
 
-                    match res {
-                        Ok(Ok(())) => {}
+                    let message = match res {
+                        Ok(Ok(())) => {
+                            *broadcast_failure.lock().unwrap() = None;
+                            return;
+                        }
                         Ok(Err(e)) => {
                             log_warn!(
                                 logger,
                                 "Warning, failed to broadcast transaction(s) via esplora: {}",
                                 e
                             );
+                            e
                         }
                         Err(e) => {
                             log_warn!(
@@ -430,7 +449,11 @@ impl BroadcasterInterface for IndexerClient {
                                 "Warning, failed to spawn esplora broadcaster task: {}",
                                 e
                             );
+                            e.to_string()
                         }
+                    };
+                    if !broadcast_error_is_benign(&message) {
+                        *broadcast_failure.lock().unwrap() = Some(message);
                     }
                 });
             }

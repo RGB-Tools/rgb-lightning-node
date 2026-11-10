@@ -791,6 +791,34 @@ impl RgbLibWalletWrapper {
     }
 }
 
+/// [`WalletSource`] for LDK bump-tx coin selection: signs through the watch-only RGB wallet
+/// and flags signer failures on the bump tracker.
+pub(crate) struct RgbBumpWalletSource {
+    pub(crate) inner: Arc<RgbLibWalletWrapper>,
+    pub(crate) signer_failed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl WalletSource for RgbBumpWalletSource {
+    fn list_confirmed_utxos<'a>(&'a self) -> AsyncResult<'a, Vec<Utxo>, ()> {
+        self.inner.as_ref().list_confirmed_utxos()
+    }
+
+    fn get_change_script<'a>(&'a self) -> AsyncResult<'a, ScriptBuf, ()> {
+        self.inner.as_ref().get_change_script()
+    }
+
+    fn sign_psbt<'a>(&'a self, tx: Psbt) -> AsyncResult<'a, Transaction, ()> {
+        let failed = Arc::clone(&self.signer_failed);
+        let inner = Arc::clone(&self.inner);
+        Box::pin(async move {
+            let result = WalletSource::sign_psbt(inner.as_ref(), tx).await;
+            if result.is_err() {
+                failed.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            result
+        })
+    }
+}
 impl ChangeDestinationSource for RgbLibWalletWrapper {
     fn get_change_destination_script<'a>(&'a self) -> AsyncResult<'a, ScriptBuf, ()> {
         Box::pin(async move {

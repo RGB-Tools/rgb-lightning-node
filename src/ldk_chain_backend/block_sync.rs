@@ -4,7 +4,7 @@ use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::constants::ChainHash;
 use bitcoin::hash_types::BlockHash;
-use bitcoin::transaction::{OutPoint, TxOut};
+use bitcoin::transaction::{OutPoint, TxOut, Txid, Version};
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
 use lightning::log_warn;
 use lightning::routing::utxo::{UtxoFuture, UtxoLookup, UtxoLookupError, UtxoResult};
@@ -24,13 +24,16 @@ use std::time::Duration;
 use crate::disk::FilesystemLogger;
 use crate::ldk::PeerGossipSync;
 
-use super::{default_fee_buckets, fee_from_bucket, store_fee_estimates, MIN_FEERATE};
+use super::{
+    default_fee_buckets, fee_from_bucket, store_fee_estimates, BroadcastFailure, MIN_FEERATE,
+};
 
 pub struct BitcoindClient {
     pub(crate) bitcoind_rpc_client: Arc<RpcClient>,
     fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
     handle: tokio::runtime::Handle,
     logger: Arc<FilesystemLogger>,
+    pub(crate) broadcast_failure: BroadcastFailure,
 }
 
 impl BlockSource for BitcoindClient {
@@ -143,6 +146,7 @@ impl BitcoindClient {
             fees: Arc::new(default_fee_buckets()),
             handle: handle.clone(),
             logger,
+            broadcast_failure: super::broadcast_failure(),
         };
         BitcoindClient::poll_for_fee_estimates(
             client.fees.clone(),
@@ -151,6 +155,28 @@ impl BitcoindClient {
             handle,
         );
         Ok(client)
+    }
+
+    /// Whether the transaction has at least one confirmation. RLN's funding and bump
+    /// transactions are wallet-visible, so no txindex is required.
+    pub(crate) async fn tx_confirmed(&self, txid: &Txid) -> bool {
+        match self
+            .bitcoind_rpc_client
+            .call_method::<serde_json::Value>(
+                "getrawtransaction",
+                &[serde_json::json!(txid.to_string()), serde_json::json!(true)],
+            )
+            .await
+        {
+            Ok(value) => {
+                value
+                    .get("confirmations")
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            }
+            Err(_) => false,
+        }
     }
 
     fn poll_for_fee_estimates(
@@ -267,42 +293,95 @@ impl FeeEstimator for BitcoindClient {
 
 impl BroadcasterInterface for BitcoindClient {
     fn broadcast_transactions(&self, txs: &[&Transaction]) {
-        // As of Bitcoin Core 28, using `submitpackage` allows us to broadcast multiple
-        // transactions at once and have them propagate through the network as a whole, avoiding
-        // some pitfalls with anchor channels where the first transaction doesn't make it into the
-        // mempool at all. Several older versions of Bitcoin Core also support `submitpackage`,
-        // however, so we just use it unconditionally here.
-        // Sadly, Bitcoin Core has an arbitrary restriction on `submitpackage` - it must actually
-        // contain a package (see https://github.com/bitcoin/bitcoin/issues/31085).
+        // `submitpackage` only for all-v3 packages (TRUC needs parent and child submitted
+        // together); v2 anchor bump packages go per-tx, relying on the commitment already
+        // sitting in the mempool. `submitpackage` must contain an actual package (bitcoin#31085).
         let txn = txs.iter().map(encode::serialize_hex).collect::<Vec<_>>();
+        let txids: Vec<String> = txs.iter().map(|tx| tx.compute_txid().to_string()).collect();
+        let package = txn.len() > 1 && txs.iter().all(|tx| tx.version == Version::non_standard(3));
         let bitcoind_rpc_client = Arc::clone(&self.bitcoind_rpc_client);
-        let logger = Arc::clone(&self.logger);
+        let broadcast_failure = Arc::clone(&self.broadcast_failure);
         self.handle.spawn(async move {
-			let res = if txn.len() == 1 {
-				let tx_json = serde_json::json!(txn[0]);
-				bitcoind_rpc_client
-					.call_method::<serde_json::Value>("sendrawtransaction", &[tx_json])
-					.await
-			} else {
-				let tx_json = serde_json::json!(txn);
-				bitcoind_rpc_client
-					.call_method::<serde_json::Value>("submitpackage", &[tx_json])
-					.await
-			};
-			// This may error due to RL calling `broadcast_transactions` with the same transaction
-			// multiple times, but the error is safe to ignore.
-			match res {
-				Ok(_) => {}
-				Err(e) => {
-					let err_str = e.get_ref().unwrap().to_string();
-					log_warn!(logger,
-						"Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {}\nTransactions: {:?}",
-						err_str,
-						txn);
-					print!("Warning, failed to broadcast a transaction, this is likely okay but may indicate an error: {err_str}\n> ");
-				}
-			}
-		});
+            let outcome = if package {
+                let tx_json = serde_json::json!(txn);
+                match bitcoind_rpc_client
+                    .call_method::<serde_json::Value>("submitpackage", &[tx_json])
+                    .await
+                {
+                    Ok(value) => package_failure_message(&value).map_or(Ok(()), Err),
+                    Err(e) => Err(e.to_string()),
+                }
+            } else {
+                let mut failure = None;
+                for (raw, txid) in txn.iter().zip(txids.iter()) {
+                    match bitcoind_rpc_client
+                        .call_method::<serde_json::Value>(
+                            "sendrawtransaction",
+                            &[serde_json::json!(raw)],
+                        )
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            let message = e.to_string();
+                            if super::broadcast_error_is_benign(&message) {
+                                tracing::warn!(
+                                    error = %message,
+                                    txid = %txid,
+                                    "ignored broadcast of already known transaction"
+                                );
+                            } else {
+                                failure = Some(message);
+                            }
+                        }
+                    }
+                }
+                failure.map_or(Ok(()), Err)
+            };
+            match outcome {
+                Ok(()) => *broadcast_failure.lock().unwrap() = None,
+                Err(message) if super::broadcast_error_is_benign(&message) => {
+                    // Fee rebroadcasts of transactions the network already knows land here.
+                    tracing::warn!(
+                        error = %message,
+                        txids = ?txids,
+                        "ignored broadcast of already known transaction(s)"
+                    );
+                }
+                Err(message) => {
+                    tracing::error!(
+                        error = %message,
+                        txids = ?txids,
+                        "chain backend rejected broadcast of transaction(s)"
+                    );
+                    *broadcast_failure.lock().unwrap() = Some(message);
+                }
+            }
+        });
+    }
+}
+
+/// Extracts bitcoind's rejection reasons from a `submitpackage` reply. `sendrawtransaction`
+/// returns a txid string on success, which has no `package_msg` and is treated as success.
+fn package_failure_message(value: &serde_json::Value) -> Option<String> {
+    let package_msg = value.get("package_msg")?.as_str()?;
+    if package_msg == "success" {
+        return None;
+    }
+    let reasons = value
+        .get("tx-results")
+        .and_then(|results| results.as_object())
+        .map(|results| {
+            results
+                .values()
+                .filter_map(|result| result.get("error").and_then(|e| e.as_str()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if reasons.is_empty() {
+        Some(package_msg.to_string())
+    } else {
+        Some(format!("{package_msg}: {}", reasons.join("; ")))
     }
 }
 
@@ -436,5 +515,30 @@ impl UtxoLookup for BlockSyncGossipVerifier {
             peer_manager_wake();
         });
         UtxoResult::Async(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::package_failure_message;
+
+    #[test]
+    fn package_rejections_are_reported_but_success_is_not() {
+        assert_eq!(
+            package_failure_message(&serde_json::json!({
+                "package_msg": "success",
+                "tx-results": {"a": {"txid": "aa"}}
+            })),
+            None
+        );
+        assert_eq!(package_failure_message(&serde_json::json!("txid")), None);
+        let message = package_failure_message(&serde_json::json!({
+            "package_msg": "transaction failed",
+            "tx-results": {
+                "a": {"error": "mempool-script-verify-flag-failed (Invalid Schnorr signature)"}
+            }
+        }))
+        .unwrap();
+        assert!(message.contains("Invalid Schnorr signature"), "{message}");
     }
 }
