@@ -43,7 +43,6 @@ anyhow = "1.0.93"
 axum = { version = "0.7.7", features = ["multipart"] }
 axum-extra = "0.9.4"
 # axum-macros = "0.4.2"  # uncomment to use debug_handler
-baid58 = "0.4.4"
 base64 = "0.22.1"
 biscuit-auth = "6.0.0"
 bitcoin = "0.32"
@@ -51,7 +50,6 @@ bitcoin-bech32 = "0.13"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = "4.5.20"
-dirs = "5.0.1"
 electrum-client = { version = "0.24.0", default-features = false, features = ["use-rustls"], optional = true }
 esplora-client = { version = "0.12", default-features = false, features = ["blocking-https-rustls"], optional = true }
 futures = "0.3"
